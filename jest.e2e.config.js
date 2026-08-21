@@ -13,5 +13,10 @@ module.exports = {
     '^@bootstrap/(.*)$': '<rootDir>/src/bootstrap/$1',
     '^@modules/(.*)$': '<rootDir>/src/modules/$1',
   },
-  passWithNoTests: true,
+  // Provision the auth schema once (idempotent) before any app boots.
+  globalSetup: '<rootDir>/test/global-setup.ts',
+  // Serialize files: the target Postgres is SHARED (Supabase locally), so avoid
+  // parallel connection storms and fixture races across the e2e specs.
+  maxWorkers: 1,
+  testTimeout: 30000,
 };

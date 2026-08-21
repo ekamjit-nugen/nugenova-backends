@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PostgresModule } from './bootstrap/database/postgres.module';
 import { HealthModule } from './modules/health/health.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { AdminPlaybooksModule } from './modules/admin-playbooks/admin-playbooks.module';
 
 /**
  * Nexora backend root module.
@@ -18,7 +20,8 @@ import { HealthModule } from './modules/health/health.module';
     ScheduleModule.forRoot(),
     HealthModule,
     // ── migrated modules land here ──
-    // AuthModule,
+    AuthModule,
+    AdminPlaybooksModule,
   ],
 })
 export class AppModule {}
