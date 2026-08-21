@@ -100,7 +100,7 @@ export async function bootTestApp(): Promise<TestHarness> {
 
 /** Unique, collision-free email for a throwaway fixture. */
 export function randomEmail(prefix = 'test'): string {
-  return `${prefix}+${newObjectId()}@nexora.test`;
+  return `${prefix}+${newObjectId()}@nugenova.test`;
 }
 
 export interface CreateUserOverrides extends Partial<UserEntity> {}

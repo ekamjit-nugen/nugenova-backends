@@ -1,8 +1,8 @@
 {
-  "name": "@nexora/backend",
+  "name": "@nugenova/backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Nexora backend — NestJS + TypeORM + Supabase Postgres. Migrated modules land here.",
+  "description": "Nugenova backend — NestJS + TypeORM + Supabase Postgres. Migrated modules land here.",
   "main": "dist/main.js",
   "scripts": {
     "dev": "nest start --watch",

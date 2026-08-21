@@ -805,7 +805,7 @@ export class AuthService {
     if (!user) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
 
     const secret = speakeasy.generateSecret({
-      name: `Nexora (${user.email})`,
+      name: `Nugenova (${user.email})`,
       length: 20,
     });
     // Store the secret provisionally; it only becomes active once verifyMFA

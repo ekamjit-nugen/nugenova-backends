@@ -9,7 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { TokenRevocationService } from '../services/token-revocation.service';
 
 /**
- * JWT auth guard — verifies a Bearer token (or the `nexora_token` cookie),
+ * JWT auth guard — verifies a Bearer token (or the `nugenova_token` cookie),
  * rejects revoked jti / mfa-challenge tokens, and attaches the decoded identity
  * to `req.user`. A lightweight replacement for the monolith's passport-jwt
  * strategy (the new repo has no passport dependency).
@@ -80,7 +80,7 @@ export class JwtAuthGuard implements CanActivate {
       const parts = authHeader.split(' ');
       if (parts.length === 2 && parts[0] === 'Bearer') return parts[1];
     }
-    if (request.cookies?.nexora_token) return request.cookies.nexora_token;
+    if (request.cookies?.nugenova_token) return request.cookies.nugenova_token;
     return null;
   }
 }

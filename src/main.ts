@@ -10,7 +10,7 @@ import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
-  const log = new Logger('Nexora');
+  const log = new Logger('Nugenova');
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   const bodyLimit = process.env.BODY_LIMIT || '10mb';
@@ -42,11 +42,11 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT || 4000);
   await app.listen(port);
-  log.log(`🚀 Nexora backend on http://localhost:${port}/api/v1`);
+  log.log(`🚀 Nugenova backend on http://localhost:${port}/api/v1`);
   log.log(`📊 Health: http://localhost:${port}/api/v1/health`);
 }
 
 bootstrap().catch((err) => {
-  console.error('Failed to start Nexora backend:', err);
+  console.error('Failed to start Nugenova backend:', err);
   process.exit(1);
 });

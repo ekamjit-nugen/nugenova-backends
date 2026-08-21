@@ -7,7 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AdminPlaybooksModule } from './modules/admin-playbooks/admin-playbooks.module';
 
 /**
- * Nexora backend root module.
+ * Nugenova backend root module.
  *
  * Postgres-only. Migrated modules are added to the imports below one at a time
  * (auth first). ScheduleModule.forRoot() is registered ONCE here — feature

@@ -1,5 +1,5 @@
 Feature: Passwordless email-OTP login
-  As the login core of Nexora
+  As the login core of Nugenova
   The auth API issues one-time codes and verifies them without ever
   enumerating which emails exist.
 

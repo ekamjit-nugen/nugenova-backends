@@ -35,14 +35,14 @@ export class AuthController {
 
   private setCookies(response: any, tokens: AuthTokens): void {
     const isProduction = process.env.NODE_ENV === 'production';
-    response.cookie('nexora_token', tokens.accessToken, {
+    response.cookie('nugenova_token', tokens.accessToken, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'strict' : 'lax',
       maxAge: tokens.expiresIn * 1000,
       path: '/',
     });
-    response.cookie('nexora_refresh', tokens.refreshToken, {
+    response.cookie('nugenova_refresh', tokens.refreshToken, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'strict' : 'lax',
@@ -60,8 +60,8 @@ export class AuthController {
       maxAge: 0,
       path: '/',
     };
-    response.cookie('nexora_token', '', opts);
-    response.cookie('nexora_refresh', '', opts);
+    response.cookie('nugenova_token', '', opts);
+    response.cookie('nugenova_refresh', '', opts);
   }
 
   // ── OTP login ──────────────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ export class AuthController {
     @Req() req: any,
     @Res({ passthrough: true }) response: any,
   ) {
-    const refreshToken = body.refreshToken || req.cookies?.nexora_refresh;
+    const refreshToken = body.refreshToken || req.cookies?.nugenova_refresh;
     const tokens = await this.authService.refreshToken(refreshToken);
     this.setCookies(response, tokens);
     return { success: true, data: tokens };
