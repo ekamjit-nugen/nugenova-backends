@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+*.tsbuildinfo
+
+# env (never commit secrets; keep .env.example)
+.env
+.env.*
+!.env.example
+
+# test / coverage
+coverage/
+*.log
+
+# ci status (published at runtime)
+ci-status.json
+
+# os / editor
+.DS_Store
