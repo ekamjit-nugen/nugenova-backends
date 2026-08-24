@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import matter from 'gray-matter';
 
 export interface PlaybookScenario {
@@ -173,6 +174,78 @@ export class AdminPlaybooksService {
       }
     }
     return summaries.sort((a, b) => (a.phase ?? 99) - (b.phase ?? 99));
+  }
+
+  /**
+   * Run a module's suites (unit then e2e) live, calling `emit` with one event per
+   * test as it completes — powers the playbook viewer's real-time runner. Scoped
+   * to the module's own test files. Disabled in production (spawns test procs).
+   */
+  async runModuleTests(module: string, emit: (e: any) => void): Promise<void> {
+    const files = await this.findPlaybookFiles();
+    if (!files.find((f) => f.module === module)) {
+      throw new NotFoundException(`No playbook for module '${module}'`);
+    }
+    if (process.env.NODE_ENV === 'production') {
+      emit({ type: 'error', message: 'Live test runs are disabled in production.' });
+      emit({ type: 'done', aborted: true });
+      return;
+    }
+
+    const jestBin = path.join(process.cwd(), 'node_modules', '.bin', 'jest');
+    const reporter = path.join(process.cwd(), 'test', 'stream-reporter.cjs');
+    const pattern = `modules/${module}/`;
+
+    emit({ type: 'start', module });
+    emit({ type: 'phase', phase: 'unit' });
+    await this.spawnJest(
+      jestBin,
+      ['--reporters', reporter, '--testPathPattern', pattern],
+      emit,
+    );
+    emit({ type: 'phase', phase: 'e2e' });
+    await this.spawnJest(
+      jestBin,
+      ['--config', 'jest.e2e.config.js', '--reporters', reporter, '--testPathPattern', pattern],
+      emit,
+    );
+    emit({ type: 'done' });
+  }
+
+  private spawnJest(
+    bin: string,
+    args: string[],
+    emit: (e: any) => void,
+  ): Promise<void> {
+    return new Promise((resolve) => {
+      const MARK = 'NUGENOVA_EVT ';
+      const child = spawn(bin, args, { cwd: process.cwd(), env: process.env });
+      let buf = '';
+      child.stdout.on('data', (d) => {
+        buf += d.toString();
+        let i: number;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i);
+          buf = buf.slice(i + 1);
+          const m = line.indexOf(MARK);
+          if (m >= 0) {
+            try {
+              emit(JSON.parse(line.slice(m + MARK.length)));
+            } catch {
+              /* ignore non-event noise */
+            }
+          }
+        }
+      });
+      child.stderr.on('data', () => {
+        /* jest logs to stderr — ignored */
+      });
+      child.on('error', (e) => {
+        emit({ type: 'error', message: String((e as any)?.message || e) });
+        resolve();
+      });
+      child.on('close', () => resolve());
+    });
   }
 
   async get(module: string): Promise<PlaybookDetail> {
