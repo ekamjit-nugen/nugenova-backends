@@ -8,6 +8,7 @@ import { UserEntity } from './entities/user.entity';
 import { OrgMembershipEntity } from './entities/org-membership.entity';
 import { SessionEntity } from './entities/session.entity';
 import { RoleEntity } from './entities/role.entity';
+import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 
@@ -22,12 +23,16 @@ import { TokenRevocationService } from './services/token-revocation.service';
 describe('AuthService (unit, no DB)', () => {
   let service: AuthService;
   let membershipRepo: { find: jest.Mock };
+  let orgRepo: { findOne: jest.Mock };
 
   const asUser = (u: Partial<UserEntity>): UserEntity =>
     ({ id: 'u1', ...u }) as UserEntity;
 
   beforeEach(async () => {
     membershipRepo = { find: jest.fn().mockResolvedValue([]) };
+    // Default: any resolved org is active, so the routing rules that don't care
+    // about org lifecycle behave as before. The onboarding-gate tests override.
+    orgRepo = { findOne: jest.fn().mockResolvedValue({ status: 'active' }) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -36,6 +41,7 @@ describe('AuthService (unit, no DB)', () => {
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
         { provide: getRepositoryToken(SessionEntity), useValue: {} },
         { provide: getRepositoryToken(RoleEntity), useValue: {} },
+        { provide: getRepositoryToken(OrganizationEntity), useValue: orgRepo },
         { provide: JwtService, useValue: { sign: jest.fn(), verify: jest.fn() } },
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: AuditService, useValue: { log: jest.fn() } },
@@ -123,6 +129,35 @@ describe('AuthService (unit, no DB)', () => {
         route: '/auth/select-organization',
         reason: 'multi_org',
         organizations: ['orgA', 'orgB'],
+      });
+    });
+
+    it('routes the owner of an onboarding org to /onboarding', async () => {
+      orgRepo.findOne.mockResolvedValue({ status: 'onboarding' });
+      membershipRepo.find.mockResolvedValue([
+        { role: 'owner', status: 'active', organizationId: 'orgOnb' },
+      ]);
+      const route = await service.determinePostLoginRoute(
+        asUser({ setupStage: 'complete' }),
+      );
+      expect(route).toEqual({
+        route: '/onboarding',
+        reason: 'org_onboarding',
+        organizationId: 'orgOnb',
+      });
+    });
+
+    it('holds a non-owner member of an onboarding org at access-denied', async () => {
+      orgRepo.findOne.mockResolvedValue({ status: 'onboarding' });
+      membershipRepo.find.mockResolvedValue([
+        { role: 'employee', status: 'active', organizationId: 'orgOnb' },
+      ]);
+      const route = await service.determinePostLoginRoute(
+        asUser({ setupStage: 'complete' }),
+      );
+      expect(route).toMatchObject({
+        route: '/auth/access-denied',
+        reason: 'org_not_active',
       });
     });
 

@@ -89,11 +89,14 @@ export class OrganizationService {
     }
 
     const slug = await this.uniqueSlug(dto.name);
+    // Provisioned orgs start in `onboarding` — the owner can sign in but is
+    // confined to the document-submission surface until a super admin approves
+    // every requested document, at which point the org flips to `active`.
     const org = await this.orgRepo.save(
       this.orgRepo.create({
         name: dto.name.trim(),
         slug,
-        status: 'active',
+        status: 'onboarding',
         ownerId: owner.id,
         createdBy: createdByUserId,
       }),

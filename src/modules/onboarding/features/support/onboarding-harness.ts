@@ -1,7 +1,5 @@
 import 'reflect-metadata';
 import { config as loadEnv } from 'dotenv';
-// Load the same env the app + ConfigModule load (DATABASE_URL, JWT_SECRET,
-// DEV_OTP_BYPASS, DEV_OTP_CODE, …). Must run before AppModule is imported.
 loadEnv({ path: ['.env.local', '.env'] });
 
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -16,69 +14,62 @@ import { UserEntity } from '../../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../../auth/entities/org-membership.entity';
 import { SessionEntity } from '../../../auth/entities/session.entity';
 import { RevokedTokenEntity } from '../../../auth/entities/revoked-token.entity';
-import { RoleEntity } from '../../../auth/entities/role.entity';
-import { OrganizationEntity } from '../../entities/organization.entity';
-import { DepartmentEntity } from '../../entities/department.entity';
+import { OrganizationEntity } from '../../../organization/entities/organization.entity';
+import { OnboardingDocumentRequestEntity } from '../../entities/onboarding-document-request.entity';
+import { OnboardingDocumentTemplateEntity } from '../../entities/onboarding-document-template.entity';
+import { EmailOutboxEntity } from '../../../../bootstrap/mail/email-outbox.entity';
+import { DocumentFileEntity } from '../../../../bootstrap/storage/document-file.entity';
 import { newObjectId } from '../../../../bootstrap/database/object-id';
 
 export const DEV_OTP = process.env.DEV_OTP_CODE || '000000';
 
-export interface CreatedOrg {
+export function randomEmail(prefix = 'onb'): string {
+  return `${prefix}+${newObjectId()}@nugenova.test`;
+}
+export function randomOrgName(prefix = 'Onboard'): string {
+  return `${prefix} ${newObjectId()}`;
+}
+
+export interface OnboardingOrg {
   orgId: string;
   slug: string;
   ownerId: string;
   ownerEmail: string;
-  ownerToken: string;
+  ownerToken: string; // routes to /onboarding
+  saToken: string;
 }
 
-export interface OrgTestHarness {
+export interface OnboardingHarness {
   app: INestApplication;
+  requests: Repository<OnboardingDocumentRequestEntity>;
+  templates: Repository<OnboardingDocumentTemplateEntity>;
+  outbox: Repository<EmailOutboxEntity>;
+  files: Repository<DocumentFileEntity>;
+  organizations: Repository<OrganizationEntity>;
   users: Repository<UserEntity>;
   memberships: Repository<OrgMembershipEntity>;
-  organizations: Repository<OrganizationEntity>;
-  departments: Repository<DepartmentEntity>;
-  roles: Repository<RoleEntity>;
-  sessions: Repository<SessionEntity>;
-  revokedTokens: Repository<RevokedTokenEntity>;
 
-  /** Issue an authenticated request (supertest) against the booted app. */
   api(): ReturnType<typeof request>;
-  /** Mint an access token for an existing user via the OTP dev-bypass flow. */
   mintToken(email: string): Promise<string>;
-  /** Persist a super-admin fixture and return { email, token }. */
   createSuperAdmin(): Promise<{ id: string; email: string; token: string }>;
-  /** Provision an org (as super admin) + log its owner in. */
-  createOrg(name?: string): Promise<CreatedOrg>;
-  /** Add an employee-tier member to an org (as its owner) + log them in. */
-  createEmployeeMember(
-    org: CreatedOrg,
-  ): Promise<{ email: string; userId: string; token: string }>;
+  /** Provision an org (stays `onboarding`) + return an owner token routed there. */
+  createOnboardingOrg(name?: string): Promise<OnboardingOrg>;
+  /** Super admin requests documents for an org. Returns the created list. */
+  requestDocs(
+    org: OnboardingOrg,
+    body: {
+      templateKeys?: string[];
+      customDocuments?: any[];
+      notify?: boolean;
+    },
+  ): Promise<any[]>;
 
-  /** Register ids for teardown. */
   trackUser(id: string): void;
   trackOrg(id: string): void;
-
   cleanup(): Promise<void>;
 }
 
-/** Unique, collision-free email for a throwaway fixture. */
-export function randomEmail(prefix = 'org'): string {
-  return `${prefix}+${newObjectId()}@nugenova.test`;
-}
-
-/** Unique org name so the derived slug + (org,name) uniqueness never collide. */
-export function randomOrgName(prefix = 'Acme'): string {
-  return `${prefix} ${newObjectId()}`;
-}
-
-/**
- * Boot an in-process Nest app mirroring src/main.ts (cookie-parser, the global
- * ValidationPipe, the `api/v1` prefix) and expose every TypeORM repo the org
- * suite touches. The underlying Postgres is SHARED (Supabase locally, ephemeral
- * in CI), so all fixtures use random emails/names and are torn down in afterAll
- * by tracked id — nothing is truncated.
- */
-export async function bootOrgTestApp(): Promise<OrgTestHarness> {
+export async function bootOnboardingApp(): Promise<OnboardingHarness> {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
@@ -99,11 +90,17 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
   const repo = <T extends ObjectLiteral>(e: any): Repository<T> =>
     app.get<Repository<T>>(getRepositoryToken(e));
 
+  const requests = repo<OnboardingDocumentRequestEntity>(
+    OnboardingDocumentRequestEntity,
+  );
+  const templates = repo<OnboardingDocumentTemplateEntity>(
+    OnboardingDocumentTemplateEntity,
+  );
+  const outbox = repo<EmailOutboxEntity>(EmailOutboxEntity);
+  const files = repo<DocumentFileEntity>(DocumentFileEntity);
+  const organizations = repo<OrganizationEntity>(OrganizationEntity);
   const users = repo<UserEntity>(UserEntity);
   const memberships = repo<OrgMembershipEntity>(OrgMembershipEntity);
-  const organizations = repo<OrganizationEntity>(OrganizationEntity);
-  const departments = repo<DepartmentEntity>(DepartmentEntity);
-  const roles = repo<RoleEntity>(RoleEntity);
   const sessions = repo<SessionEntity>(SessionEntity);
   const revokedTokens = repo<RevokedTokenEntity>(RevokedTokenEntity);
 
@@ -113,42 +110,31 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
   const api = () => request(app.getHttpServer());
 
   const mintToken = async (email: string): Promise<string> => {
-    await api()
-      .post('/api/v1/auth/send-otp')
-      .send({ email })
-      .expect(200);
+    await api().post('/api/v1/auth/send-otp').send({ email }).expect(200);
     const res = await api()
       .post('/api/v1/auth/verify-otp')
       .send({ email, otp: DEV_OTP })
       .expect(200);
     const token = res.body?.data?.accessToken;
     if (!token) {
-      throw new Error(
-        `mintToken: no accessToken for ${email} — body: ${JSON.stringify(
-          res.body,
-        )}`,
-      );
+      throw new Error(`mintToken: no accessToken for ${email}`);
     }
     return token;
   };
 
-  const harness: OrgTestHarness = {
+  const harness: OnboardingHarness = {
     app,
+    requests,
+    templates,
+    outbox,
+    files,
+    organizations,
     users,
     memberships,
-    organizations,
-    departments,
-    roles,
-    sessions,
-    revokedTokens,
     api,
     mintToken,
-    trackUser: (id: string) => {
-      if (id) userIds.add(id);
-    },
-    trackOrg: (id: string) => {
-      if (id) orgIds.add(id);
-    },
+    trackUser: (id) => id && userIds.add(id),
+    trackOrg: (id) => id && orgIds.add(id),
 
     async createSuperAdmin() {
       const email = randomEmail('sa');
@@ -170,7 +156,7 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
       return { id: saved.id, email: saved.email, token };
     },
 
-    async createOrg(name = randomOrgName()) {
+    async createOnboardingOrg(name = randomOrgName()) {
       const sa = await this.createSuperAdmin();
       const ownerEmail = randomEmail('owner');
       const res = await api()
@@ -182,11 +168,6 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
       const ownerId = res.body.data.owner.id;
       orgIds.add(orgId);
       userIds.add(ownerId);
-      // Provisioning now yields an `onboarding` org (gated out of /org/*). The
-      // departments/roles/team/overview suites exercise the ACTIVE org-admin
-      // surface, so activate it here before minting the owner token — the
-      // onboarding gate itself is covered by the onboarding suite.
-      await organizations.update({ id: orgId }, { status: 'active' });
       const ownerToken = await mintToken(ownerEmail);
       return {
         orgId,
@@ -194,39 +175,36 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
         ownerId,
         ownerEmail,
         ownerToken,
+        saToken: sa.token,
       };
     },
 
-    async createEmployeeMember(org: CreatedOrg) {
-      const email = randomEmail('emp');
+    async requestDocs(org, body) {
       const res = await api()
-        .post('/api/v1/org/members')
-        .set('Authorization', `Bearer ${org.ownerToken}`)
-        .send({ email, role: 'employee', firstName: 'Emp', lastName: 'Loyee' })
+        .post(`/api/v1/admin/organizations/${org.orgId}/documents`)
+        .set('Authorization', `Bearer ${org.saToken}`)
+        .send(body)
         .expect(201);
-      const userId = res.body.data.userId;
-      userIds.add(userId);
-      const token = await mintToken(email);
-      return { email, userId, token };
+      return res.body.data.created as any[];
     },
 
     async cleanup() {
       const uids = [...userIds];
       const oids = [...orgIds];
-      // Child rows first; no hard FKs, but keep it tidy.
       if (oids.length) {
+        await requests
+          .delete({ organizationId: In(oids) })
+          .catch(() => undefined);
+        await files.delete({ organizationId: In(oids) }).catch(() => undefined);
+        await outbox
+          .delete({ organizationId: In(oids) })
+          .catch(() => undefined);
         await memberships
           .delete({ organizationId: In(oids) })
           .catch(() => undefined);
-        await departments
-          .delete({ organizationId: In(oids) })
-          .catch(() => undefined);
-        await roles.delete({ organizationId: In(oids) }).catch(() => undefined);
       }
       if (uids.length) {
-        await memberships
-          .delete({ userId: In(uids) })
-          .catch(() => undefined);
+        await memberships.delete({ userId: In(uids) }).catch(() => undefined);
         await sessions.delete({ userId: In(uids) }).catch(() => undefined);
         await revokedTokens
           .delete({ userId: In(uids) })

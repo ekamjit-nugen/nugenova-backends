@@ -16,6 +16,7 @@ import { UserEntity } from './entities/user.entity';
 import { OrgMembershipEntity } from './entities/org-membership.entity';
 import { SessionEntity } from './entities/session.entity';
 import { RoleEntity } from './entities/role.entity';
+import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { AuditAction, AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 
@@ -71,6 +72,8 @@ export class AuthService {
     private readonly sessionRepo: Repository<SessionEntity>,
     @InjectRepository(RoleEntity)
     private readonly roleRepo: Repository<RoleEntity>,
+    @InjectRepository(OrganizationEntity)
+    private readonly orgRepo: Repository<OrganizationEntity>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
@@ -529,11 +532,7 @@ export class AuthService {
       if (org.status === 'deactivated') {
         return { route: '/auth/access-denied', reason: 'membership_deactivated' };
       }
-      return {
-        route: '/dashboard',
-        reason: 'active_user',
-        organizationId: org.organizationId,
-      };
+      return this.resolveOrgRoute(org);
     }
 
     // Case 6: multi-org.
@@ -546,11 +545,7 @@ export class AuthService {
         };
       }
       if (activeOrgs.length === 1) {
-        return {
-          route: '/dashboard',
-          reason: 'single_active_org',
-          organizationId: activeOrgs[0].organizationId,
-        };
+        return this.resolveOrgRoute(activeOrgs[0]);
       }
       return {
         route: '/auth/select-organization',
@@ -565,6 +560,49 @@ export class AuthService {
     }
 
     return { route: '/login', reason: 'unknown_state' };
+  }
+
+  /**
+   * Decide where a member of a single active org lands, gating on the org's
+   * lifecycle status (the onboarding approval gate):
+   *  - `active`   → `/dashboard` (full app).
+   *  - `onboarding` (created, documents not yet all approved) → owners/admins go
+   *    to `/onboarding` to submit documents; everyone else is held at
+   *    access-denied until the org goes live.
+   *  - `suspended`/anything else → access-denied.
+   */
+  private async resolveOrgRoute(
+    membership: OrgMembershipEntity,
+  ): Promise<PostLoginRoute> {
+    const org = await this.orgRepo.findOne({
+      where: { id: membership.organizationId },
+    });
+    if (org && org.status !== 'active') {
+      if (org.status === 'onboarding') {
+        if (membership.role === 'owner' || membership.role === 'admin') {
+          return {
+            route: '/onboarding',
+            reason: 'org_onboarding',
+            organizationId: membership.organizationId,
+          };
+        }
+        return {
+          route: '/auth/access-denied',
+          reason: 'org_not_active',
+          organizationId: membership.organizationId,
+        };
+      }
+      return {
+        route: '/auth/access-denied',
+        reason: `org_${org.status}`,
+        organizationId: membership.organizationId,
+      };
+    }
+    return {
+      route: '/dashboard',
+      reason: 'active_user',
+      organizationId: membership.organizationId,
+    };
   }
 
   // ── Token generation ───────────────────────────────────────────────────────

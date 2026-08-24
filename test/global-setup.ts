@@ -13,10 +13,15 @@ import { RoleEntity } from '../src/modules/auth/entities/role.entity';
 import { RevokedTokenEntity } from '../src/modules/auth/entities/revoked-token.entity';
 import { OrganizationEntity } from '../src/modules/organization/entities/organization.entity';
 import { DepartmentEntity } from '../src/modules/organization/entities/department.entity';
+import { EmailOutboxEntity } from '../src/bootstrap/mail/email-outbox.entity';
+import { DocumentFileEntity } from '../src/bootstrap/storage/document-file.entity';
+import { OnboardingDocumentTemplateEntity } from '../src/modules/onboarding/entities/onboarding-document-template.entity';
+import { OnboardingDocumentRequestEntity } from '../src/modules/onboarding/entities/onboarding-document-request.entity';
 import { AuthUsersInitial1787316090532 } from '../src/bootstrap/database/migrations/1787316090532-AuthUsersInitial';
 import { AuthSessionsRolesTokens1787334496372 } from '../src/bootstrap/database/migrations/1787334496372-AuthSessionsRolesTokens';
 import { OrganizationDepartments1787546870935 } from '../src/bootstrap/database/migrations/1787546870935-OrganizationDepartments';
 import { DepartmentCodeCostCenter1787552806757 } from '../src/bootstrap/database/migrations/1787552806757-DepartmentCodeCostCenter';
+import { OnboardingDocuments1787640000000 } from '../src/bootstrap/database/migrations/1787640000000-OnboardingDocuments';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -55,6 +60,10 @@ module.exports = async function globalSetup(): Promise<void> {
       RevokedTokenEntity,
       OrganizationEntity,
       DepartmentEntity,
+      EmailOutboxEntity,
+      DocumentFileEntity,
+      OnboardingDocumentTemplateEntity,
+      OnboardingDocumentRequestEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -65,6 +74,7 @@ module.exports = async function globalSetup(): Promise<void> {
       AuthSessionsRolesTokens1787334496372,
       OrganizationDepartments1787546870935,
       DepartmentCodeCostCenter1787552806757,
+      OnboardingDocuments1787640000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

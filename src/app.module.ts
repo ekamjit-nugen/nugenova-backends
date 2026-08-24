@@ -2,10 +2,13 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PostgresModule } from './bootstrap/database/postgres.module';
+import { MailModule } from './bootstrap/mail/mail.module';
+import { StorageModule } from './bootstrap/storage/storage.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AdminPlaybooksModule } from './modules/admin-playbooks/admin-playbooks.module';
 import { OrganizationModule } from './modules/organization/organization.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
 
 /**
  * Nugenova backend root module.
@@ -19,11 +22,14 @@ import { OrganizationModule } from './modules/organization/organization.module';
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     PostgresModule,
     ScheduleModule.forRoot(),
+    MailModule,
+    StorageModule,
     HealthModule,
     // ── migrated modules land here ──
     AuthModule,
     AdminPlaybooksModule,
     OrganizationModule,
+    OnboardingModule,
   ],
 })
 export class AppModule {}

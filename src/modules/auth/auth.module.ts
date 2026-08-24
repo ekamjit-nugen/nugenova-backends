@@ -18,6 +18,7 @@ import { OrgMembershipEntity } from './entities/org-membership.entity';
 import { SessionEntity } from './entities/session.entity';
 import { RoleEntity } from './entities/role.entity';
 import { RevokedTokenEntity } from './entities/revoked-token.entity';
+import { OrganizationEntity } from '../organization/entities/organization.entity';
 
 /**
  * AuthModule — the first migrated module. Passwordless email-OTP login + TOTP
@@ -35,6 +36,7 @@ import { RevokedTokenEntity } from './entities/revoked-token.entity';
       SessionEntity,
       RoleEntity,
       RevokedTokenEntity,
+      OrganizationEntity,
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

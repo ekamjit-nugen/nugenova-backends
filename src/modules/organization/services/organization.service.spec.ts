@@ -82,11 +82,12 @@ describe('OrganizationService (unit, no DB)', () => {
         }),
       );
 
-      // Org created with trimmed name, active status, a slug, and createdBy.
+      // Org created with trimmed name, onboarding status (the approval gate), a
+      // slug, and createdBy.
       expect(orgRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'Acme Corp',
-          status: 'active',
+          status: 'onboarding',
           createdBy: 'super-admin-1',
           slug: expect.any(String),
         }),
@@ -114,7 +115,7 @@ describe('OrganizationService (unit, no DB)', () => {
         expect.objectContaining({
           id: 'org-1',
           name: 'Acme Corp',
-          status: 'active',
+          status: 'onboarding',
         }),
       );
       expect(result.owner.email).toBe('owner@example.com');
