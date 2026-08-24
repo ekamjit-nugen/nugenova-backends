@@ -4,31 +4,31 @@
     "passed": 40,
     "failed": 0,
     "total": 40,
-    "ranAt": "2026-08-24T08:11:48.638Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32704813093"
+    "ranAt": "2026-08-24T09:06:40.527Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32709473322"
   },
   "organization": {
     "status": "passing",
     "passed": 39,
     "failed": 0,
     "total": 39,
-    "ranAt": "2026-08-24T08:11:48.638Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32704813093"
+    "ranAt": "2026-08-24T09:06:40.527Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32709473322"
   },
   "onboarding": {
     "status": "passing",
-    "passed": 31,
+    "passed": 33,
     "failed": 0,
-    "total": 31,
-    "ranAt": "2026-08-24T08:11:48.638Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32704813093"
+    "total": 33,
+    "ranAt": "2026-08-24T09:06:40.527Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32709473322"
   },
   "health": {
     "status": "passing",
     "passed": 2,
     "failed": 0,
     "total": 2,
-    "ranAt": "2026-08-24T08:11:48.638Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32704813093"
+    "ranAt": "2026-08-24T09:06:40.527Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/32709473322"
   }
 }
