@@ -53,12 +53,14 @@ node -v && pm2 -v
 sudo apt-get install -y nginx
 ```
 
-### 1c. App directory + a read-only GitHub deploy key (so the box can `git pull`)
+### 1c. A read-only GitHub deploy key (so the box can `git pull`)
+
+The repo can live wherever your other projects are — this guide uses
+`~/nugenova-api` (override with a `DEPLOY_PATH` repo secret if you clone
+elsewhere). pm2 logs go in the repo's own `logs/` dir, so there's no `/var/...`
+to create.
 
 ```bash
-sudo mkdir -p /var/www/nugenova-api /var/log/nugenova-api
-sudo chown -R $USER:$USER /var/www/nugenova-api /var/log/nugenova-api
-
 # Generate a deploy key for pulling the private repo:
 ssh-keygen -t ed25519 -f ~/.ssh/nugenova_deploy -N "" -C "nugenova-api-deploy"
 cat ~/.ssh/nugenova_deploy.pub
@@ -77,8 +79,9 @@ Host github.com-nugenova
   IdentitiesOnly yes
 EOF
 
-git clone git@github.com-nugenova:cto-varun/nugenova-backend.git /var/www/nugenova-api
-cd /var/www/nugenova-api
+git clone git@github.com-nugenova:cto-varun/nugenova-backend.git ~/nugenova-api
+cd ~/nugenova-api
+mkdir -p logs      # pm2 writes err.log / out.log here
 ```
 
 ### 1d. Production `.env` (you place this — CI never sees secrets)
@@ -157,9 +160,10 @@ Actions):
 | Secret | Value |
 | --- | --- |
 | `DEPLOY_HOST` | `164.52.202.240` |
-| `DEPLOY_USER` | the SSH user that owns `/var/www/nugenova-api` |
+| `DEPLOY_USER` | the SSH user that owns `~/nugenova-api` |
 | `DEPLOY_PORT` | `22` |
 | `DEPLOY_SSH_KEY` | the **private** key (`cat nugenova_ci`) — the whole file |
+| `DEPLOY_PATH` | *(optional)* the clone path if not `~/nugenova-api` — e.g. `/root/nugenova-api` |
 
 Now every push to `main` deploys once CI is green. To deploy on demand (e.g. a
 hotfix or after changing `.env`): Actions → **Deploy** → **Run workflow**.
@@ -169,7 +173,7 @@ hotfix or after changing `.env`): Actions → **Deploy** → **Run workflow**.
 ## 3. Day-to-day
 
 - **Watch a deploy:** GitHub → Actions → the latest **Deploy** run.
-- **Logs:** `pm2 logs nugenova-api` (or `/var/log/nugenova-api/*.log`).
+- **Logs:** `pm2 logs nugenova-api` (or `~/nugenova-api/logs/*.log`).
 - **Status / restart:** `pm2 status`, `pm2 reload nugenova-api`.
 - **Rollback:** on the box, `git reset --hard <good-sha> && npm ci && npm run
   build && pm2 reload nugenova-api` — or revert the commit on `main` and let the

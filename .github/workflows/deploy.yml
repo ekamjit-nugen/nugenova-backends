@@ -40,11 +40,14 @@ jobs:
       - name: Deploy over SSH
         if: steps.cfg.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
+          envs: DEPLOY_PATH
           script_stop: true
           script: |
             set -euo pipefail
@@ -52,7 +55,9 @@ jobs:
             export PATH="$PATH:/usr/local/bin:/usr/bin"
             [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
 
-            cd /var/www/nugenova-api
+            # Where the repo is cloned. Defaults to ~/nugenova-api; override by
+            # setting a DEPLOY_PATH repo secret (e.g. /root/nugenova-api).
+            cd "${DEPLOY_PATH:-$HOME/nugenova-api}"
 
             echo "→ Fetching latest main"
             git fetch --all --prune
