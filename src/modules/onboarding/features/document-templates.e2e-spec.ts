@@ -49,11 +49,11 @@ defineFeature(feature, (test) => {
       res = await listTemplates(token);
     });
     then(
-      'the built-in NDA and incorporation-certificate templates are present',
+      'the built-in PAN-card and incorporation-certificate templates are present',
       () => {
         expect(res.status).toBe(200);
         const keys = res.body.data.map((t: any) => t.key);
-        expect(keys).toContain('builtin_nda');
+        expect(keys).toContain('builtin_pan_card');
         expect(keys).toContain('builtin_incorporation_certificate');
       },
     );

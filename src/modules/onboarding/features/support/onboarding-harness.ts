@@ -63,6 +63,8 @@ export interface OnboardingHarness {
       notify?: boolean;
     },
   ): Promise<any[]>;
+  /** Request a custom agreement the org must sign (a signature document). */
+  requestSignatureDoc(org: OnboardingOrg, title?: string): Promise<any>;
 
   trackUser(id: string): void;
   trackOrg(id: string): void;
@@ -186,6 +188,20 @@ export async function bootOnboardingApp(): Promise<OnboardingHarness> {
         .send(body)
         .expect(201);
       return res.body.data.created as any[];
+    },
+
+    async requestSignatureDoc(org, title = 'Test Service Agreement') {
+      const created = await this.requestDocs(org, {
+        customDocuments: [
+          {
+            title,
+            category: 'agreement',
+            requiresSignature: true,
+            bodyHtml: '<p>This agreement must be signed by the organization.</p>',
+          },
+        ],
+      });
+      return created[0];
     },
 
     async cleanup() {

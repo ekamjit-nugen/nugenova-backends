@@ -5,9 +5,14 @@ Feature: Organization onboarding document lifecycle
 
   Scenario: a super admin requests documents from an onboarding org
     Given a super admin has provisioned an onboarding organization
-    When the super admin requests an NDA and an incorporation certificate
+    When the super admin requests an agreement and an incorporation certificate
     Then two documents are created for the organization
     And each requested document starts in the requested state
+
+  Scenario: requesting a document already requested for an org is skipped
+    Given an onboarding org already has an incorporation certificate requested
+    When the super admin requests the incorporation certificate again
+    Then no new document is created and it is reported as skipped
 
   Scenario: the owner sees the requested documents as a checklist
     Given an onboarding org has two documents requested
@@ -52,6 +57,13 @@ Feature: Organization onboarding document lifecycle
     When the super admin rejects the document with a reason
     Then the document moves to the rejected state
     And the owner can sign and resubmit it back to submitted
+
+  Scenario: a super admin uploads a PDF with placed fields and the owner fills and signs it
+    Given a super admin has provisioned an onboarding organization
+    And the super admin uploads a PDF and requests it with a signature and a name field
+    When the owner fills the name field and signs the placed signature field
+    Then the document moves to the submitted state
+    And the stored signature records the drawn method and the filled field values
 
   Scenario: approving the last document activates the organization
     Given an onboarding org whose only document has been submitted

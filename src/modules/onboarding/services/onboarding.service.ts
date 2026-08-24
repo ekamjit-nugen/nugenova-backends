@@ -69,6 +69,7 @@ export class OnboardingService {
       requiresSignature: r.requiresSignature,
       requiresUpload: r.requiresUpload,
       fields: r.fields || [],
+      sourceFileId: r.sourceFileId,
       status: r.status,
       signature: r.signature,
       submittedFileId: r.submittedFileId,
@@ -89,6 +90,7 @@ export class OnboardingService {
       requiresSignature: r.requiresSignature,
       requiresUpload: r.requiresUpload,
       fields: r.fields || [],
+      sourceFileId: r.sourceFileId,
       status: r.status,
       signature: r.signature
         ? {
@@ -131,8 +133,23 @@ export class OnboardingService {
     const org = await this.getOrg(orgId);
 
     const created: OnboardingDocumentRequestEntity[] = [];
+    const skipped: string[] = [];
+
+    // Never request the same library document twice for an org — skip any
+    // template already requested (in any non-deleted state).
+    const existing = await this.requests.find({
+      where: { organizationId: orgId, isDeleted: false },
+    });
+    const requestedTemplateIds = new Set(
+      existing.map((r) => r.templateId).filter(Boolean) as string[],
+    );
+
     const tpls = await this.templates.resolveByKeys(dto.templateKeys || []);
     for (const t of tpls) {
+      if (requestedTemplateIds.has(t.id)) {
+        skipped.push(t.name);
+        continue;
+      }
       created.push(
         await this.requests.save(
           this.requests.create({
@@ -153,6 +170,15 @@ export class OnboardingService {
       );
     }
     for (const c of dto.customDocuments || []) {
+      const fields = (c.fields as any) ?? null;
+      const hasSignatureField =
+        Array.isArray(fields) &&
+        fields.some(
+          (f: any) => f.type === 'signature' || f.type === 'initials',
+        );
+      // A PDF-with-fields document is filled/signed in place: signature comes
+      // from a placed field, and there's no separate file to upload.
+      const isPdfFieldDoc = !!c.sourceFileId;
       created.push(
         await this.requests.save(
           this.requests.create({
@@ -162,9 +188,14 @@ export class OnboardingService {
             description: c.description ?? null,
             category: c.category || 'other',
             bodyHtml: c.bodyHtml ?? null,
-            requiresSignature: c.requiresSignature ?? false,
-            requiresUpload: c.requiresUpload ?? !c.requiresSignature,
-            fields: (c.fields as any) ?? null,
+            requiresSignature: isPdfFieldDoc
+              ? hasSignatureField
+              : (c.requiresSignature ?? false),
+            requiresUpload: isPdfFieldDoc
+              ? false
+              : (c.requiresUpload ?? !c.requiresSignature),
+            fields,
+            sourceFileId: c.sourceFileId ?? null,
             status: 'requested',
             requestedBy,
             sharedAt: new Date(),
@@ -174,6 +205,10 @@ export class OnboardingService {
     }
 
     if (!created.length) {
+      // Everything asked for was already requested — a no-op, not an error.
+      if (skipped.length) {
+        return { created: [], count: 0, skipped };
+      }
       throw new BadRequestException(
         'No documents to request — provide templateKeys and/or customDocuments',
       );
@@ -192,6 +227,7 @@ export class OnboardingService {
     return {
       created: created.map((r) => this.adminView(r)),
       count: created.length,
+      skipped,
     };
   }
 

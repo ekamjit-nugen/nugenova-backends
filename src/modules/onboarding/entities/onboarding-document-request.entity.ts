@@ -63,6 +63,14 @@ export class OnboardingDocumentRequestEntity extends PgBaseEntity {
   @Column({ type: 'jsonb', nullable: true, default: null })
   fields: DocumentField[] | null;
 
+  /**
+   * DocumentFile id of a PDF the super admin uploaded for the owner to fill/sign
+   * in place — the fields above are positioned on this PDF. Null for template
+   * agreements (rendered from `bodyHtml`) and plain upload requests.
+   */
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  sourceFileId: string | null;
+
   /** requested | submitted | approved | rejected */
   @Column({ type: 'varchar', default: 'requested' })
   status: string;

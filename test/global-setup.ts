@@ -22,6 +22,7 @@ import { AuthSessionsRolesTokens1787334496372 } from '../src/bootstrap/database/
 import { OrganizationDepartments1787546870935 } from '../src/bootstrap/database/migrations/1787546870935-OrganizationDepartments';
 import { DepartmentCodeCostCenter1787552806757 } from '../src/bootstrap/database/migrations/1787552806757-DepartmentCodeCostCenter';
 import { OnboardingDocuments1787640000000 } from '../src/bootstrap/database/migrations/1787640000000-OnboardingDocuments';
+import { OnboardingSourceFile1787660000000 } from '../src/bootstrap/database/migrations/1787660000000-OnboardingSourceFile';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -75,6 +76,7 @@ module.exports = async function globalSetup(): Promise<void> {
       OrganizationDepartments1787546870935,
       DepartmentCodeCostCenter1787552806757,
       OnboardingDocuments1787640000000,
+      OnboardingSourceFile1787660000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

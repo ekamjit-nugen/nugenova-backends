@@ -48,7 +48,7 @@ defineFeature(feature, (test) => {
     });
     when('the super admin requests documents with notification enabled', async () => {
       await h.requestDocs(org, {
-        templateKeys: ['builtin_nda'],
+        customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
         notify: true,
       });
     });
@@ -74,7 +74,10 @@ defineFeature(feature, (test) => {
       async () => {
         org = await h.createOnboardingOrg();
         const created = await h.requestDocs(org, {
-          templateKeys: ['builtin_nda', 'builtin_incorporation_certificate'],
+          customDocuments: [
+            { title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' },
+            { title: 'Certificate of Incorporation', category: 'registration', requiresUpload: true },
+          ],
         });
         firstId = created[0].id;
         await sign(org, firstId);
@@ -99,7 +102,7 @@ defineFeature(feature, (test) => {
 
     given('an onboarding org with a signed, submitted document', async () => {
       org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, { templateKeys: ['builtin_nda'] });
+      const created = await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
       docId = created[0].id;
       await sign(org, docId);
     });
@@ -129,7 +132,7 @@ defineFeature(feature, (test) => {
       async () => {
         org = await h.createOnboardingOrg();
         const created = await h.requestDocs(org, {
-          templateKeys: ['builtin_nda'],
+          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
         });
         docId = created[0].id;
         await sign(org, docId);

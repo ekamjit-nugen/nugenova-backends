@@ -19,6 +19,8 @@ export type DocumentFieldType =
   | 'signature'
   | 'initials'
   | 'name'
+  | 'firstName'
+  | 'lastName'
   | 'date'
   | 'text'
   | 'email';

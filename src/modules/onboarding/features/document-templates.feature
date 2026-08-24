@@ -5,7 +5,7 @@ Feature: Onboarding document template library
   Scenario: the built-in document library is available to a super admin
     Given a signed-in super admin
     When they list the document templates
-    Then the built-in NDA and incorporation-certificate templates are present
+    Then the built-in PAN-card and incorporation-certificate templates are present
     And every built-in template is flagged as built-in
 
   Scenario: a super admin creates a custom template

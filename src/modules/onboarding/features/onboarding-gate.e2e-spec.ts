@@ -81,7 +81,7 @@ defineFeature(feature, (test) => {
       async () => {
         org = await h.createOnboardingOrg();
         const created = await h.requestDocs(org, {
-          templateKeys: ['builtin_nda'],
+          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
         });
         const docId = created[0].id;
         await h
@@ -126,7 +126,7 @@ defineFeature(feature, (test) => {
         .api()
         .post(`/api/v1/admin/organizations/${org.orgId}/documents`)
         .set('Authorization', `Bearer ${org.ownerToken}`)
-        .send({ templateKeys: ['builtin_nda'] });
+        .send({ customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
     });
     then('the request is rejected as forbidden', () => {
       expect(res.status).toBe(403);
@@ -144,7 +144,7 @@ defineFeature(feature, (test) => {
 
     given('an onboarding org with a signed, submitted document', async () => {
       org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, { templateKeys: ['builtin_nda'] });
+      const created = await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
       docId = created[0].id;
       await h
         .api()
@@ -191,10 +191,10 @@ defineFeature(feature, (test) => {
       'two separate onboarding orgs each with a document requested',
       async () => {
         orgA = await h.createOnboardingOrg();
-        await h.requestDocs(orgA, { templateKeys: ['builtin_nda'] });
+        await h.requestDocs(orgA, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
         const orgB = await h.createOnboardingOrg();
         const bDocs = await h.requestDocs(orgB, {
-          templateKeys: ['builtin_nda'],
+          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
         });
         orgBDocId = bDocs[0].id;
       },

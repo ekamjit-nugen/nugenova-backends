@@ -54,10 +54,13 @@ defineFeature(feature, (test) => {
       org = await h.createOnboardingOrg();
     });
     when(
-      'the super admin requests an NDA and an incorporation certificate',
+      'the super admin requests an agreement and an incorporation certificate',
       async () => {
         created = await h.requestDocs(org, {
-          templateKeys: ['builtin_nda', 'builtin_incorporation_certificate'],
+          customDocuments: [
+            { title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' },
+            { title: 'Certificate of Incorporation', category: 'registration', requiresUpload: true },
+          ],
         });
       },
     );
@@ -66,6 +69,37 @@ defineFeature(feature, (test) => {
     });
     and('each requested document starts in the requested state', () => {
       expect(created.every((d) => d.status === 'requested')).toBe(true);
+    });
+  });
+
+  test('requesting a document already requested for an org is skipped', ({
+    given,
+    when,
+    then,
+  }) => {
+    let org: OnboardingOrg;
+    let res: request.Response;
+
+    given(
+      'an onboarding org already has an incorporation certificate requested',
+      async () => {
+        org = await h.createOnboardingOrg();
+        await h.requestDocs(org, {
+          templateKeys: ['builtin_incorporation_certificate'],
+        });
+      },
+    );
+    when('the super admin requests the incorporation certificate again', async () => {
+      res = await h
+        .api()
+        .post(`/api/v1/admin/organizations/${org.orgId}/documents`)
+        .set('Authorization', `Bearer ${org.saToken}`)
+        .send({ templateKeys: ['builtin_incorporation_certificate'] });
+    });
+    then('no new document is created and it is reported as skipped', () => {
+      expect(res.status).toBe(201);
+      expect(res.body.data.count).toBe(0);
+      expect(res.body.data.skipped).toHaveLength(1);
     });
   });
 
@@ -81,7 +115,10 @@ defineFeature(feature, (test) => {
     given('an onboarding org has two documents requested', async () => {
       org = await h.createOnboardingOrg();
       await h.requestDocs(org, {
-        templateKeys: ['builtin_nda', 'builtin_incorporation_certificate'],
+        customDocuments: [
+            { title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' },
+            { title: 'Certificate of Incorporation', category: 'registration', requiresUpload: true },
+          ],
       });
     });
     when('the owner opens their onboarding checklist', async () => {
@@ -113,7 +150,7 @@ defineFeature(feature, (test) => {
       'an onboarding org with a signature document requested',
       async () => {
         org = await h.createOnboardingOrg();
-        await h.requestDocs(org, { templateKeys: ['builtin_nda'] });
+        await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
       },
     );
     when('the owner signs it with a typed signature', async () => {
@@ -185,7 +222,7 @@ defineFeature(feature, (test) => {
       async () => {
         org = await h.createOnboardingOrg();
         const created = await h.requestDocs(org, {
-          templateKeys: ['builtin_nda'],
+          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
         });
         docId = created[0].id;
       },
@@ -233,7 +270,7 @@ defineFeature(feature, (test) => {
 
     given('an onboarding org with a signed, submitted document', async () => {
       org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, { templateKeys: ['builtin_nda'] });
+      const created = await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
       docId = created[0].id;
       await submit(org, docId, { signerName: 'Olivia Owner', method: 'typed' });
     });
@@ -260,7 +297,7 @@ defineFeature(feature, (test) => {
       async () => {
         org = await h.createOnboardingOrg();
         const created = await h.requestDocs(org, {
-          templateKeys: ['builtin_nda'],
+          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
         });
         docId = created[0].id;
       },
@@ -285,7 +322,7 @@ defineFeature(feature, (test) => {
 
     given('an onboarding org with a signed, submitted document', async () => {
       org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, { templateKeys: ['builtin_nda'] });
+      const created = await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
       docId = created[0].id;
       await submit(org, docId, { signerName: 'Olivia Owner', method: 'typed' });
     });
@@ -306,6 +343,111 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('a super admin uploads a PDF with placed fields and the owner fills and signs it', ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let org: OnboardingOrg;
+    let docId: string;
+    let submitRes: request.Response;
+
+    given('a super admin has provisioned an onboarding organization', async () => {
+      org = await h.createOnboardingOrg();
+    });
+    and(
+      'the super admin uploads a PDF and requests it with a signature and a name field',
+      async () => {
+        const up = await h
+          .api()
+          .post(`/api/v1/admin/organizations/${org.orgId}/upload`)
+          .set('Authorization', `Bearer ${org.saToken}`)
+          .attach('file', Buffer.from('%PDF-1.4 placed-fields'), {
+            filename: 'agreement.pdf',
+            contentType: 'application/pdf',
+          });
+        expect(up.status).toBe(201);
+        const sourceFileId = up.body.data.id;
+        const created = await h.requestDocs(org, {
+          customDocuments: [
+            {
+              title: 'Prepared Service Agreement',
+              category: 'agreement',
+              sourceFileId,
+              fields: [
+                {
+                  key: 'name1',
+                  type: 'name',
+                  page: 0,
+                  xPct: 10,
+                  yPct: 70,
+                  wPct: 40,
+                  hPct: 5,
+                  required: true,
+                  label: 'Full name',
+                },
+                {
+                  key: 'sig1',
+                  type: 'signature',
+                  page: 0,
+                  xPct: 10,
+                  yPct: 80,
+                  wPct: 30,
+                  hPct: 8,
+                  required: true,
+                  label: 'Signature',
+                },
+              ],
+            },
+          ],
+        });
+        docId = created[0].id;
+        // A PDF-with-signature-field doc requires a signature, not an upload.
+        expect(created[0].requiresSignature).toBe(true);
+        expect(created[0].requiresUpload).toBe(false);
+        expect(created[0].sourceFileId).toBe(sourceFileId);
+      },
+    );
+    when(
+      'the owner fills the name field and signs the placed signature field',
+      async () => {
+        const upSig = await h
+          .api()
+          .post('/api/v1/media/upload')
+          .set('Authorization', `Bearer ${org.ownerToken}`)
+          .attach('file', Buffer.from('\x89PNG\r\n signature'), {
+            filename: 'sig.png',
+            contentType: 'image/png',
+          });
+        expect(upSig.status).toBe(201);
+        submitRes = await submit(org, docId, {
+          signerName: 'Yara Owner',
+          method: 'drawn',
+          signatureFileId: upSig.body.data.id,
+          fieldValues: [{ key: 'name1', value: 'Yara Owner' }],
+        });
+      },
+    );
+    then('the document moves to the submitted state', () => {
+      expect(submitRes.status).toBe(201);
+      expect(submitRes.body.data.status).toBe('submitted');
+    });
+    and(
+      'the stored signature records the drawn method and the filled field values',
+      async () => {
+        const view = await h
+          .api()
+          .get(`/api/v1/admin/organizations/${org.orgId}/onboarding`)
+          .set('Authorization', `Bearer ${org.saToken}`);
+        const doc = view.body.data.documents.find((d: any) => d.id === docId);
+        expect(doc.signature.method).toBe('drawn');
+        expect(doc.signature.signatureFileId).toBeTruthy();
+        expect(doc.signature.fieldValues.name1).toBe('Yara Owner');
+      },
+    );
+  });
+
   test('approving the last document activates the organization', ({
     given,
     when,
@@ -321,7 +463,7 @@ defineFeature(feature, (test) => {
       async () => {
         org = await h.createOnboardingOrg();
         const created = await h.requestDocs(org, {
-          templateKeys: ['builtin_nda'],
+          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
         });
         docId = created[0].id;
         await submit(org, docId, {

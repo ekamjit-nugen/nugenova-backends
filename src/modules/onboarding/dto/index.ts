@@ -13,17 +13,16 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-const CATEGORIES = [
-  'nda',
-  'msa',
-  'agreement',
-  'certificate',
-  'tax',
-  'kyc',
-  'bank',
-  'other',
+const FIELD_TYPES = [
+  'signature',
+  'initials',
+  'name',
+  'firstName',
+  'lastName',
+  'date',
+  'text',
+  'email',
 ];
-const FIELD_TYPES = ['signature', 'initials', 'name', 'date', 'text', 'email'];
 
 export class DocumentFieldDto {
   @IsString()
@@ -70,8 +69,9 @@ export class CustomDocumentDto {
   description?: string;
 
   @IsOptional()
-  @IsIn(CATEGORIES)
-  category?: string;
+  @IsString()
+  @MaxLength(60)
+  category?: string; // free-text: pick a suggestion or enter a custom category
 
   @IsOptional()
   @IsString()
@@ -91,6 +91,13 @@ export class CustomDocumentDto {
   @ValidateNested({ each: true })
   @Type(() => DocumentFieldDto)
   fields?: DocumentFieldDto[];
+
+  /** DocumentFile id of a PDF (uploaded via the admin upload endpoint) that the
+   * owner fills/signs in place; `fields` are positioned on it. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  sourceFileId?: string;
 }
 
 /** Super admin: request a batch of documents from an org (templates + custom). */
@@ -124,8 +131,9 @@ export class CreateTemplateDto {
   description?: string;
 
   @IsOptional()
-  @IsIn(CATEGORIES)
-  category?: string;
+  @IsString()
+  @MaxLength(60)
+  category?: string; // free-text: pick a suggestion or enter a custom category
 
   @IsOptional()
   @IsString()

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,13 +10,17 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/guards/platform-admin.guard';
 import { OnboardingService } from './services/onboarding.service';
 import { DocumentTemplateService } from './services/document-template.service';
+import { StorageService } from '../../bootstrap/storage/storage.service';
 import {
   ApprovalDto,
   CreateTemplateDto,
@@ -38,7 +43,36 @@ export class AdminOnboardingController {
   constructor(
     private readonly onboarding: OnboardingService,
     private readonly templates: DocumentTemplateService,
+    private readonly storage: StorageService,
   ) {}
+
+  /**
+   * Upload a source PDF for a target org (the super admin has no org context of
+   * their own, so `/media/upload` can't be used). The returned file id is passed
+   * back as `customDocuments[].sourceFileId` when requesting the document, and
+   * the file is owned by the target org so its owner can fetch it.
+   */
+  @Post('organizations/:orgId/upload')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
+  )
+  async uploadForOrg(
+    @Param('orgId') orgId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ) {
+    if (!file) throw new BadRequestException('No file provided');
+    const data = await this.storage.save({
+      organizationId: orgId,
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      buffer: file.buffer,
+      uploadedBy: req.user.userId,
+      category: 'onboarding-source',
+    });
+    return { success: true, message: 'File uploaded', data };
+  }
 
   @Get('document-templates')
   async listTemplates() {

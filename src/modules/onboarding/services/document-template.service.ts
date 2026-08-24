@@ -40,6 +40,18 @@ export class DocumentTemplateService implements OnModuleInit {
 
   /** Upsert every built-in by its stable `key`. Safe to run on every boot. */
   async seedBuiltins(): Promise<void> {
+    const liveKeys = new Set(BUILTIN_TEMPLATES.map((t) => t.key));
+    // Retire built-ins that are no longer in the library (e.g. the old bodyHtml
+    // agreement templates now that agreements are admin-uploaded PDFs).
+    const existingBuiltins = await this.repo.find({
+      where: { isBuiltin: true, isDeleted: false },
+    });
+    for (const row of existingBuiltins) {
+      if (row.key && !liveKeys.has(row.key)) {
+        row.isDeleted = true;
+        await this.repo.save(row);
+      }
+    }
     for (const t of BUILTIN_TEMPLATES) {
       const existing = await this.repo.findOne({ where: { key: t.key } });
       if (existing) {
