@@ -117,6 +117,36 @@ export class MembershipService {
     return this.toView(m, user || undefined);
   }
 
+  async updateMember(
+    orgId: string,
+    membershipId: string,
+    patch: { role?: string; roleId?: string | null; departmentId?: string | null },
+  ): Promise<MemberView> {
+    const m = await this.membershipRepo.findOne({
+      where: { id: membershipId, organizationId: orgId },
+    });
+    if (!m) throw new NotFoundException('Member not found');
+    if (patch.role !== undefined) m.role = patch.role;
+    if (patch.roleId !== undefined) m.roleId = patch.roleId || null;
+    if (patch.departmentId !== undefined) m.departmentId = patch.departmentId || null;
+    await this.membershipRepo.save(m);
+    const user = m.userId
+      ? await this.userRepo.findOne({ where: { id: m.userId } })
+      : null;
+    return this.toView(m, user || undefined);
+  }
+
+  async removeMember(orgId: string, membershipId: string): Promise<void> {
+    const m = await this.membershipRepo.findOne({
+      where: { id: membershipId, organizationId: orgId },
+    });
+    if (!m) throw new NotFoundException('Member not found');
+    if (m.role === 'owner') {
+      throw new ConflictException('The organization owner cannot be removed');
+    }
+    await this.membershipRepo.delete({ id: membershipId, organizationId: orgId });
+  }
+
   private toView(m: OrgMembershipEntity, user?: UserEntity): MemberView {
     return {
       membershipId: m.id,

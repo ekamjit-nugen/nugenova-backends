@@ -21,6 +21,7 @@ import {
   CreateDepartmentDto,
   CreateRoleDto,
   UpdateDepartmentDto,
+  UpdateMemberDto,
   UpdateRoleDto,
 } from './dto';
 
@@ -118,6 +119,22 @@ export class OrgSetupController {
   async listMembers(@Req() req: any) {
     const data = await this.members.list(this.orgId(req));
     return { success: true, data };
+  }
+
+  @Put('members/:id')
+  async updateMember(
+    @Param('id') id: string,
+    @Body() dto: UpdateMemberDto,
+    @Req() req: any,
+  ) {
+    const data = await this.members.updateMember(this.orgId(req), id, dto);
+    return { success: true, data };
+  }
+
+  @Delete('members/:id')
+  async removeMember(@Param('id') id: string, @Req() req: any) {
+    await this.members.removeMember(this.orgId(req), id);
+    return { success: true, message: 'Member removed' };
   }
 
   // ── Overview ────────────────────────────────────────────────────────────────

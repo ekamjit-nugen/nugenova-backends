@@ -149,6 +149,21 @@ export class UpdateRoleDto {
   permissions?: PermissionDto[];
 }
 
+export class UpdateMemberDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  role?: string;
+
+  @IsOptional()
+  @IsString()
+  roleId?: string;
+
+  @IsOptional()
+  @IsString()
+  departmentId?: string;
+}
+
 export class AddMemberDto {
   @Transform(trimLowerEmail)
   @IsEmail({}, { message: 'email must be a valid email address' })
