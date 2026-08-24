@@ -65,8 +65,7 @@ Feature: Organization onboarding document lifecycle
     Then the document moves to the submitted state
     And the stored signature records the drawn method and the filled field values
 
-  Scenario: approving the last document activates the organization
+  Scenario: approving documents never changes the organization status
     Given an onboarding org whose only document has been submitted
-    When the super admin approves that final document
-    Then the onboarding summary reports every document approved
-    And the organization becomes active
+    When the super admin approves that document
+    Then the document is approved and the organization stays active

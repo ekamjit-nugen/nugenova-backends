@@ -23,6 +23,8 @@ import { OrganizationDepartments1787546870935 } from '../src/bootstrap/database/
 import { DepartmentCodeCostCenter1787552806757 } from '../src/bootstrap/database/migrations/1787552806757-DepartmentCodeCostCenter';
 import { OnboardingDocuments1787640000000 } from '../src/bootstrap/database/migrations/1787640000000-OnboardingDocuments';
 import { OnboardingSourceFile1787660000000 } from '../src/bootstrap/database/migrations/1787660000000-OnboardingSourceFile';
+import { TermsConsent1787680000000 } from '../src/bootstrap/database/migrations/1787680000000-TermsConsent';
+import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -65,6 +67,7 @@ module.exports = async function globalSetup(): Promise<void> {
       DocumentFileEntity,
       OnboardingDocumentTemplateEntity,
       OnboardingDocumentRequestEntity,
+      PlatformTermsEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -77,6 +80,7 @@ module.exports = async function globalSetup(): Promise<void> {
       DepartmentCodeCostCenter1787552806757,
       OnboardingDocuments1787640000000,
       OnboardingSourceFile1787660000000,
+      TermsConsent1787680000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

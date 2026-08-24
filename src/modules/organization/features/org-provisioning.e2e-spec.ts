@@ -49,13 +49,15 @@ defineFeature(feature, (test) => {
       if (res.body?.data?.owner?.id) h.trackUser(res.body.data.owner.id);
     });
     then(
-      'the organization is created with an onboarding status and a slug',
+      'the organization is created active but with consent pending, and a slug',
       () => {
         expect(res.status).toBe(201);
         expect(res.body.success).toBe(true);
         const org = res.body.data.organization;
         expect(org.id).toBeTruthy();
-        expect(org.status).toBe('onboarding');
+        expect(org.status).toBe('active');
+        expect(org.needsConsent).toBe(true);
+        expect(org.consentAccepted).toBe(false);
         expect(typeof org.slug).toBe('string');
         expect(org.slug.length).toBeGreaterThan(0);
         expect(org.ownerId).toBeTruthy();

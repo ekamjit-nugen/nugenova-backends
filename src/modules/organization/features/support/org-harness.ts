@@ -29,6 +29,7 @@ export interface CreatedOrg {
   ownerId: string;
   ownerEmail: string;
   ownerToken: string;
+  saToken: string;
 }
 
 export interface OrgTestHarness {
@@ -47,8 +48,12 @@ export interface OrgTestHarness {
   mintToken(email: string): Promise<string>;
   /** Persist a super-admin fixture and return { email, token }. */
   createSuperAdmin(): Promise<{ id: string; email: string; token: string }>;
-  /** Provision an org (as super admin) + log its owner in. */
+  /** Provision an org (as super admin) + log its owner in — consent NOT accepted. */
+  provisionOrg(name?: string): Promise<CreatedOrg>;
+  /** Provision an org AND accept the T&C consent, so /org/* is reachable. */
   createOrg(name?: string): Promise<CreatedOrg>;
+  /** Accept the current T&C for an org, as its owner. */
+  acceptConsent(org: CreatedOrg): Promise<void>;
   /** Add an employee-tier member to an org (as its owner) + log them in. */
   createEmployeeMember(
     org: CreatedOrg,
@@ -170,7 +175,7 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
       return { id: saved.id, email: saved.email, token };
     },
 
-    async createOrg(name = randomOrgName()) {
+    async provisionOrg(name = randomOrgName()) {
       const sa = await this.createSuperAdmin();
       const ownerEmail = randomEmail('owner');
       const res = await api()
@@ -182,11 +187,6 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
       const ownerId = res.body.data.owner.id;
       orgIds.add(orgId);
       userIds.add(ownerId);
-      // Provisioning now yields an `onboarding` org (gated out of /org/*). The
-      // departments/roles/team/overview suites exercise the ACTIVE org-admin
-      // surface, so activate it here before minting the owner token — the
-      // onboarding gate itself is covered by the onboarding suite.
-      await organizations.update({ id: orgId }, { status: 'active' });
       const ownerToken = await mintToken(ownerEmail);
       return {
         orgId,
@@ -194,7 +194,25 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
         ownerId,
         ownerEmail,
         ownerToken,
+        saToken: sa.token,
       };
+    },
+
+    async acceptConsent(org: CreatedOrg) {
+      await api()
+        .post('/api/v1/consent/accept')
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(201);
+    },
+
+    async createOrg(name = randomOrgName()) {
+      // Provisioned orgs are active-but-unconsented (gated out of /org/*). The
+      // departments/roles/team/overview suites exercise the ACTIVE org-admin
+      // surface, so accept the Terms consent here — the consent gate itself is
+      // covered by the consent suite.
+      const org = await this.provisionOrg(name);
+      await this.acceptConsent(org);
+      return org;
     },
 
     async createEmployeeMember(org: CreatedOrg) {

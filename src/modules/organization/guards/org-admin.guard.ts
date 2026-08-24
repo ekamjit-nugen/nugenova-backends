@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { OrganizationEntity } from '../entities/organization.entity';
+import { TermsService } from '../../terms/terms.service';
 
 /**
  * Org-admin guard — restricts org-setup routes to the owner/admin of the org the
@@ -19,16 +20,17 @@ import { OrganizationEntity } from '../entities/organization.entity';
  * Platform admins pass (and skip the active-status gate) but still act within
  * their token's org context.
  *
- * The active-status gate is the second half of the onboarding approval flow: an
- * org still in `onboarding` (documents not yet all approved) cannot use the app —
- * its owner is confined to the `/onboarding` surface until a super admin approves
- * everything and the org flips to `active`.
+ * The lifecycle gate: an org that is `suspended` (manually halted) or has not
+ * accepted the CURRENT Terms & Conditions version cannot use `/org/*` — its owner
+ * is confined to `/suspended` or `/consent` respectively until the halt is lifted
+ * / the terms are accepted.
  */
 @Injectable()
 export class OrgAdminGuard implements CanActivate {
   constructor(
     @InjectRepository(OrganizationEntity)
     private readonly orgRepo: Repository<OrganizationEntity>,
+    private readonly terms: TermsService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -49,10 +51,19 @@ export class OrgAdminGuard implements CanActivate {
     }
 
     const org = await this.orgRepo.findOne({ where: { id: orgId } });
-    if (org && org.status !== 'active') {
-      throw new ForbiddenException(
-        'Your organization is still being onboarded — complete document verification first',
-      );
+    if (org) {
+      if (org.status === 'suspended') {
+        throw new ForbiddenException(
+          'Your organization has been suspended — please contact the platform administrator',
+        );
+      }
+      const needsConsent =
+        !org.consent || org.consent.version < this.terms.getCurrentVersion();
+      if (needsConsent) {
+        throw new ForbiddenException(
+          'Please review and accept the latest Terms & Conditions to continue',
+        );
+      }
     }
 
     return true;

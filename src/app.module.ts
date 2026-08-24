@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { PostgresModule } from './bootstrap/database/postgres.module';
 import { MailModule } from './bootstrap/mail/mail.module';
 import { StorageModule } from './bootstrap/storage/storage.module';
+import { TermsModule } from './modules/terms/terms.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AdminPlaybooksModule } from './modules/admin-playbooks/admin-playbooks.module';
@@ -24,6 +25,7 @@ import { OnboardingModule } from './modules/onboarding/onboarding.module';
     ScheduleModule.forRoot(),
     MailModule,
     StorageModule,
+    TermsModule,
     HealthModule,
     // ── migrated modules land here ──
     AuthModule,

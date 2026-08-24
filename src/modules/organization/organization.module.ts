@@ -16,6 +16,8 @@ import { OrgAdminGuard } from './guards/org-admin.guard';
 
 import { AdminOrganizationController } from './admin-organization.controller';
 import { OrgSetupController } from './org-setup.controller';
+import { ConsentController } from './consent.controller';
+import { AdminTermsController } from './admin-terms.controller';
 
 /**
  * Organization onboarding — the tenant setup spine. Super admins provision orgs
@@ -36,7 +38,12 @@ import { OrgSetupController } from './org-setup.controller';
       UserEntity,
     ]),
   ],
-  controllers: [AdminOrganizationController, OrgSetupController],
+  controllers: [
+    AdminOrganizationController,
+    OrgSetupController,
+    ConsentController,
+    AdminTermsController,
+  ],
   providers: [
     OrganizationService,
     DepartmentService,

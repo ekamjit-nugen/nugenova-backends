@@ -6,7 +6,7 @@ Feature: Organization provisioning
   Scenario: a super admin provisions an organization and its owner
     Given a signed-in super admin
     When they create an organization with a fresh owner email
-    Then the organization is created with an onboarding status and a slug
+    Then the organization is created active but with consent pending, and a slug
     And the response names the owner account
 
   Scenario: the provisioned owner logs in scoped to the new org as owner

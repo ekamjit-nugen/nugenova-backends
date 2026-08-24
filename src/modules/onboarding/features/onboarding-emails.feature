@@ -17,8 +17,3 @@ Feature: Onboarding emails
     Given an onboarding org with a signed, submitted document
     When the super admin rejects the document with a reason
     Then a document-rejected email is recorded for the organization
-
-  Scenario: activating the organization emails the owner a welcome
-    Given an onboarding org whose only document has been submitted
-    When the super admin approves that final document
-    Then an organization-activated email is recorded for the organization

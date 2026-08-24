@@ -42,4 +42,20 @@ export class AdminOrganizationController {
     const data = await this.orgService.get(id);
     return { success: true, data };
   }
+
+  /** Manually halt an org (conditions not met) — its owner is fully blocked. */
+  @Post(':id/halt')
+  @HttpCode(HttpStatus.OK)
+  async halt(@Param('id') id: string, @Req() req: any) {
+    const data = await this.orgService.halt(id, req.user.userId);
+    return { success: true, message: 'Organization halted', data };
+  }
+
+  /** Lift a halt — the org is active again (consent still required if stale). */
+  @Post(':id/reactivate')
+  @HttpCode(HttpStatus.OK)
+  async reactivate(@Param('id') id: string, @Req() req: any) {
+    const data = await this.orgService.reactivate(id, req.user.userId);
+    return { success: true, message: 'Organization reactivated', data };
+  }
 }

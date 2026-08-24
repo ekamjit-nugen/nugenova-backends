@@ -5,7 +5,6 @@ import {
   bootOnboardingApp,
   OnboardingHarness,
   OnboardingOrg,
-  DEV_OTP,
 } from './support/onboarding-harness';
 
 const feature = loadFeature('./onboarding-gate.feature', {
@@ -19,95 +18,6 @@ defineFeature(feature, (test) => {
   });
   afterAll(async () => {
     await h.cleanup();
-  });
-
-  const verify = (email: string) =>
-    h.api().post('/api/v1/auth/verify-otp').send({ email, otp: DEV_OTP });
-
-  const departments = (token: string) =>
-    h.api().get('/api/v1/org/departments').set('Authorization', `Bearer ${token}`);
-
-  test('the owner of an onboarding org is routed to onboarding', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let res: request.Response;
-
-    given('a super admin has provisioned an onboarding organization', async () => {
-      org = await h.createOnboardingOrg();
-    });
-    when('the owner completes OTP verification', async () => {
-      await h.api().post('/api/v1/auth/send-otp').send({ email: org.ownerEmail });
-      res = await verify(org.ownerEmail);
-    });
-    then('the owner is routed to "/onboarding"', () => {
-      expect(res.status).toBe(200);
-      expect(res.body.data.route).toBe('/onboarding');
-    });
-  });
-
-  test('the owner cannot reach the org-admin surface while onboarding', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let res: request.Response;
-
-    given('a super admin has provisioned an onboarding organization', async () => {
-      org = await h.createOnboardingOrg();
-    });
-    when('the onboarding owner calls the departments endpoint', async () => {
-      res = await departments(org.ownerToken);
-    });
-    then('the request is rejected as forbidden', () => {
-      expect(res.status).toBe(403);
-    });
-  });
-
-  test('once every document is approved the owner reaches the dashboard', ({
-    given,
-    when,
-    then,
-    and,
-  }) => {
-    let org: OnboardingOrg;
-    let res: request.Response;
-
-    given(
-      'an onboarding org whose only document has been approved',
-      async () => {
-        org = await h.createOnboardingOrg();
-        const created = await h.requestDocs(org, {
-          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
-        });
-        const docId = created[0].id;
-        await h
-          .api()
-          .post(`/api/v1/onboarding/documents/${docId}/submit`)
-          .set('Authorization', `Bearer ${org.ownerToken}`)
-          .send({ signerName: 'Olivia Owner', method: 'typed' });
-        await h
-          .api()
-          .post(`/api/v1/admin/onboarding-documents/${docId}/approve`)
-          .set('Authorization', `Bearer ${org.saToken}`)
-          .send({});
-      },
-    );
-    when('the owner completes OTP verification again', async () => {
-      res = await verify(org.ownerEmail);
-    });
-    then('the owner is routed to "/dashboard"', () => {
-      expect(res.status).toBe(200);
-      expect(res.body.data.route).toBe('/dashboard');
-    });
-    and('the owner can now reach the departments endpoint', async () => {
-      const token = res.body.data.accessToken;
-      const dept = await departments(token);
-      expect(dept.status).toBe(200);
-    });
   });
 
   test('a non super admin cannot request documents for an org', ({

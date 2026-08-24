@@ -112,20 +112,6 @@ export class AdminOnboardingController {
     return { success: true, data: await this.onboarding.adminList(orgId) };
   }
 
-  @Post('organizations/:orgId/activate')
-  async activate(
-    @Param('orgId') orgId: string,
-    @Query('force') force: string,
-    @Req() req: any,
-  ) {
-    const data = await this.onboarding.activateOrg(
-      orgId,
-      req.user.userId,
-      force === 'true' || force === '1',
-    );
-    return { success: true, message: 'Organization activated', data };
-  }
-
   @Post('onboarding-documents/:id/approve')
   async approve(
     @Param('id') id: string,

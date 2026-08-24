@@ -34,6 +34,13 @@ export class CreateOrganizationDto {
   ownerLastName?: string;
 }
 
+export class UpdateTermsDto {
+  @IsString()
+  @MinLength(10)
+  @MaxLength(100000)
+  text: string;
+}
+
 export class CreateDepartmentDto {
   @IsString()
   @MinLength(2)

@@ -18,7 +18,6 @@ import {
   documentsRequestedEmail,
   documentApprovedEmail,
   documentRejectedEmail,
-  orgActivatedEmail,
 } from '../../../bootstrap/mail/email-layout';
 import { RequestDocumentsDto, SubmitDocumentDto } from '../dto';
 
@@ -214,12 +213,9 @@ export class OnboardingService {
       );
     }
 
-    // Keep the org in the onboarding gate while documents are outstanding.
-    if (org.status === 'active') {
-      org.status = 'onboarding';
-      await this.orgs.save(org);
-    }
-
+    // Documents are non-blocking — requesting them does NOT change the org's
+    // status; the org stays usable. Enforcement (if a condition isn't met) is a
+    // manual halt by the super admin.
     if (dto.notify !== false) {
       await this.sendDocumentsRequestedEmail(org);
     }
@@ -380,25 +376,23 @@ export class OnboardingService {
     });
     const summary = this.summarize(rows);
 
-    if (summary.allApproved) {
-      await this.activate(org, actedBy);
-    } else {
-      const to = await this.ownerEmail(org);
-      if (to) {
-        const { subject, html } = documentApprovedEmail({
-          orgName: org.name,
-          documentTitle: r.title,
-          remaining: summary.pending,
-          submitUrl: `${this.frontendUrl()}/onboarding`,
-        });
-        await this.mail.send({
-          to,
-          subject,
-          html,
-          category: 'onboarding.document_approved',
-          organizationId: org.id,
-        });
-      }
+    // Documents are non-blocking — approving one does NOT change the org's
+    // status. Just notify the owner.
+    const to = await this.ownerEmail(org);
+    if (to) {
+      const { subject, html } = documentApprovedEmail({
+        orgName: org.name,
+        documentTitle: r.title,
+        remaining: summary.pending,
+        submitUrl: `${this.frontendUrl()}/onboarding`,
+      });
+      await this.mail.send({
+        to,
+        subject,
+        html,
+        category: 'onboarding.document_approved',
+        organizationId: org.id,
+      });
     }
 
     return { document: this.adminView(r), summary, orgStatus: org.status };
@@ -435,41 +429,4 @@ export class OnboardingService {
     return { document: this.adminView(r) };
   }
 
-  /** Flip the org to active + send the welcome email. */
-  private async activate(org: OrganizationEntity, actedBy: string) {
-    if (org.status !== 'active') {
-      org.status = 'active';
-      await this.orgs.save(org);
-      this.logger.log(`Org '${org.name}' (${org.id}) activated by ${actedBy}`);
-    }
-    const to = await this.ownerEmail(org);
-    if (to) {
-      const { subject, html } = orgActivatedEmail({
-        orgName: org.name,
-        loginUrl: `${this.frontendUrl()}/login`,
-      });
-      await this.mail.send({
-        to,
-        subject,
-        html,
-        category: 'onboarding.org_activated',
-        organizationId: org.id,
-      });
-    }
-  }
-
-  async activateOrg(orgId: string, actedBy: string, force = false) {
-    const org = await this.getOrg(orgId);
-    const rows = await this.requests.find({
-      where: { organizationId: orgId, isDeleted: false },
-    });
-    const summary = this.summarize(rows);
-    if (!force && !summary.allApproved) {
-      throw new BadRequestException(
-        'Every requested document must be approved before activation (or force it)',
-      );
-    }
-    await this.activate(org, actedBy);
-    return { organization: { id: org.id, name: org.name, status: org.status } };
-  }
 }

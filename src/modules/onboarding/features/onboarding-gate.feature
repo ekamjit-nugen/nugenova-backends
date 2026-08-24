@@ -1,23 +1,8 @@
-Feature: Onboarding access gate
-  Until every requested document is approved an organization stays in onboarding:
-  its owner can sign in only to the document-submission surface and is kept out of
-  the rest of the app. Once approved, the organization goes live.
-
-  Scenario: the owner of an onboarding org is routed to onboarding
-    Given a super admin has provisioned an onboarding organization
-    When the owner completes OTP verification
-    Then the owner is routed to "/onboarding"
-
-  Scenario: the owner cannot reach the org-admin surface while onboarding
-    Given a super admin has provisioned an onboarding organization
-    When the onboarding owner calls the departments endpoint
-    Then the request is rejected as forbidden
-
-  Scenario: once every document is approved the owner reaches the dashboard
-    Given an onboarding org whose only document has been approved
-    When the owner completes OTP verification again
-    Then the owner is routed to "/dashboard"
-    And the owner can now reach the departments endpoint
+Feature: Onboarding document security
+  Requested documents are non-blocking, but the document surfaces are still
+  access-controlled: only a super admin can request or approve documents, only an
+  authenticated owner can open the onboarding surface, and an owner can only act
+  on their own organization's documents.
 
   @security
   Scenario: a non super admin cannot request documents for an org

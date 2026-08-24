@@ -3,20 +3,30 @@ import { Repository } from 'typeorm';
 
 import { OrgAdminGuard } from './org-admin.guard';
 import { OrganizationEntity } from '../entities/organization.entity';
+import { TermsService } from '../../terms/terms.service';
 
 /**
  * Pure unit specs — NO database, no app boot. Exercises OrgAdminGuard's decision
- * logic directly against a stubbed ExecutionContext / req.user and a stubbed org
- * repo. Runs under `npm test`.
+ * logic: role check + the lifecycle gate (suspended halt, and consent for the
+ * CURRENT terms version).
  */
 describe('OrgAdminGuard (unit)', () => {
-  // Default stub: the org is active, so the status gate is a no-op and the tests
-  // isolate the role logic. Individual tests override findOne where needed.
-  const makeGuard = (status: string | null = 'active') => {
+  // Default org: active + consent for v1; current terms v1 → gate is a no-op so
+  // tests isolate the role logic. Individual tests override.
+  const makeGuard = (
+    org: Partial<OrganizationEntity> | null = {
+      status: 'active',
+      consent: { version: 1 } as any,
+    },
+    currentVersion = 1,
+  ) => {
     const repo = {
-      findOne: jest.fn().mockResolvedValue(status ? { status } : null),
+      findOne: jest.fn().mockResolvedValue(org),
     } as unknown as Repository<OrganizationEntity>;
-    return new OrgAdminGuard(repo);
+    const terms = {
+      getCurrentVersion: jest.fn().mockReturnValue(currentVersion),
+    } as unknown as TermsService;
+    return new OrgAdminGuard(repo, terms);
   };
 
   const ctxFor = (user: any): ExecutionContext =>
@@ -24,17 +34,17 @@ describe('OrgAdminGuard (unit)', () => {
       switchToHttp: () => ({ getRequest: () => ({ user }) }),
     }) as unknown as ExecutionContext;
 
-  it('lets an org owner of an active org through', async () => {
+  it('lets an org owner of an active, consented org through', async () => {
     await expect(
-      makeGuard('active').canActivate(
+      makeGuard().canActivate(
         ctxFor({ orgRole: 'owner', organizationId: 'org-1' }),
       ),
     ).resolves.toBe(true);
   });
 
-  it('lets an org admin of an active org through', async () => {
+  it('lets an org admin of an active, consented org through', async () => {
     await expect(
-      makeGuard('active').canActivate(
+      makeGuard().canActivate(
         ctxFor({ orgRole: 'admin', organizationId: 'org-1' }),
       ),
     ).resolves.toBe(true);
@@ -48,41 +58,48 @@ describe('OrgAdminGuard (unit)', () => {
     ).resolves.toBe(true);
   });
 
-  it('rejects an org owner whose org is still onboarding with 403', async () => {
+  it('rejects an owner whose org is suspended (halted) with 403', async () => {
     await expect(
-      makeGuard('onboarding').canActivate(
+      makeGuard({ status: 'suspended', consent: { version: 1 } as any }).canActivate(
         ctxFor({ orgRole: 'owner', organizationId: 'org-1' }),
       ),
     ).rejects.toThrow(ForbiddenException);
   });
 
-  it('rejects an employee-tier member with 403', async () => {
+  it('rejects an owner whose org has not accepted the terms', async () => {
     await expect(
-      makeGuard('active').canActivate(
-        ctxFor({ orgRole: 'employee', organizationId: 'org-1' }),
+      makeGuard({ status: 'active', consent: null }).canActivate(
+        ctxFor({ orgRole: 'owner', organizationId: 'org-1' }),
       ),
     ).rejects.toThrow(ForbiddenException);
   });
 
-  it('rejects a manager-tier member with 403', async () => {
+  it('rejects an owner whose accepted terms version is stale', async () => {
     await expect(
-      makeGuard('active').canActivate(
-        ctxFor({ orgRole: 'manager', organizationId: 'org-1' }),
+      makeGuard(
+        { status: 'active', consent: { version: 1 } as any },
+        2, // current terms is v2, org accepted v1
+      ).canActivate(ctxFor({ orgRole: 'owner', organizationId: 'org-1' })),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('rejects an employee-tier member with 403', async () => {
+    await expect(
+      makeGuard().canActivate(
+        ctxFor({ orgRole: 'employee', organizationId: 'org-1' }),
       ),
     ).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects a session with no org context and no platform-admin flag', async () => {
     await expect(
-      makeGuard('active').canActivate(
-        ctxFor({ orgRole: 'owner', organizationId: null }),
-      ),
+      makeGuard().canActivate(ctxFor({ orgRole: 'owner', organizationId: null })),
     ).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects an unauthenticated request (no req.user)', async () => {
-    await expect(
-      makeGuard('active').canActivate(ctxFor(undefined)),
-    ).rejects.toThrow(ForbiddenException);
+    await expect(makeGuard().canActivate(ctxFor(undefined))).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });

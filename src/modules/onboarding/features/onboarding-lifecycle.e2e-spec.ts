@@ -448,11 +448,10 @@ defineFeature(feature, (test) => {
     );
   });
 
-  test('approving the last document activates the organization', ({
+  test('approving documents never changes the organization status', ({
     given,
     when,
     then,
-    and,
   }) => {
     let org: OnboardingOrg;
     let docId: string;
@@ -472,18 +471,20 @@ defineFeature(feature, (test) => {
         });
       },
     );
-    when('the super admin approves that final document', async () => {
+    when('the super admin approves that document', async () => {
       res = await approve(org, docId);
     });
-    then('the onboarding summary reports every document approved', () => {
-      expect(res.status).toBe(201);
-      expect(res.body.data.summary.allApproved).toBe(true);
-    });
-    and('the organization becomes active', async () => {
-      const orgRow = await h.organizations.findOne({
-        where: { id: org.orgId },
-      });
-      expect(orgRow?.status).toBe('active');
-    });
+    then(
+      'the document is approved and the organization stays active',
+      async () => {
+        expect(res.status).toBe(201);
+        expect(res.body.data.document.status).toBe('approved');
+        expect(res.body.data.orgStatus).toBe('active');
+        const orgRow = await h.organizations.findOne({
+          where: { id: org.orgId },
+        });
+        expect(orgRow?.status).toBe('active');
+      },
+    );
   });
 });

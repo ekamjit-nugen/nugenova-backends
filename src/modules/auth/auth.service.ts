@@ -17,6 +17,7 @@ import { OrgMembershipEntity } from './entities/org-membership.entity';
 import { SessionEntity } from './entities/session.entity';
 import { RoleEntity } from './entities/role.entity';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
+import { TermsService } from '../terms/terms.service';
 import { AuditAction, AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 
@@ -74,6 +75,7 @@ export class AuthService {
     private readonly roleRepo: Repository<RoleEntity>,
     @InjectRepository(OrganizationEntity)
     private readonly orgRepo: Repository<OrganizationEntity>,
+    private readonly terms: TermsService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
@@ -563,13 +565,11 @@ export class AuthService {
   }
 
   /**
-   * Decide where a member of a single active org lands, gating on the org's
-   * lifecycle status (the onboarding approval gate):
-   *  - `active`   → `/dashboard` (full app).
-   *  - `onboarding` (created, documents not yet all approved) → owners/admins go
-   *    to `/onboarding` to submit documents; everyone else is held at
-   *    access-denied until the org goes live.
-   *  - `suspended`/anything else → access-denied.
+   * Decide where a member of a single org lands, gating on the org's lifecycle:
+   *  - `suspended` (manual halt) → `/suspended` (blocked until reactivated).
+   *  - consent not accepted for the CURRENT Terms version → owners/admins go to
+   *    `/consent` to accept; other members are held at access-denied.
+   *  - otherwise → `/dashboard` (full app). Requested documents are non-blocking.
    */
   private async resolveOrgRoute(
     membership: OrgMembershipEntity,
@@ -577,32 +577,26 @@ export class AuthService {
     const org = await this.orgRepo.findOne({
       where: { id: membership.organizationId },
     });
-    if (org && org.status !== 'active') {
-      if (org.status === 'onboarding') {
-        if (membership.role === 'owner' || membership.role === 'admin') {
-          return {
-            route: '/onboarding',
-            reason: 'org_onboarding',
-            organizationId: membership.organizationId,
-          };
-        }
-        return {
-          route: '/auth/access-denied',
-          reason: 'org_not_active',
-          organizationId: membership.organizationId,
-        };
+    const organizationId = membership.organizationId;
+    if (!org) {
+      return { route: '/dashboard', reason: 'active_user', organizationId };
+    }
+    if (org.status === 'suspended') {
+      return { route: '/suspended', reason: 'org_suspended', organizationId };
+    }
+    const needsConsent =
+      !org.consent || org.consent.version < this.terms.getCurrentVersion();
+    if (needsConsent) {
+      if (membership.role === 'owner' || membership.role === 'admin') {
+        return { route: '/consent', reason: 'consent_required', organizationId };
       }
       return {
         route: '/auth/access-denied',
-        reason: `org_${org.status}`,
-        organizationId: membership.organizationId,
+        reason: 'org_pending_consent',
+        organizationId,
       };
     }
-    return {
-      route: '/dashboard',
-      reason: 'active_user',
-      organizationId: membership.organizationId,
-    };
+    return { route: '/dashboard', reason: 'active_user', organizationId };
   }
 
   // ── Token generation ───────────────────────────────────────────────────────

@@ -11,15 +11,23 @@ import { randomUUID } from 'crypto';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { TermsService } from '../../terms/terms.service';
 import { CreateOrganizationDto } from '../dto';
 
 export interface OrgPublic {
   id: string;
   name: string;
   slug: string;
-  status: string;
+  status: string; // active | suspended
   ownerId: string | null;
   createdAt: Date;
+  /** Whether the org has accepted the CURRENT T&C version. */
+  consentAccepted: boolean;
+  /** True when consent is missing or stale (must (re-)accept). */
+  needsConsent: boolean;
+  consentVersion: number | null;
+  consentAcceptedAt: string | null;
+  currentTermsVersion: number;
 }
 
 /**
@@ -39,7 +47,19 @@ export class OrganizationService {
     private readonly userRepo: Repository<UserEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly membershipRepo: Repository<OrgMembershipEntity>,
+    private readonly terms: TermsService,
   ) {}
+
+  /** True when the org has not accepted the CURRENT T&C version. */
+  needsConsent(o: OrganizationEntity): boolean {
+    return !o.consent || o.consent.version < this.terms.getCurrentVersion();
+  }
+
+  private async getEntity(id: string): Promise<OrganizationEntity> {
+    const org = await this.orgRepo.findOne({ where: { id } });
+    if (!org) throw new NotFoundException('Organization not found');
+    return org;
+  }
 
   private async uniqueSlug(name: string): Promise<string> {
     const base =
@@ -58,6 +78,8 @@ export class OrganizationService {
   }
 
   toPublic(o: OrganizationEntity): OrgPublic {
+    const currentTermsVersion = this.terms.getCurrentVersion();
+    const needsConsent = this.needsConsent(o);
     return {
       id: o.id,
       name: o.name,
@@ -65,6 +87,11 @@ export class OrganizationService {
       status: o.status,
       ownerId: o.ownerId,
       createdAt: o.createdAt,
+      consentAccepted: !needsConsent,
+      needsConsent,
+      consentVersion: o.consent?.version ?? null,
+      consentAcceptedAt: o.consent?.acceptedAt ?? null,
+      currentTermsVersion,
     };
   }
 
@@ -89,14 +116,15 @@ export class OrganizationService {
     }
 
     const slug = await this.uniqueSlug(dto.name);
-    // Provisioned orgs start in `onboarding` — the owner can sign in but is
-    // confined to the document-submission surface until a super admin approves
-    // every requested document, at which point the org flips to `active`.
+    // Provisioned orgs are `active` with NO consent yet — the owner can sign in
+    // but is routed to the consent screen and blocked from the app until they
+    // accept the current Terms & Conditions. `suspended` is a manual halt.
     const org = await this.orgRepo.save(
       this.orgRepo.create({
         name: dto.name.trim(),
         slug,
-        status: 'onboarding',
+        status: 'active',
+        consent: null,
         ownerId: owner.id,
         createdBy: createdByUserId,
       }),
@@ -148,8 +176,63 @@ export class OrganizationService {
   }
 
   async get(id: string): Promise<OrgPublic> {
-    const org = await this.orgRepo.findOne({ where: { id } });
-    if (!org) throw new NotFoundException('Organization not found');
+    return this.toPublic(await this.getEntity(id));
+  }
+
+  // ── Consent (owner) ──────────────────────────────────────────────────────
+
+  /** The consent state + current T&C text for the owner's consent screen. */
+  async getConsentState(orgId: string) {
+    const org = await this.getEntity(orgId);
+    const current = await this.terms.getCurrent();
+    return {
+      organization: { id: org.id, name: org.name, status: org.status },
+      terms: { version: current.version, text: current.text },
+      accepted: !this.needsConsent(org),
+      acceptedVersion: org.consent?.version ?? null,
+      acceptedAt: org.consent?.acceptedAt ?? null,
+      needsConsent: this.needsConsent(org),
+    };
+  }
+
+  /** Record the owner's acceptance of the CURRENT T&C version. */
+  async acceptConsent(
+    orgId: string,
+    userId: string,
+    ip?: string,
+    ua?: string,
+  ): Promise<OrgPublic> {
+    const org = await this.getEntity(orgId);
+    const current = await this.terms.getCurrent();
+    org.consent = {
+      version: current.version,
+      acceptedByUserId: userId,
+      acceptedAt: new Date().toISOString(),
+      ipAddress: ip ?? null,
+      userAgent: ua ?? null,
+    };
+    await this.orgRepo.save(org);
+    this.logger.log(
+      `Org ${org.id} accepted Terms v${current.version} (user ${userId})`,
+    );
+    return this.toPublic(org);
+  }
+
+  // ── Halt / reactivate (super admin) ──────────────────────────────────────
+
+  async halt(orgId: string, actedBy: string): Promise<OrgPublic> {
+    const org = await this.getEntity(orgId);
+    org.status = 'suspended';
+    await this.orgRepo.save(org);
+    this.logger.log(`Org ${org.id} HALTED by ${actedBy}`);
+    return this.toPublic(org);
+  }
+
+  async reactivate(orgId: string, actedBy: string): Promise<OrgPublic> {
+    const org = await this.getEntity(orgId);
+    org.status = 'active';
+    await this.orgRepo.save(org);
+    this.logger.log(`Org ${org.id} reactivated by ${actedBy}`);
     return this.toPublic(org);
   }
 }

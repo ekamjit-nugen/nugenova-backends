@@ -6,6 +6,7 @@ import { OrganizationService } from './organization.service';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { TermsService } from '../../terms/terms.service';
 
 /**
  * Pure unit specs — NO database. Every repository is a jest mock, so these run
@@ -40,6 +41,10 @@ describe('OrganizationService (unit, no DB)', () => {
         {
           provide: getRepositoryToken(OrgMembershipEntity),
           useValue: membershipRepo,
+        },
+        {
+          provide: TermsService,
+          useValue: { getCurrentVersion: jest.fn().mockReturnValue(1) },
         },
       ],
     }).compile();
@@ -82,12 +87,13 @@ describe('OrganizationService (unit, no DB)', () => {
         }),
       );
 
-      // Org created with trimmed name, onboarding status (the approval gate), a
-      // slug, and createdBy.
+      // Org created with trimmed name, active status + no consent yet (the
+      // consent gate handles access), a slug, and createdBy.
       expect(orgRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'Acme Corp',
-          status: 'onboarding',
+          status: 'active',
+          consent: null,
           createdBy: 'super-admin-1',
           slug: expect.any(String),
         }),
@@ -110,12 +116,14 @@ describe('OrganizationService (unit, no DB)', () => {
       expect(savedOwner.setupStage).toBe('complete');
       expect(savedOwner.isActive).toBe(true);
 
-      // Public shape returned.
+      // Public shape returned — active, but consent not yet accepted.
       expect(result.organization).toEqual(
         expect.objectContaining({
           id: 'org-1',
           name: 'Acme Corp',
-          status: 'onboarding',
+          status: 'active',
+          consentAccepted: false,
+          needsConsent: true,
         }),
       );
       expect(result.owner.email).toBe('owner@example.com');

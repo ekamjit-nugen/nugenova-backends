@@ -9,6 +9,7 @@ import { OrgMembershipEntity } from './entities/org-membership.entity';
 import { SessionEntity } from './entities/session.entity';
 import { RoleEntity } from './entities/role.entity';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
+import { TermsService } from '../terms/terms.service';
 import { AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 
@@ -24,15 +25,22 @@ describe('AuthService (unit, no DB)', () => {
   let service: AuthService;
   let membershipRepo: { find: jest.Mock };
   let orgRepo: { findOne: jest.Mock };
+  let terms: { getCurrentVersion: jest.Mock };
 
   const asUser = (u: Partial<UserEntity>): UserEntity =>
     ({ id: 'u1', ...u }) as UserEntity;
 
   beforeEach(async () => {
     membershipRepo = { find: jest.fn().mockResolvedValue([]) };
-    // Default: any resolved org is active, so the routing rules that don't care
-    // about org lifecycle behave as before. The onboarding-gate tests override.
-    orgRepo = { findOne: jest.fn().mockResolvedValue({ status: 'active' }) };
+    // Default: any resolved org is active AND has accepted the current terms
+    // (v1), so the routing rules that don't care about the lifecycle behave as
+    // before. The consent/suspend tests override.
+    orgRepo = {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ status: 'active', consent: { version: 1 } }),
+    };
+    terms = { getCurrentVersion: jest.fn().mockReturnValue(1) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -42,6 +50,7 @@ describe('AuthService (unit, no DB)', () => {
         { provide: getRepositoryToken(SessionEntity), useValue: {} },
         { provide: getRepositoryToken(RoleEntity), useValue: {} },
         { provide: getRepositoryToken(OrganizationEntity), useValue: orgRepo },
+        { provide: TermsService, useValue: terms },
         { provide: JwtService, useValue: { sign: jest.fn(), verify: jest.fn() } },
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: AuditService, useValue: { log: jest.fn() } },
@@ -132,32 +141,64 @@ describe('AuthService (unit, no DB)', () => {
       });
     });
 
-    it('routes the owner of an onboarding org to /onboarding', async () => {
-      orgRepo.findOne.mockResolvedValue({ status: 'onboarding' });
+    it('routes the owner of an org that has not accepted the terms to /consent', async () => {
+      orgRepo.findOne.mockResolvedValue({ status: 'active', consent: null });
       membershipRepo.find.mockResolvedValue([
-        { role: 'owner', status: 'active', organizationId: 'orgOnb' },
+        { role: 'owner', status: 'active', organizationId: 'orgC' },
       ]);
       const route = await service.determinePostLoginRoute(
         asUser({ setupStage: 'complete' }),
       );
       expect(route).toEqual({
-        route: '/onboarding',
-        reason: 'org_onboarding',
-        organizationId: 'orgOnb',
+        route: '/consent',
+        reason: 'consent_required',
+        organizationId: 'orgC',
       });
     });
 
-    it('holds a non-owner member of an onboarding org at access-denied', async () => {
-      orgRepo.findOne.mockResolvedValue({ status: 'onboarding' });
+    it('routes the owner to /consent when their accepted terms version is stale', async () => {
+      orgRepo.findOne.mockResolvedValue({
+        status: 'active',
+        consent: { version: 1 },
+      });
+      terms.getCurrentVersion.mockReturnValue(2); // terms bumped since acceptance
       membershipRepo.find.mockResolvedValue([
-        { role: 'employee', status: 'active', organizationId: 'orgOnb' },
+        { role: 'owner', status: 'active', organizationId: 'orgC' },
+      ]);
+      const route = await service.determinePostLoginRoute(
+        asUser({ setupStage: 'complete' }),
+      );
+      expect(route).toMatchObject({ route: '/consent', reason: 'consent_required' });
+    });
+
+    it('holds a non-owner member of an unconsented org at access-denied', async () => {
+      orgRepo.findOne.mockResolvedValue({ status: 'active', consent: null });
+      membershipRepo.find.mockResolvedValue([
+        { role: 'employee', status: 'active', organizationId: 'orgC' },
       ]);
       const route = await service.determinePostLoginRoute(
         asUser({ setupStage: 'complete' }),
       );
       expect(route).toMatchObject({
         route: '/auth/access-denied',
-        reason: 'org_not_active',
+        reason: 'org_pending_consent',
+      });
+    });
+
+    it('routes a member of a suspended (halted) org to /suspended', async () => {
+      orgRepo.findOne.mockResolvedValue({
+        status: 'suspended',
+        consent: { version: 1 },
+      });
+      membershipRepo.find.mockResolvedValue([
+        { role: 'owner', status: 'active', organizationId: 'orgS' },
+      ]);
+      const route = await service.determinePostLoginRoute(
+        asUser({ setupStage: 'complete' }),
+      );
+      expect(route).toMatchObject({
+        route: '/suspended',
+        reason: 'org_suspended',
       });
     });
 

@@ -119,31 +119,4 @@ defineFeature(feature, (test) => {
     });
   });
 
-  test('activating the organization emails the owner a welcome', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-
-    given(
-      'an onboarding org whose only document has been submitted',
-      async () => {
-        org = await h.createOnboardingOrg();
-        const created = await h.requestDocs(org, {
-          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
-        });
-        docId = created[0].id;
-        await sign(org, docId);
-      },
-    );
-    when('the super admin approves that final document', async () => {
-      await approve(org, docId);
-    });
-    then('an organization-activated email is recorded for the organization', async () => {
-      const count = await emailsFor(org.orgId, 'onboarding.org_activated');
-      expect(count).toBeGreaterThanOrEqual(1);
-    });
-  });
 });

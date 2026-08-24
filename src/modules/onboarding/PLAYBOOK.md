@@ -10,56 +10,56 @@ source: nugenova-monolith/src/modules/hr (client-document e-sign) + auth (organi
 
 # Organization Onboarding & Document Approval
 
-Before a brand-new organization can use Nugenova, it must be **verified**. A
-platform (super) admin provisions the org, asks it for the documents needed to
-onboard, and reviews what comes back. The organization can sign in only to submit
-those documents — the rest of the app stays locked until **every** document is
-approved, at which point the organization goes live.
+> **Access is gated by Terms & Conditions consent, not documents.** The consent
+> gate + org lifecycle (halt/reactivate) live in the **organization** module —
+> see its playbook. This module is the **document compliance** side: requesting,
+> submitting, and approving documents, all **non-blocking**.
+
+A platform (super) admin can request documents from an organization at any time.
+The owner **sees** the requests and can submit them, but the organization keeps
+full access throughout — documents never lock the app. Enforcement, if a required
+condition isn't met, is a **manual halt** by the super admin (organization
+module). Two kinds of request:
+
+- **Documents to upload** (photos / scans the org provides): picked from a library
+  of ready-made requests (PAN card, GST certificate, certificate of incorporation,
+  bank details, …). A document already requested can't be requested again.
+- **Agreements to sign**: the super admin **uploads the actual PDF** and **places
+  the fields** the org must fill on it — signature, first name, last name, date,
+  and so on. There are no pre-canned agreement templates.
 
 This is the journey the module guarantees:
 
-1. **Super admin creates the organization** — names it and nominates an owner by
-   email. The org is created in the **onboarding** state (not yet active).
-2. **Super admin asks for what's needed** — two kinds of things:
-   - **Documents to upload** (photos / scans the org provides): picked from a
-     library of ready-made requests (PAN card, GST certificate, certificate of
-     incorporation, bank details, …). A document already requested can't be
-     requested again.
-   - **Agreements to sign**: the super admin **uploads the actual PDF** and
-     **places the fields** the org must fill on it — signature, first name, last
-     name, date, and so on. There are no pre-canned agreement templates.
-   The owner is emailed a link.
-3. **The owner signs in** — and lands on a dedicated **onboarding** page. They
-   cannot reach departments, roles, team, or anything else yet.
-4. **The owner submits each document** — **uploads** the files asked for, and for
+1. **Super admin requests what's needed** — upload documents and/or a prepared
+   agreement PDF. The owner is emailed a link.
+2. **The owner submits each document** — **uploads** the files asked for, and for
    an agreement **fills and signs the placed fields** right on the PDF in the
-   browser (draw or type the signature, type the name/date/…).
-5. **Super admin reviews each document** — views the uploaded file or the signed
+   browser (draw or type the signature, type the name/date/…). The org stays
+   fully usable the whole time.
+3. **Super admin reviews each document** — views the uploaded file or the signed
    agreement, then approves it, or rejects it with a reason so the owner can fix
-   and re-submit.
-6. **The organization goes live** — the moment the last document is approved the
-   org flips to **active**, the owner is emailed a welcome, and on their next
-   sign-in they land on the full dashboard.
+   and re-submit. Approving/rejecting **does not** change the org's status.
+4. **If a condition isn't met** — the super admin **halts** the org (organization
+   module), which blocks it until reactivated.
 
 ## Flow (happy path)
 
-How a brand-new organization gets verified and activated, start to finish:
+How documents are requested, submitted, and reviewed (non-blocking):
 
 ```mermaid
 flowchart TD
-    A(["Super admin signs in"]) --> B["Creates a new organization<br/>(starts in onboarding)"]
-    B --> C1["Requests upload documents<br/>(PAN, GST, incorporation…)"]
-    B --> C2["Uploads an agreement PDF<br/>and places fields to sign"]
+    A(["Super admin (org already active)"]) --> C1["Requests upload documents<br/>(PAN, GST, incorporation…)"]
+    A --> C2["Uploads an agreement PDF<br/>and places fields to sign"]
     C1 --> D["Owner is emailed a link"]
     C2 --> D
-    D --> E(["Owner signs in → onboarding page"])
+    D --> E(["Owner opens the Documents page<br/>(keeps full app access)"])
     E --> F["Fills & signs the agreement PDF<br/>(signature, first/last name, date placed on it)"]
     E --> G["Uploads the requested files<br/>(photos / scans)"]
     F --> H["Super admin reviews each document<br/>(views the file / signed agreement)"]
     G --> H
     H -->|"Rejected with a reason"| E
-    H -->|"All approved"| I["Organization becomes active<br/>owner emailed a welcome"]
-    I --> J(["Owner signs in → full dashboard"])
+    H -->|"Approved"| I["Recorded as approved<br/>(org status unchanged)"]
+    H -.->|"Condition not met"| K["Super admin halts the org<br/>(organization module)"]
 ```
 
 ### What each step needs
@@ -134,15 +134,15 @@ All routes are under the global `/api/v1` prefix.
 | POST | `/admin/organizations/:orgId/upload` | Upload a source PDF for an org (multipart `file`) → file id, used as `sourceFileId`. |
 | POST | `/admin/organizations/:orgId/documents` | Request documents: `{templateKeys?, customDocuments?, notify?}`. A `customDocuments[]` entry may carry `sourceFileId` + placed `fields` (an agreement). Already-requested templates are skipped and returned as `skipped`. |
 | GET | `/admin/organizations/:orgId/onboarding` | The org's onboarding status + every document + summary. |
-| POST | `/admin/onboarding-documents/:id/approve` | Approve a submitted document (`{note?}`). Activates the org when it's the last one. |
+| POST | `/admin/onboarding-documents/:id/approve` | Approve a submitted document (`{note?}`). Does **not** change the org's status. |
 | POST | `/admin/onboarding-documents/:id/reject` | Reject a submitted document (`{note}` required) — reopens it for re-submission. |
-| POST | `/admin/organizations/:orgId/activate` | Manually activate (all approved), or `?force=true` to override. |
 
-### Org owner (the onboarding surface)
+Org lifecycle (halt/reactivate/consent) lives in the **organization** module.
+
+### Org owner (the documents surface)
 
 The acting org is **always** the JWT's `organizationId` — never taken from the
-client. Reachable while the org is in `onboarding`; unlike the rest of `/org/*`
-it does **not** require the org to be active.
+client. This surface is non-blocking; the owner reaches it as a normal in-app page.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -167,10 +167,10 @@ it does **not** require the org to be active.
 
 ## Emails
 
-Every step notifies the org by email, using the monolith's branded HTML system
-(grey canvas, white card, brand-blue header, CTA button): **documents requested**
-(with a submit link), **document approved**, **document rejected** (with the
-reason), and an **organization activated** welcome. Delivery is driver-based
+Every document step notifies the org by email, using the monolith's branded HTML
+system (grey canvas, white card, brand-blue header, CTA button): **documents
+requested** (with a submit link), **document approved**, and **document rejected**
+(with the reason). Delivery is driver-based
 (`MAIL_DRIVER`): `zeptomail` / `smtp` for real sending, and an **outbox** driver
 (default in dev/CI) that persists every email to `email_outbox` so delivery is
 verifiable without a mail server. Swapping in real SMTP/ZeptoMail creds is a
@@ -185,9 +185,10 @@ self-contained, and production is one env change away.
 
 ## Migration status & steps
 
-- **Status:** ✅ live on Postgres. Full flow verified end to end (provision →
-  request → owner sign/upload → approve → activate → dashboard), plus the login
-  gate and the authorization negatives.
+- **Status:** ✅ live on Postgres. Full flow verified end to end (request → owner
+  sign/upload → approve/reject), all non-blocking, plus the authorization
+  negatives. The access gate (consent / halt) is covered by the organization
+  playbook.
 - **Entities:** new `OnboardingDocumentTemplateEntity`,
   `OnboardingDocumentRequestEntity`, `DocumentFileEntity`, `EmailOutboxEntity`;
   reused `OrganizationEntity`, `UserEntity`.
@@ -210,9 +211,9 @@ Additive and reversible — the monolith is untouched.
 ## Authorization
 
 - **`/admin/*`** — JWT + platform-admin (super admin) only.
-- **`/onboarding/*`** — JWT + org owner/admin; reachable during onboarding.
-- **`/org/*`** — JWT + org-admin **and the org must be `active`** — an onboarding
-  org's owner is 403 here until activation.
+- **`/onboarding/*`** — JWT + org owner/admin (non-blocking documents surface).
+- The app-access gate (`/org/*` requires the org to be **not suspended** and to
+  have **accepted the current Terms**) lives in the organization module.
 - Org scope is always taken from the token, never the request body/params.
 
 ## Deferred (not in this phase)

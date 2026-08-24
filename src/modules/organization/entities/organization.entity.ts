@@ -20,7 +20,22 @@ export class OrganizationEntity extends PgBaseEntity {
   slug: string;
 
   @Column({ type: 'varchar', default: 'active' })
-  status: string; // active | suspended
+  status: string; // active | suspended  (suspended = manually halted)
+
+  /**
+   * The org's acceptance of the platform Terms & Conditions. Null until the
+   * owner accepts. `version` is the T&C version accepted — when the global terms
+   * are updated to a higher version this becomes stale and the org must
+   * re-accept (enforced in the auth routing + org guard).
+   */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  consent: {
+    version: number;
+    acceptedByUserId: string;
+    acceptedAt: string;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } | null;
 
   @Index()
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
