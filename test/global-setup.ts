@@ -16,6 +16,7 @@ import { DepartmentEntity } from '../src/modules/organization/entities/departmen
 import { AuthUsersInitial1787316090532 } from '../src/bootstrap/database/migrations/1787316090532-AuthUsersInitial';
 import { AuthSessionsRolesTokens1787334496372 } from '../src/bootstrap/database/migrations/1787334496372-AuthSessionsRolesTokens';
 import { OrganizationDepartments1787546870935 } from '../src/bootstrap/database/migrations/1787546870935-OrganizationDepartments';
+import { DepartmentCodeCostCenter1787552806757 } from '../src/bootstrap/database/migrations/1787552806757-DepartmentCodeCostCenter';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -55,10 +56,15 @@ module.exports = async function globalSetup(): Promise<void> {
       OrganizationEntity,
       DepartmentEntity,
     ],
+    // NOTE: keep this list in sync with every migration under
+    // src/bootstrap/database/migrations — ts-jest can't load the glob
+    // data-source.ts uses, so new migrations MUST be added here or CI's fresh
+    // DB will be missing their columns.
     migrations: [
       AuthUsersInitial1787316090532,
       AuthSessionsRolesTokens1787334496372,
       OrganizationDepartments1787546870935,
+      DepartmentCodeCostCenter1787552806757,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
