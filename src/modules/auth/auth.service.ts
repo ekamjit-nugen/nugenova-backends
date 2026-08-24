@@ -59,10 +59,25 @@ export interface LoginResult {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  private readonly OTP_MAX_ATTEMPTS = 5;
-  private readonly OTP_LOCKOUT_MINUTES = 15;
-  private readonly OTP_RATE_LIMIT_PER_HOUR = 5;
-  private readonly OTP_RESEND_COOLDOWN_SECONDS = 30;
+  // OTP throttling — env-overridable, defaults kept IDENTICAL to the monolith's
+  // effective runtime (its live .env): 5 verify attempts → 30-min lockout,
+  // 20 sends/hour, 30-second resend cooldown, 10-minute OTP validity.
+  private readonly OTP_MAX_ATTEMPTS = parseInt(
+    process.env.OTP_MAX_ATTEMPTS || '5',
+    10,
+  );
+  private readonly OTP_LOCKOUT_MINUTES = parseInt(
+    process.env.OTP_LOCKOUT_MINUTES || '30',
+    10,
+  );
+  private readonly OTP_RATE_LIMIT_PER_HOUR = parseInt(
+    process.env.OTP_RATE_LIMIT_PER_HOUR || '20',
+    10,
+  );
+  private readonly OTP_RESEND_COOLDOWN_SECONDS = parseInt(
+    process.env.OTP_RESEND_COOLDOWN_SECONDS || '30',
+    10,
+  );
 
   constructor(
     @InjectRepository(UserEntity)
@@ -97,9 +112,17 @@ export class AuthService {
     });
     const isNewUser = !user;
 
+    // In dev, DEV_OTP_BYPASS makes the code always `000000`, so throttling the
+    // send just gets in the way — skip the rate-limit + resend cooldown. NEVER
+    // active in production (guarded on NODE_ENV), so prod throttling is intact.
+    const devOtpBypass =
+      process.env.DEV_OTP_BYPASS === 'true' &&
+      process.env.NODE_ENV !== 'production';
+
     if (user) {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
       if (
+        !devOtpBypass &&
         user.otpLastRequestedAt &&
         user.otpLastRequestedAt > oneHourAgo &&
         (user.otpRequestCount || 0) >= this.OTP_RATE_LIMIT_PER_HOUR
@@ -116,7 +139,7 @@ export class AuthService {
         );
       }
 
-      if (user.otpLastRequestedAt) {
+      if (!devOtpBypass && user.otpLastRequestedAt) {
         const secondsSinceLast =
           (Date.now() - user.otpLastRequestedAt.getTime()) / 1000;
         if (secondsSinceLast < this.OTP_RESEND_COOLDOWN_SECONDS) {
@@ -166,9 +189,7 @@ export class AuthService {
 
     // Dev-only email skip — mirrors the verifyOtp bypass. When DEV_OTP_BYPASS is
     // on (non-prod), the magic code is always accepted, so sending mail is moot.
-    const devOtpBypass =
-      process.env.DEV_OTP_BYPASS === 'true' &&
-      process.env.NODE_ENV !== 'production';
+    // (devOtpBypass is computed once at the top of this method.)
     if (devOtpBypass) {
       this.logger.warn(
         `DEV_OTP_BYPASS active — skipping OTP email for ${email}. Use code ${
@@ -697,7 +718,9 @@ export class AuthService {
       jti: accessJti,
     };
 
-    const jwtExpiry = this.configService.get<string>('JWT_EXPIRY') || '15m';
+    // Access-token TTL. Default matches the monolith's effective runtime (6h);
+    // refresh token + session stay at 7d (below), same as the monolith.
+    const jwtExpiry = this.configService.get<string>('JWT_EXPIRY') || '6h';
     const accessToken = this.jwtService.sign(payload, {
       expiresIn: jwtExpiry as any,
     });
