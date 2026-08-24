@@ -7,6 +7,8 @@
  */
 const path = require('path');
 const MARKER = 'NUGENOVA_EVT ';
+// Strip ANSI colour sequences (ESC [ … m) from jest's failure messages.
+const ANSI = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
 
 class StreamReporter {
   _emit(obj) {
@@ -26,7 +28,7 @@ class StreamReporter {
       duration: tc.duration || 0,
       file: path.basename(test.path),
       failureMessages: (tc.failureMessages || []).map((m) =>
-        String(m).replace(/\[[0-9;]*m/g, '').split('\n').slice(0, 4).join('\n'),
+        String(m).replace(ANSI, '').split('\n').slice(0, 8).join('\n'),
       ),
     });
   }
