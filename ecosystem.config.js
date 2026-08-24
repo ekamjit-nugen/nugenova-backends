@@ -23,10 +23,11 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       max_memory_restart: '600M',
+      // PORT comes from .env so each host can pick a free port without editing
+      // this file. HOST stays loopback so only nginx can reach the app.
       env: {
         NODE_ENV: 'production',
         HOST: '127.0.0.1',
-        PORT: '4000',
       },
       error_file: path.join(__dirname, 'logs', 'err.log'),
       out_file: path.join(__dirname, 'logs', 'out.log'),
