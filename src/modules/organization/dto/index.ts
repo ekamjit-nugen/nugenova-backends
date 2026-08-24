@@ -42,6 +42,11 @@ export class CreateDepartmentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(24)
+  code?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   description?: string;
 
@@ -52,6 +57,11 @@ export class CreateDepartmentDto {
   @IsOptional()
   @IsString()
   parentDepartmentId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  costCenter?: string;
 }
 
 export class UpdateDepartmentDto {
@@ -63,12 +73,26 @@ export class UpdateDepartmentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(24)
+  code?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   description?: string;
 
   @IsOptional()
   @IsString()
   headUserId?: string;
+
+  @IsOptional()
+  @IsString()
+  parentDepartmentId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  costCenter?: string;
 }
 
 class PermissionDto {

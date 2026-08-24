@@ -33,13 +33,24 @@ export class DepartmentService {
         `A department named '${dto.name.trim()}' already exists`,
       );
     }
+    const code = dto.code?.trim().toUpperCase() || null;
+    if (code) {
+      const dup = await this.repo.findOne({
+        where: { organizationId: orgId, code, isDeleted: false },
+      });
+      if (dup) {
+        throw new ConflictException(`A department with code '${code}' already exists`);
+      }
+    }
     return this.repo.save(
       this.repo.create({
         organizationId: orgId,
         name: dto.name.trim(),
+        code,
         description: dto.description ?? null,
-        headUserId: dto.headUserId ?? null,
-        parentDepartmentId: dto.parentDepartmentId ?? null,
+        headUserId: dto.headUserId || null,
+        parentDepartmentId: dto.parentDepartmentId || null,
+        costCenter: dto.costCenter?.trim() || null,
         createdBy,
       }),
     );
@@ -67,8 +78,12 @@ export class DepartmentService {
   ): Promise<DepartmentEntity> {
     const dept = await this.get(orgId, id);
     if (dto.name !== undefined) dept.name = dto.name.trim();
+    if (dto.code !== undefined) dept.code = dto.code?.trim().toUpperCase() || null;
     if (dto.description !== undefined) dept.description = dto.description;
-    if (dto.headUserId !== undefined) dept.headUserId = dto.headUserId;
+    if (dto.headUserId !== undefined) dept.headUserId = dto.headUserId || null;
+    if (dto.parentDepartmentId !== undefined)
+      dept.parentDepartmentId = dto.parentDepartmentId || null;
+    if (dto.costCenter !== undefined) dept.costCenter = dto.costCenter?.trim() || null;
     return this.repo.save(dept);
   }
 

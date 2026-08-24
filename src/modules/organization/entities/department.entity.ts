@@ -20,8 +20,15 @@ export class DepartmentEntity extends PgBaseEntity {
   @Column({ type: 'varchar' })
   name: string;
 
+  /** Short unique code within the org (e.g. "ENG"), auto-uppercased. */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  code: string | null;
+
   @Column({ type: 'text', nullable: true, default: null })
   description: string | null;
+
+  @Column({ type: 'varchar', nullable: true, default: null })
+  costCenter: string | null;
 
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   headUserId: string | null;
