@@ -59,10 +59,25 @@ export interface LoginResult {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  private readonly OTP_MAX_ATTEMPTS = 5;
-  private readonly OTP_LOCKOUT_MINUTES = 15;
-  private readonly OTP_RATE_LIMIT_PER_HOUR = 5;
-  private readonly OTP_RESEND_COOLDOWN_SECONDS = 30;
+  // OTP throttling — env-overridable, defaults kept IDENTICAL to the monolith's
+  // effective runtime (its live .env): 5 verify attempts → 30-min lockout,
+  // 20 sends/hour, 30-second resend cooldown, 10-minute OTP validity.
+  private readonly OTP_MAX_ATTEMPTS = parseInt(
+    process.env.OTP_MAX_ATTEMPTS || '5',
+    10,
+  );
+  private readonly OTP_LOCKOUT_MINUTES = parseInt(
+    process.env.OTP_LOCKOUT_MINUTES || '30',
+    10,
+  );
+  private readonly OTP_RATE_LIMIT_PER_HOUR = parseInt(
+    process.env.OTP_RATE_LIMIT_PER_HOUR || '20',
+    10,
+  );
+  private readonly OTP_RESEND_COOLDOWN_SECONDS = parseInt(
+    process.env.OTP_RESEND_COOLDOWN_SECONDS || '30',
+    10,
+  );
 
   constructor(
     @InjectRepository(UserEntity)
@@ -697,7 +712,9 @@ export class AuthService {
       jti: accessJti,
     };
 
-    const jwtExpiry = this.configService.get<string>('JWT_EXPIRY') || '15m';
+    // Access-token TTL. Default matches the monolith's effective runtime (6h);
+    // refresh token + session stay at 7d (below), same as the monolith.
+    const jwtExpiry = this.configService.get<string>('JWT_EXPIRY') || '6h';
     const accessToken = this.jwtService.sign(payload, {
       expiresIn: jwtExpiry as any,
     });
