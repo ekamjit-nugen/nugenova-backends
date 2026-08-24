@@ -1,0 +1,26 @@
+{
+  "organization": {
+    "status": "passing",
+    "passed": 38,
+    "failed": 0,
+    "total": 38,
+    "ranAt": "2026-08-24T05:07:10.742Z",
+    "runUrl": null
+  },
+  "health": {
+    "status": "passing",
+    "passed": 2,
+    "failed": 0,
+    "total": 2,
+    "ranAt": "2026-08-24T05:07:10.742Z",
+    "runUrl": null
+  },
+  "auth": {
+    "status": "passing",
+    "passed": 38,
+    "failed": 0,
+    "total": 38,
+    "ranAt": "2026-08-24T05:07:10.742Z",
+    "runUrl": null
+  }
+}

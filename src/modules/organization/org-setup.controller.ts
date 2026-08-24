@@ -1,0 +1,148 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Put,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OrgAdminGuard } from './guards/org-admin.guard';
+import { DepartmentService } from './services/department.service';
+import { OrgRoleService } from './services/org-role.service';
+import { MembershipService } from './services/membership.service';
+import {
+  AddMemberDto,
+  CreateDepartmentDto,
+  CreateRoleDto,
+  UpdateDepartmentDto,
+  UpdateRoleDto,
+} from './dto';
+
+/**
+ * Org-admin setup surface — departments, roles, and team for the org the JWT is
+ * scoped to. Every route resolves the acting org from `req.user.organizationId`
+ * (never the client), guarded by JWT + OrgAdminGuard (owner/admin only).
+ * Effective base path: `/api/v1/org`.
+ */
+@Controller('org')
+@UseGuards(JwtAuthGuard, OrgAdminGuard)
+export class OrgSetupController {
+  constructor(
+    private readonly departments: DepartmentService,
+    private readonly roles: OrgRoleService,
+    private readonly members: MembershipService,
+  ) {}
+
+  private orgId(req: any): string {
+    return req.user.organizationId;
+  }
+
+  // ── Departments ─────────────────────────────────────────────────────────────
+
+  @Post('departments')
+  @HttpCode(HttpStatus.CREATED)
+  async createDepartment(@Body() dto: CreateDepartmentDto, @Req() req: any) {
+    const data = await this.departments.create(this.orgId(req), dto, req.user.userId);
+    return { success: true, data };
+  }
+
+  @Get('departments')
+  async listDepartments(@Req() req: any) {
+    const data = await this.departments.list(this.orgId(req));
+    return { success: true, data };
+  }
+
+  @Put('departments/:id')
+  async updateDepartment(
+    @Param('id') id: string,
+    @Body() dto: UpdateDepartmentDto,
+    @Req() req: any,
+  ) {
+    const data = await this.departments.update(this.orgId(req), id, dto);
+    return { success: true, data };
+  }
+
+  @Delete('departments/:id')
+  async deleteDepartment(@Param('id') id: string, @Req() req: any) {
+    await this.departments.remove(this.orgId(req), id);
+    return { success: true, message: 'Department removed' };
+  }
+
+  // ── Roles ───────────────────────────────────────────────────────────────────
+
+  @Post('roles')
+  @HttpCode(HttpStatus.CREATED)
+  async createRole(@Body() dto: CreateRoleDto, @Req() req: any) {
+    const data = await this.roles.create(this.orgId(req), dto, req.user.userId);
+    return { success: true, data };
+  }
+
+  @Get('roles')
+  async listRoles(@Req() req: any) {
+    const data = await this.roles.list(this.orgId(req));
+    return { success: true, data };
+  }
+
+  @Put('roles/:id')
+  async updateRole(
+    @Param('id') id: string,
+    @Body() dto: UpdateRoleDto,
+    @Req() req: any,
+  ) {
+    const data = await this.roles.update(this.orgId(req), id, dto);
+    return { success: true, data };
+  }
+
+  @Delete('roles/:id')
+  async deleteRole(@Param('id') id: string, @Req() req: any) {
+    await this.roles.remove(this.orgId(req), id);
+    return { success: true, message: 'Role removed' };
+  }
+
+  // ── Team ────────────────────────────────────────────────────────────────────
+
+  @Post('members')
+  @HttpCode(HttpStatus.CREATED)
+  async addMember(@Body() dto: AddMemberDto, @Req() req: any) {
+    const data = await this.members.addMember(this.orgId(req), dto, req.user.userId);
+    return { success: true, data };
+  }
+
+  @Get('members')
+  async listMembers(@Req() req: any) {
+    const data = await this.members.list(this.orgId(req));
+    return { success: true, data };
+  }
+
+  // ── Overview ────────────────────────────────────────────────────────────────
+
+  @Get('overview')
+  async overview(@Req() req: any) {
+    const orgId = this.orgId(req);
+    const [departments, roles, people] = await Promise.all([
+      this.departments.list(orgId),
+      this.roles.list(orgId),
+      this.members.list(orgId),
+    ]);
+    return {
+      success: true,
+      data: {
+        organizationId: orgId,
+        counts: {
+          departments: departments.length,
+          roles: roles.length,
+          people: people.length,
+        },
+        departments,
+        roles,
+        people,
+      },
+    };
+  }
+}

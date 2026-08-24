@@ -46,6 +46,10 @@ export class OrgMembershipEntity extends PgBaseEntity {
 
   @Index()
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  departmentId: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   clientId: string | null;
 
   @Index()

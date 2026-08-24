@@ -11,8 +11,11 @@ import { OrgMembershipEntity } from '../src/modules/auth/entities/org-membership
 import { SessionEntity } from '../src/modules/auth/entities/session.entity';
 import { RoleEntity } from '../src/modules/auth/entities/role.entity';
 import { RevokedTokenEntity } from '../src/modules/auth/entities/revoked-token.entity';
+import { OrganizationEntity } from '../src/modules/organization/entities/organization.entity';
+import { DepartmentEntity } from '../src/modules/organization/entities/department.entity';
 import { AuthUsersInitial1787316090532 } from '../src/bootstrap/database/migrations/1787316090532-AuthUsersInitial';
 import { AuthSessionsRolesTokens1787334496372 } from '../src/bootstrap/database/migrations/1787334496372-AuthSessionsRolesTokens';
+import { OrganizationDepartments1787546870935 } from '../src/bootstrap/database/migrations/1787546870935-OrganizationDepartments';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -49,10 +52,13 @@ module.exports = async function globalSetup(): Promise<void> {
       SessionEntity,
       RoleEntity,
       RevokedTokenEntity,
+      OrganizationEntity,
+      DepartmentEntity,
     ],
     migrations: [
       AuthUsersInitial1787316090532,
       AuthSessionsRolesTokens1787334496372,
+      OrganizationDepartments1787546870935,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

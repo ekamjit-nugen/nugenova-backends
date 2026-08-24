@@ -15,6 +15,31 @@ login with an optional **TOTP second factor**, JWT issue / refresh / revoke, and
 post-login routing. Ported faithfully from the Mongo monolith's auth core; only
 the persistence layer changed (Mongoose → TypeORM, `_id` → `id`).
 
+## Flow (happy path)
+
+How someone signs in — no password, just an emailed code:
+
+```mermaid
+flowchart TD
+    A(["Enter your email"]) --> B["Receive a one-time code by email"]
+    B --> C["Enter the code"]
+    C --> D{"Extra security<br/>turned on?"}
+    D -->|Yes| E["Enter the code from your<br/>authenticator app"]
+    D -->|No| F(["Signed in"])
+    E --> F
+```
+
+### What each step needs
+
+| Step | What you provide |
+| --- | --- |
+| **Enter your email** | Your work email address |
+| **Enter the code** | The 6-digit code from the email (in development, `000000` always works) |
+| **Authenticator step** (only if you turned on extra security) | The 6-digit code from your authenticator app, or a backup code |
+
+No password to remember — the emailed code proves it's you, and the optional
+authenticator step is a second layer for accounts that want it.
+
 ## Overview & endpoints
 
 All routes are under the global `/api/v1` prefix.

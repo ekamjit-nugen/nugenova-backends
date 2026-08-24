@@ -5,6 +5,7 @@ import { PostgresModule } from './bootstrap/database/postgres.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AdminPlaybooksModule } from './modules/admin-playbooks/admin-playbooks.module';
+import { OrganizationModule } from './modules/organization/organization.module';
 
 /**
  * Nugenova backend root module.
@@ -22,6 +23,7 @@ import { AdminPlaybooksModule } from './modules/admin-playbooks/admin-playbooks.
     // ── migrated modules land here ──
     AuthModule,
     AdminPlaybooksModule,
+    OrganizationModule,
   ],
 })
 export class AppModule {}
