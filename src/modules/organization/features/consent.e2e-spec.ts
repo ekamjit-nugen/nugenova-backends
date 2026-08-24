@@ -30,6 +30,21 @@ defineFeature(feature, (test) => {
       .set('Authorization', `Bearer ${org.saToken}`)
       .send({ text });
 
+  const SAMPLE_PDF = Buffer.from(
+    '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF',
+  );
+
+  const publishPdfTerms = (org: CreatedOrg) =>
+    h
+      .api()
+      .post('/api/v1/admin/terms/pdf')
+      .set('Authorization', `Bearer ${org.saToken}`)
+      .field('title', 'Signed Master Agreement')
+      .attach('file', SAMPLE_PDF, {
+        filename: 'terms.pdf',
+        contentType: 'application/pdf',
+      });
+
   const halt = (org: CreatedOrg) =>
     h
       .api()
@@ -122,6 +137,72 @@ defineFeature(feature, (test) => {
     and('it reports consent as not yet accepted', () => {
       expect(res.body.data.accepted).toBe(false);
       expect(res.body.data.needsConsent).toBe(true);
+    });
+  });
+
+  test('the editor offers multiple terms templates', ({ given, when, then }) => {
+    let org: CreatedOrg;
+    let res: request.Response;
+
+    given('a super admin has provisioned an organization for a fresh owner', async () => {
+      org = await h.provisionOrg();
+    });
+    when('the super admin lists the terms templates', async () => {
+      res = await h
+        .api()
+        .get('/api/v1/admin/terms/templates')
+        .set('Authorization', `Bearer ${org.saToken}`);
+    });
+    then('more than one template is returned', () => {
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data.length).toBeGreaterThan(1);
+      expect(res.body.data[0]).toHaveProperty('id');
+      expect(res.body.data[0]).toHaveProperty('html');
+    });
+  });
+
+  test('publishing a PDF makes the org read and accept the document', ({
+    given,
+    when,
+    then,
+    and,
+  }) => {
+    let org: CreatedOrg;
+
+    given('an organization that has accepted the current terms', async () => {
+      org = await h.provisionOrg();
+      await h.acceptConsent(org);
+      expect((await departments(org.ownerToken)).status).toBe(200);
+    });
+    when('the super admin publishes a PDF as the new terms', async () => {
+      const res = await publishPdfTerms(org);
+      expect(res.status).toBe(200);
+      expect(res.body.data.kind).toBe('pdf');
+    });
+    then('the consent screen reports a PDF document to read', async () => {
+      const res = await h
+        .api()
+        .get('/api/v1/consent')
+        .set('Authorization', `Bearer ${org.ownerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.terms.kind).toBe('pdf');
+      expect(res.body.data.terms.hasDocument).toBe(true);
+      expect(res.body.data.needsConsent).toBe(true);
+    });
+    and('the owner can download the current terms PDF', async () => {
+      const res = await h
+        .api()
+        .get('/api/v1/consent/document')
+        .set('Authorization', `Bearer ${org.ownerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('application/pdf');
+    });
+    and('after re-accepting, the owner can reach the departments endpoint', async () => {
+      // Stale consent (new version) blocks until re-accept.
+      expect((await departments(org.ownerToken)).status).toBe(403);
+      await h.acceptConsent(org);
+      expect((await departments(org.ownerToken)).status).toBe(200);
     });
   });
 

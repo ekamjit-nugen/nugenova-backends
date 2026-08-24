@@ -39,6 +39,18 @@ export class UpdateTermsDto {
   @MinLength(10)
   @MaxLength(100000)
   text: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  title?: string;
+}
+
+export class PublishPdfTermsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  title?: string;
 }
 
 export class CreateDepartmentDto {

@@ -35,6 +35,18 @@ version. When the super admin **edits** the terms, the version bumps and **every
 org must re-accept** — a stale org is routed back to `/consent` and blocked from
 `/org/*` until it re-accepts.
 
+**Terms source: written or PDF.** A terms version has a `kind`:
+- **`html`** — the super admin starts from one of several **ready-made templates**
+  (Standard SaaS, Startup, Enterprise, Privacy/Data-Processing), edits, and
+  publishes. The org reads the rendered HTML on the consent screen.
+- **`pdf`** — the super admin **uploads a PDF** (stored via the shared
+  `StorageService`, S3 with a Postgres-`bytea` fallback). The org reads the
+  embedded PDF (`GET /consent/document`) and accepts it as-is.
+
+Either way, publishing bumps the version and forces re-consent. The org always
+reads whatever the *current* version is — the PDF if the latest is a PDF,
+otherwise the template/HTML text.
+
 **Halt.** The super admin can **halt** an org (status → `suspended`), which fully
 blocks its owner (routed to `/suspended`) until **reactivated**. This is the
 enforcement lever when a compliance condition (e.g. a requested document) isn't
@@ -95,13 +107,17 @@ All routes are under the global `/api/v1` prefix.
 | GET | `/admin/organizations/:id` | Fetch one organization. |
 | POST | `/admin/organizations/:id/halt` | Halt (suspend) an org — its owner is fully blocked. |
 | POST | `/admin/organizations/:id/reactivate` | Lift a halt (status → active). |
-| GET / PUT | `/admin/terms` | View / publish the global Terms. A `PUT` bumps the version → every org must re-accept. |
+| GET / PUT | `/admin/terms` | View / publish the global Terms (HTML). A `PUT` `{text, title?}` bumps the version → every org must re-accept. |
+| GET | `/admin/terms/templates` | The ready-made template catalog (`{id, name, description, html}[]`) offered as editor starting points. |
+| POST | `/admin/terms/pdf` | Upload a PDF (`multipart` `file` + optional `title`) and publish it as the new terms version. |
+| GET | `/admin/terms/document` | Stream the current terms PDF (super-admin preview). |
 
 ### Org owner (consent)
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/consent` | The current Terms text + version + whether this org has accepted. |
+| GET | `/consent` | The current Terms `{version, kind, text, title, hasDocument}` + whether this org has accepted. |
+| GET | `/consent/document` | Stream the current terms PDF (when `kind = pdf`) for the owner to read. |
 | POST | `/consent/accept` | Accept the current Terms (records version + who/when/ip). Unlocks `/org/*`. |
 
 ### Org admin (owner/admin of the JWT's org)
@@ -122,7 +138,7 @@ the org to be **not suspended** and to have **accepted the current Terms**.
 ### Data model (entities → tables)
 
 - **`organizations`** — the tenant (name, unique slug, status `active|suspended`, `consent` jsonb = accepted terms version + who/when/ip, ownerId, createdBy).
-- **`platform_terms`** — the versioned global Terms & Conditions (append-only; current = max version). *New (TermsConsent migration).*
+- **`platform_terms`** — the versioned global Terms & Conditions (append-only; current = max version). Each row is a `kind`: `html` (`text` holds the body) or `pdf` (`file_id` → `document_files`), plus a `title`. *TermsConsent + TermsSourceKind migrations.*
 - **`departments`** — org-scoped grouping (name unique per org, optional head + parent).
 - **`roles`** — reused from `auth`; org-scoped custom roles with a jsonb permission matrix.
 - **`org_memberships`** — reused from `auth`; the people of an org (+ a new `department_id` link added this migration).

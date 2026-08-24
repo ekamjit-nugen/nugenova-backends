@@ -24,6 +24,7 @@ import { DepartmentCodeCostCenter1787552806757 } from '../src/bootstrap/database
 import { OnboardingDocuments1787640000000 } from '../src/bootstrap/database/migrations/1787640000000-OnboardingDocuments';
 import { OnboardingSourceFile1787660000000 } from '../src/bootstrap/database/migrations/1787660000000-OnboardingSourceFile';
 import { TermsConsent1787680000000 } from '../src/bootstrap/database/migrations/1787680000000-TermsConsent';
+import { TermsSourceKind1787700000000 } from '../src/bootstrap/database/migrations/1787700000000-TermsSourceKind';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 
 /**
@@ -81,6 +82,7 @@ module.exports = async function globalSetup(): Promise<void> {
       OnboardingDocuments1787640000000,
       OnboardingSourceFile1787660000000,
       TermsConsent1787680000000,
+      TermsSourceKind1787700000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

@@ -26,6 +26,18 @@ Feature: Terms & Conditions consent gate
     Then it returns the current terms text and version
     And it reports consent as not yet accepted
 
+  Scenario: the editor offers multiple terms templates
+    Given a super admin has provisioned an organization for a fresh owner
+    When the super admin lists the terms templates
+    Then more than one template is returned
+
+  Scenario: publishing a PDF makes the org read and accept the document
+    Given an organization that has accepted the current terms
+    When the super admin publishes a PDF as the new terms
+    Then the consent screen reports a PDF document to read
+    And the owner can download the current terms PDF
+    And after re-accepting, the owner can reach the departments endpoint
+
   Scenario: editing the terms forces the org to re-accept
     Given an organization that has accepted the current terms
     When the super admin publishes a new version of the terms

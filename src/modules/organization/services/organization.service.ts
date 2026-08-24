@@ -187,7 +187,13 @@ export class OrganizationService {
     const current = await this.terms.getCurrent();
     return {
       organization: { id: org.id, name: org.name, status: org.status },
-      terms: { version: current.version, text: current.text },
+      terms: {
+        version: current.version,
+        kind: current.kind,
+        text: current.text,
+        title: current.title,
+        hasDocument: current.kind === 'pdf' && !!current.fileId,
+      },
       accepted: !this.needsConsent(org),
       acceptedVersion: org.consent?.version ?? null,
       acceptedAt: org.consent?.acceptedAt ?? null,
