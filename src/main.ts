@@ -13,6 +13,11 @@ async function bootstrap(): Promise<void> {
   const log = new Logger('Nugenova');
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
+  // Behind the nginx reverse proxy in production: trust the first proxy hop so
+  // req.ip / X-Forwarded-For reflect the real client (used for signature capture
+  // and OTP rate-limiting), and secure cookies work over the proxied TLS.
+  (app.getHttpAdapter().getInstance() as any).set('trust proxy', 1);
+
   const bodyLimit = process.env.BODY_LIMIT || '10mb';
   app.use(json({ limit: bodyLimit }));
   app.use(urlencoded({ extended: true, limit: bodyLimit }));
@@ -41,8 +46,11 @@ async function bootstrap(): Promise<void> {
   app.setGlobalPrefix('api/v1');
 
   const port = Number(process.env.PORT || 4000);
-  await app.listen(port);
-  log.log(`🚀 Nugenova backend on http://localhost:${port}/api/v1`);
+  // In production bind to 127.0.0.1 (HOST) so only nginx can reach the app; the
+  // default 0.0.0.0 keeps local dev reachable.
+  const host = process.env.HOST || '0.0.0.0';
+  await app.listen(port, host);
+  log.log(`🚀 Nugenova backend on http://${host}:${port}/api/v1`);
   log.log(`📊 Health: http://localhost:${port}/api/v1/health`);
 }
 

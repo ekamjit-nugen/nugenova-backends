@@ -1,0 +1,74 @@
+name: Deploy
+
+# Deploy to the production API box (prod-api.nugenova.com) only AFTER the CI
+# workflow has finished successfully on main. Also runnable on demand from the
+# Actions tab (workflow_dispatch) for hotfixes / rollbacks.
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # workflow_dispatch always deploys; workflow_run only when CI passed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      # Until the DEPLOY_* secrets are configured, skip the SSH step cleanly
+      # instead of failing every run.
+      - name: Check deploy is configured
+        id: cfg
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DEPLOY_HOST not set — skipping deploy. Add the DEPLOY_* secrets to enable (see DEPLOYMENT.md §2)."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy over SSH
+        if: steps.cfg.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            # Make node/npm/pm2 resolvable in the non-interactive SSH shell.
+            export PATH="$PATH:/usr/local/bin:/usr/bin"
+            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
+
+            cd /var/www/nugenova-api
+
+            echo "→ Fetching latest main"
+            git fetch --all --prune
+            git reset --hard origin/main
+
+            echo "→ Installing deps"
+            npm ci
+
+            echo "→ Building"
+            npm run build
+
+            echo "→ Running migrations"
+            npm run migration:run
+
+            echo "→ Reloading pm2 (zero-downtime)"
+            pm2 reload ecosystem.config.js --update-env
+            pm2 save
+
+            echo "✅ Deploy complete"
