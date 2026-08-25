@@ -1,0 +1,103 @@
+import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+
+import { MembershipService } from './membership.service';
+import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { UserEntity } from '../../auth/entities/user.entity';
+import { RoleEntity } from '../../auth/entities/role.entity';
+
+/**
+ * Pure unit specs — NO database. Focus on addMember's role resolution: enforced
+ * tier vs. custom role (tier derived), the department↔role relation, and the
+ * owner-cannot-be-removed guard.
+ */
+describe('MembershipService (unit, no DB)', () => {
+  let service: MembershipService;
+  let membershipRepo: any;
+  let userRepo: any;
+  let roleRepo: any;
+
+  const passthrough = () => ({
+    findOne: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
+    create: jest.fn((v) => ({ ...v })),
+    save: jest.fn(async (v) => ({ id: v.id ?? 'gen', ...v })),
+    delete: jest.fn().mockResolvedValue({ affected: 1 }),
+  });
+
+  beforeEach(async () => {
+    membershipRepo = passthrough();
+    userRepo = passthrough();
+    roleRepo = passthrough();
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        MembershipService,
+        { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
+        { provide: getRepositoryToken(UserEntity), useValue: userRepo },
+        { provide: getRepositoryToken(RoleEntity), useValue: roleRepo },
+      ],
+    }).compile();
+    service = moduleRef.get(MembershipService);
+  });
+
+  const freshUser = () => {
+    userRepo.findOne.mockResolvedValue(null); // new user
+    userRepo.save.mockImplementation(async (u: any) => ({ id: 'user-1', ...u }));
+    membershipRepo.findOne.mockResolvedValue(null); // no existing membership
+  };
+
+  it('adds a member with an enforced tier (no custom role)', async () => {
+    freshUser();
+    await service.addMember('org-1', { email: 'a@b.com', role: 'manager' } as any, 'inviter');
+    expect(membershipRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'manager', roleId: null }),
+    );
+    expect(roleRepo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('derives the enforced tier from a custom role when none is passed', async () => {
+    freshUser();
+    roleRepo.findOne.mockResolvedValue({ id: 'hr-role', name: 'hr', departmentId: null, isDeleted: false });
+    await service.addMember('org-1', { email: 'a@b.com', roleId: 'hr-role' } as any, 'inviter');
+    // hr → manager tier (ROLE_NAME_TO_TIER), roleId preserved
+    expect(membershipRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'manager', roleId: 'hr-role' }),
+    );
+  });
+
+  it('rejects a department-scoped role assigned outside its department', async () => {
+    freshUser();
+    roleRepo.findOne.mockResolvedValue({ id: 'r', name: 'lead', departmentId: 'dept-eng', isDeleted: false });
+    await expect(
+      service.addMember('org-1', { email: 'a@b.com', roleId: 'r', departmentId: 'dept-sales' } as any, 'inviter'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('404s when the custom role does not exist in the org', async () => {
+    freshUser();
+    roleRepo.findOne.mockResolvedValue(null);
+    await expect(
+      service.addMember('org-1', { email: 'a@b.com', roleId: 'ghost' } as any, 'inviter'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects adding the same person twice', async () => {
+    userRepo.findOne.mockResolvedValue({ id: 'user-1', email: 'a@b.com', organizations: [] });
+    membershipRepo.findOne.mockResolvedValue({ id: 'm-exists' });
+    await expect(
+      service.addMember('org-1', { email: 'a@b.com', role: 'employee' } as any, 'inviter'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('refuses to remove the organization owner', async () => {
+    membershipRepo.findOne.mockResolvedValue({ id: 'm-owner', role: 'owner', organizationId: 'org-1' });
+    await expect(service.removeMember('org-1', 'm-owner')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+});
