@@ -190,8 +190,24 @@ export class OrganizationService {
       `Org '${org.name}' (${org.id}) provisioned by ${createdByUserId}, owner ${owner.email}`,
     );
 
-    // Invite the owner to sign in and set the org up. send() never throws, so a
-    // mail hiccup doesn't fail provisioning.
+    // Invite the owner to sign in and set the org up.
+    await this.sendOwnerInvite(org, owner);
+
+    return {
+      organization: this.toPublic(org),
+      owner: { id: owner.id, email: owner.email },
+    };
+  }
+
+  /**
+   * Email the org's owner an invitation to sign in and set the org up. send()
+   * never throws, so a mail hiccup doesn't fail the caller. Returns whether it
+   * was accepted for delivery.
+   */
+  private async sendOwnerInvite(
+    org: OrganizationEntity,
+    owner: UserEntity,
+  ): Promise<boolean> {
     const ownerName = [owner.firstName, owner.lastName]
       .filter((p) => p && p !== 'Owner' && p !== 'Pending')
       .join(' ')
@@ -202,18 +218,33 @@ export class OrganizationService {
       ownerEmail: owner.email,
       loginUrl: `${this.frontendUrl()}/login`,
     });
-    await this.mail.send({
+    return this.mail.send({
       to: { email: owner.email, name: ownerName || undefined },
       subject: invite.subject,
       html: invite.html,
       category: 'org-invite',
       organizationId: org.id,
     });
+  }
 
-    return {
-      organization: this.toPublic(org),
-      owner: { id: owner.id, email: owner.email },
-    };
+  /** Re-send the owner invitation email (super admin action). */
+  async resendInvite(
+    orgId: string,
+    actedBy: string,
+  ): Promise<{ sent: boolean; email: string }> {
+    const org = await this.getEntity(orgId);
+    if (!org.ownerId) {
+      throw new BadRequestException('This organization has no owner to invite');
+    }
+    const owner = await this.userRepo.findOne({ where: { id: org.ownerId } });
+    if (!owner) {
+      throw new NotFoundException('Owner account not found');
+    }
+    const sent = await this.sendOwnerInvite(org, owner);
+    this.logger.log(
+      `Invitation re-sent for org ${org.id} to ${owner.email} by ${actedBy}`,
+    );
+    return { sent, email: owner.email };
   }
 
   async list(): Promise<OrgPublic[]> {
