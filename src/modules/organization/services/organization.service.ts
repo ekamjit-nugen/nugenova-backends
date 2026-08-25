@@ -35,6 +35,25 @@ export interface OrgPublic {
   consentAcceptedAt: string | null;
   /** Current version of the org's assigned T&C (null if none assigned). */
   currentTermsVersion: number | null;
+  /** Owner setup-wizard progress (0 = not started; 1..3 = current step). */
+  onboardingStep: number;
+  /** Whether the owner finished (or skipped) the setup wizard. */
+  onboardingCompleted: boolean;
+  /**
+   * The org's position in its lifecycle, derived for the super-admin console so
+   * every state is visible at a glance:
+   *  - `suspended`        — manually halted (owner blocked)
+   *  - `awaiting_consent` — provisioned, owner has never accepted the T&C
+   *  - `reconsent`        — accepted before, but the T&C changed → must re-accept
+   *  - `setting_up`       — consent accepted, owner is running the setup wizard
+   *  - `active`           — consent accepted and setup finished
+   */
+  lifecycle:
+    | 'suspended'
+    | 'awaiting_consent'
+    | 'reconsent'
+    | 'setting_up'
+    | 'active';
 }
 
 /**
@@ -100,6 +119,21 @@ export class OrganizationService {
   toPublic(o: OrganizationEntity): OrgPublic {
     const currentTermsVersion = this.terms.getVersion(o.termsId);
     const needsConsent = this.needsConsent(o);
+    const onboardingCompleted = !!o.onboardingCompleted;
+
+    // Derive the single lifecycle state the super-admin console reads.
+    let lifecycle: OrgPublic['lifecycle'];
+    if (o.status === 'suspended') {
+      lifecycle = 'suspended';
+    } else if (needsConsent) {
+      // A recorded (now stale) consent version means they accepted once before.
+      lifecycle = o.consent?.version != null ? 'reconsent' : 'awaiting_consent';
+    } else if (!onboardingCompleted) {
+      lifecycle = 'setting_up';
+    } else {
+      lifecycle = 'active';
+    }
+
     return {
       id: o.id,
       name: o.name,
@@ -113,6 +147,9 @@ export class OrganizationService {
       consentVersion: o.consent?.version ?? null,
       consentAcceptedAt: o.consent?.acceptedAt ?? null,
       currentTermsVersion,
+      onboardingStep: o.onboardingStep ?? 0,
+      onboardingCompleted,
+      lifecycle,
     };
   }
 

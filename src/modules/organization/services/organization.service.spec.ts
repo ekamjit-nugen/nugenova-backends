@@ -201,4 +201,74 @@ describe('OrganizationService (unit, no DB)', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });
+
+  describe('toPublic lifecycle derivation', () => {
+    const termsSvc = () =>
+      (service as any).terms as {
+        getVersion: jest.Mock;
+        needsConsent: jest.Mock;
+      };
+
+    const base = () =>
+      ({
+        id: 'o',
+        name: 'O',
+        slug: 'o',
+        status: 'active',
+        ownerId: 'u',
+        createdAt: new Date(),
+        termsId: 'terms-1',
+        consent: null,
+        onboardingStep: 0,
+        onboardingCompleted: false,
+      }) as any;
+
+    it('suspended → lifecycle "suspended" regardless of consent/setup', () => {
+      termsSvc().needsConsent.mockReturnValue(false);
+      const pub = service.toPublic({
+        ...base(),
+        status: 'suspended',
+        onboardingCompleted: true,
+      });
+      expect(pub.lifecycle).toBe('suspended');
+    });
+
+    it('never consented → "awaiting_consent"', () => {
+      termsSvc().needsConsent.mockReturnValue(true);
+      const pub = service.toPublic(base());
+      expect(pub.lifecycle).toBe('awaiting_consent');
+    });
+
+    it('accepted before but terms bumped → "reconsent"', () => {
+      termsSvc().needsConsent.mockReturnValue(true);
+      const pub = service.toPublic({
+        ...base(),
+        consent: { version: 1 } as any,
+      });
+      expect(pub.lifecycle).toBe('reconsent');
+    });
+
+    it('consented but wizard unfinished → "setting_up" (with step)', () => {
+      termsSvc().needsConsent.mockReturnValue(false);
+      const pub = service.toPublic({
+        ...base(),
+        consent: { version: 2 } as any,
+        onboardingStep: 2,
+        onboardingCompleted: false,
+      });
+      expect(pub.lifecycle).toBe('setting_up');
+      expect(pub.onboardingStep).toBe(2);
+    });
+
+    it('consented and setup finished → "active"', () => {
+      termsSvc().needsConsent.mockReturnValue(false);
+      const pub = service.toPublic({
+        ...base(),
+        consent: { version: 2 } as any,
+        onboardingCompleted: true,
+      });
+      expect(pub.lifecycle).toBe('active');
+      expect(pub.onboardingCompleted).toBe(true);
+    });
+  });
 });
