@@ -23,13 +23,24 @@ export class OrganizationEntity extends PgBaseEntity {
   status: string; // active | suspended  (suspended = manually halted)
 
   /**
-   * The org's acceptance of the platform Terms & Conditions. Null until the
-   * owner accepts. `version` is the T&C version accepted — when the global terms
-   * are updated to a higher version this becomes stale and the org must
-   * re-accept (enforced in the auth routing + org guard).
+   * The Terms & Conditions document (from the T&C library) this org must accept.
+   * Chosen by the super admin at creation. Required in practice; nullable only
+   * for defensive back-compat. See `PlatformTermsEntity`.
+   */
+  @Index()
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  termsId: string | null;
+
+  /**
+   * The org's acceptance of its assigned T&C (`termsId`). Null until the owner
+   * accepts. `termsId` pins WHICH document was accepted and `version` WHICH edit
+   * of it — if the super admin edits that T&C (bumping its version) or the org is
+   * reassigned a different T&C, this becomes stale and the org must re-accept
+   * (enforced in auth routing + the org guard).
    */
   @Column({ type: 'jsonb', nullable: true, default: null })
   consent: {
+    termsId: string;
     version: number;
     acceptedByUserId: string;
     acceptedAt: string;

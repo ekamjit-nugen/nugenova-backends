@@ -44,7 +44,12 @@ describe('OrganizationService (unit, no DB)', () => {
         },
         {
           provide: TermsService,
-          useValue: { getCurrentVersion: jest.fn().mockReturnValue(1) },
+          useValue: {
+            exists: jest.fn().mockResolvedValue(true),
+            getVersion: jest.fn().mockReturnValue(1),
+            needsConsent: jest.fn().mockReturnValue(true),
+            get: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -73,6 +78,7 @@ describe('OrganizationService (unit, no DB)', () => {
           name: '  Acme Corp  ',
           ownerEmail: 'Owner@Example.com',
           ownerFirstName: 'Ada',
+          termsId: 'terms-1',
         } as any,
         'super-admin-1',
       );
@@ -144,7 +150,7 @@ describe('OrganizationService (unit, no DB)', () => {
       orgRepo.save.mockImplementation(async (o: any) => ({ id: 'org-2', ...o }));
 
       await service.createOrganization(
-        { name: 'Beta', ownerEmail: 'owner@example.com' } as any,
+        { name: 'Beta', ownerEmail: 'owner@example.com', termsId: 'terms-1' } as any,
         'super-admin-1',
       );
 
@@ -172,7 +178,7 @@ describe('OrganizationService (unit, no DB)', () => {
 
       await expect(
         service.createOrganization(
-          { name: 'Gamma', ownerEmail: 'owner@example.com' } as any,
+          { name: 'Gamma', ownerEmail: 'owner@example.com', termsId: 'terms-1' } as any,
           'super-admin-1',
         ),
       ).rejects.toBeInstanceOf(ConflictException);

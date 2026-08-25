@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -21,13 +22,16 @@ export interface OrgPublic {
   status: string; // active | suspended
   ownerId: string | null;
   createdAt: Date;
-  /** Whether the org has accepted the CURRENT T&C version. */
+  /** The T&C document assigned to this org (from the library). */
+  termsId: string | null;
+  /** Whether the org has accepted its assigned T&C at its current version. */
   consentAccepted: boolean;
   /** True when consent is missing or stale (must (re-)accept). */
   needsConsent: boolean;
   consentVersion: number | null;
   consentAcceptedAt: string | null;
-  currentTermsVersion: number;
+  /** Current version of the org's assigned T&C (null if none assigned). */
+  currentTermsVersion: number | null;
 }
 
 /**
@@ -50,9 +54,14 @@ export class OrganizationService {
     private readonly terms: TermsService,
   ) {}
 
-  /** True when the org has not accepted the CURRENT T&C version. */
+  /** True when the org has not accepted its assigned T&C at its current version. */
   needsConsent(o: OrganizationEntity): boolean {
-    return !o.consent || o.consent.version < this.terms.getCurrentVersion();
+    return this.terms.needsConsent(o.termsId, o.consent);
+  }
+
+  /** How many orgs are assigned a given T&C — gates deletion of that document. */
+  async countUsingTerms(termsId: string): Promise<number> {
+    return this.orgRepo.count({ where: { termsId, deletedAt: null as any } });
   }
 
   private async getEntity(id: string): Promise<OrganizationEntity> {
@@ -78,7 +87,7 @@ export class OrganizationService {
   }
 
   toPublic(o: OrganizationEntity): OrgPublic {
-    const currentTermsVersion = this.terms.getCurrentVersion();
+    const currentTermsVersion = this.terms.getVersion(o.termsId);
     const needsConsent = this.needsConsent(o);
     return {
       id: o.id,
@@ -87,6 +96,7 @@ export class OrganizationService {
       status: o.status,
       ownerId: o.ownerId,
       createdAt: o.createdAt,
+      termsId: o.termsId ?? null,
       consentAccepted: !needsConsent,
       needsConsent,
       consentVersion: o.consent?.version ?? null,
@@ -115,15 +125,23 @@ export class OrganizationService {
       owner = await this.userRepo.save(owner);
     }
 
+    // A T&C must be chosen from the library and must exist.
+    if (!dto.termsId || !(await this.terms.exists(dto.termsId))) {
+      throw new BadRequestException(
+        'A valid Terms & Conditions must be selected for the organization',
+      );
+    }
+
     const slug = await this.uniqueSlug(dto.name);
     // Provisioned orgs are `active` with NO consent yet — the owner can sign in
     // but is routed to the consent screen and blocked from the app until they
-    // accept the current Terms & Conditions. `suspended` is a manual halt.
+    // accept the assigned Terms & Conditions. `suspended` is a manual halt.
     const org = await this.orgRepo.save(
       this.orgRepo.create({
         name: dto.name.trim(),
         slug,
         status: 'active',
+        termsId: dto.termsId,
         consent: null,
         ownerId: owner.id,
         createdBy: createdByUserId,
@@ -181,19 +199,28 @@ export class OrganizationService {
 
   // ── Consent (owner) ──────────────────────────────────────────────────────
 
-  /** The consent state + current T&C text for the owner's consent screen. */
+  /** The T&C id assigned to an org (for streaming its PDF). */
+  async getAssignedTermsId(orgId: string): Promise<string | null> {
+    const org = await this.getEntity(orgId);
+    return org.termsId ?? null;
+  }
+
+  /** The consent state + the org's assigned T&C for the owner's consent screen. */
   async getConsentState(orgId: string) {
     const org = await this.getEntity(orgId);
-    const current = await this.terms.getCurrent();
+    const doc = org.termsId ? await this.terms.get(org.termsId) : null;
     return {
       organization: { id: org.id, name: org.name, status: org.status },
-      terms: {
-        version: current.version,
-        kind: current.kind,
-        text: current.text,
-        title: current.title,
-        hasDocument: current.kind === 'pdf' && !!current.fileId,
-      },
+      terms: doc
+        ? {
+            id: doc.id,
+            version: doc.version,
+            kind: doc.kind,
+            text: doc.text,
+            title: doc.title,
+            hasDocument: doc.kind === 'pdf' && !!doc.fileId,
+          }
+        : null,
       accepted: !this.needsConsent(org),
       acceptedVersion: org.consent?.version ?? null,
       acceptedAt: org.consent?.acceptedAt ?? null,
@@ -201,7 +228,7 @@ export class OrganizationService {
     };
   }
 
-  /** Record the owner's acceptance of the CURRENT T&C version. */
+  /** Record the owner's acceptance of the org's assigned T&C at its version. */
   async acceptConsent(
     orgId: string,
     userId: string,
@@ -209,9 +236,13 @@ export class OrganizationService {
     ua?: string,
   ): Promise<OrgPublic> {
     const org = await this.getEntity(orgId);
-    const current = await this.terms.getCurrent();
+    if (!org.termsId) {
+      throw new BadRequestException('No Terms & Conditions assigned to this organization');
+    }
+    const doc = await this.terms.get(org.termsId);
     org.consent = {
-      version: current.version,
+      termsId: doc.id,
+      version: doc.version,
       acceptedByUserId: userId,
       acceptedAt: new Date().toISOString(),
       ipAddress: ip ?? null,
@@ -219,7 +250,7 @@ export class OrganizationService {
     };
     await this.orgRepo.save(org);
     this.logger.log(
-      `Org ${org.id} accepted Terms v${current.version} (user ${userId})`,
+      `Org ${org.id} accepted Terms ${doc.id} v${doc.version} (user ${userId})`,
     );
     return this.toPublic(org);
   }

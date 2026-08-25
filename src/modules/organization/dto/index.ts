@@ -32,25 +32,32 @@ export class CreateOrganizationDto {
   @IsString()
   @MaxLength(80)
   ownerLastName?: string;
+
+  /** The T&C document (from the library) the new org must accept. Required. */
+  @IsString()
+  @MaxLength(24)
+  termsId: string;
 }
 
-export class UpdateTermsDto {
+/** Create or edit an HTML T&C document in the library. */
+export class UpsertHtmlTermsDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  title: string;
+
   @IsString()
   @MinLength(10)
   @MaxLength(100000)
   text: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  title?: string;
 }
 
-export class PublishPdfTermsDto {
-  @IsOptional()
+/** Create or replace a PDF T&C document (multipart; file carries the PDF). */
+export class UpsertPdfTermsDto {
   @IsString()
+  @MinLength(1)
   @MaxLength(120)
-  title?: string;
+  title: string;
 }
 
 export class CreateDepartmentDto {

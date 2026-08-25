@@ -43,6 +43,11 @@ Feature: Terms & Conditions consent gate
     When the super admin publishes a new version of the terms
     Then the owner is blocked from the departments endpoint until they re-accept
 
+  Scenario: a Terms and Conditions assigned to an org cannot be deleted
+    Given an organization that has accepted the current terms
+    When the super admin tries to delete the assigned Terms and Conditions
+    Then the request is rejected as a conflict
+
   Scenario: a super admin halts an organization
     Given an organization that has accepted the current terms
     When the super admin halts the organization

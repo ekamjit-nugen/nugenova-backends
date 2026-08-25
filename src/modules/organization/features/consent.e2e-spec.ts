@@ -23,21 +23,23 @@ defineFeature(feature, (test) => {
       .get('/api/v1/org/departments')
       .set('Authorization', `Bearer ${token}`);
 
+  // Edit the org's ASSIGNED T&C (bumps its version → the org must re-accept).
   const editTerms = (org: CreatedOrg, text: string) =>
     h
       .api()
-      .put('/api/v1/admin/terms')
+      .put(`/api/v1/admin/terms/${org.termsId}`)
       .set('Authorization', `Bearer ${org.saToken}`)
-      .send({ text });
+      .send({ title: 'Updated Terms', text });
 
   const SAMPLE_PDF = Buffer.from(
     '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF',
   );
 
+  // Replace the org's assigned T&C with a PDF (also bumps its version).
   const publishPdfTerms = (org: CreatedOrg) =>
     h
       .api()
-      .post('/api/v1/admin/terms/pdf')
+      .put(`/api/v1/admin/terms/${org.termsId}/pdf`)
       .set('Authorization', `Bearer ${org.saToken}`)
       .field('title', 'Signed Master Agreement')
       .attach('file', SAMPLE_PDF, {
@@ -237,6 +239,29 @@ defineFeature(feature, (test) => {
     );
   });
 
+  test('a Terms and Conditions assigned to an org cannot be deleted', ({
+    given,
+    when,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let res: request.Response;
+
+    given('an organization that has accepted the current terms', async () => {
+      org = await h.provisionOrg();
+      await h.acceptConsent(org);
+    });
+    when('the super admin tries to delete the assigned Terms and Conditions', async () => {
+      res = await h
+        .api()
+        .delete(`/api/v1/admin/terms/${org.termsId}`)
+        .set('Authorization', `Bearer ${org.saToken}`);
+    });
+    then('the request is rejected as a conflict', () => {
+      expect(res.status).toBe(409);
+    });
+  });
+
   test('a super admin halts an organization', ({ given, when, then, and }) => {
     let org: CreatedOrg;
 
@@ -291,9 +316,9 @@ defineFeature(feature, (test) => {
     when('the owner tries to publish new terms', async () => {
       res = await h
         .api()
-        .put('/api/v1/admin/terms')
+        .post('/api/v1/admin/terms')
         .set('Authorization', `Bearer ${org.ownerToken}`)
-        .send({ text: '<p>hacked</p>' });
+        .send({ title: 'Hacked', text: '<p>hacked terms</p>' });
     });
     then('the request is rejected as forbidden', () => {
       expect(res.status).toBe(403);

@@ -1,21 +1,28 @@
-import { Column, Entity, Index } from 'typeorm';
+import { Column, Entity } from 'typeorm';
 import { PgBaseEntity } from '../../../bootstrap/database/pg-base.entity';
 
 /**
- * A version of the global platform Terms & Conditions. Append-only: each edit
- * inserts a new row with `version = previous + 1`; the current terms are the
- * highest-versioned row. An organization's stored consent version is compared
- * against the current version to decide whether it must (re-)accept.
+ * One Terms & Conditions document in the platform T&C **library**. The super
+ * admin creates any number of these (each with a `title`/name) and assigns one to
+ * an organization at creation; the org's owner then consents to it.
  *
- * A version is one of two `kind`s:
+ * A document is one of two `kind`s:
  *  - `html` — `text` holds the agreement body (from a template or hand-edited).
- *  - `pdf`  — `fileId` points at a stored PDF in `document_files`; the org reads
- *    the PDF on the consent screen. `text` is null for this kind.
+ *  - `pdf`  — `fileId` points at a stored PDF in `document_files`.
+ *
+ * `version` is this document's OWN edit counter (starts at 1, bumped on each
+ * edit). An org stores the `{termsId, version}` it accepted; a higher `version`
+ * (an edit) makes that consent stale and forces re-acceptance. `version` is NOT
+ * globally unique — each document versions independently.
  */
 @Entity('platform_terms')
 export class PlatformTermsEntity extends PgBaseEntity {
-  @Index('uq_platform_terms_version', { unique: true })
-  @Column({ type: 'int' })
+  /** Display name of this T&C document (shown in the picker + consent screen). */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  title: string | null;
+
+  /** This document's edit version (1, 2, 3…). Bumped on each edit. */
+  @Column({ type: 'int', default: 1 })
   version: number;
 
   /** html | pdf */
@@ -25,10 +32,6 @@ export class PlatformTermsEntity extends PgBaseEntity {
   /** Agreement body for the `html` kind. Null for the `pdf` kind. */
   @Column({ type: 'text', nullable: true, default: null })
   text: string | null;
-
-  /** Human label (template name or uploaded PDF filename). */
-  @Column({ type: 'varchar', nullable: true, default: null })
-  title: string | null;
 
   /** `document_files` id of the uploaded PDF for the `pdf` kind. */
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })

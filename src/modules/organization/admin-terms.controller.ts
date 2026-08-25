@@ -1,8 +1,13 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
+  Param,
   Post,
   Put,
   Req,
@@ -10,8 +15,6 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
-  HttpCode,
-  HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -20,14 +23,17 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/guards/platform-admin.guard';
 import { TermsService, PLATFORM_ORG_ID } from '../terms/terms.service';
 import { StorageService } from '../../bootstrap/storage/storage.service';
-import { UpdateTermsDto, PublishPdfTermsDto } from './dto';
+import { OrganizationService } from './services/organization.service';
+import { UpsertHtmlTermsDto, UpsertPdfTermsDto } from './dto';
 
 /**
- * Super-admin management of the global Terms & Conditions. Publishing (HTML from
- * a template/editor, or an uploaded PDF) bumps the version, which forces every
- * org to re-accept. Effective paths (global prefix `api/v1`):
- * `GET /admin/terms`, `GET /admin/terms/templates`, `PUT /admin/terms`,
- * `POST /admin/terms/pdf`, `GET /admin/terms/document`.
+ * Super-admin management of the Terms & Conditions **library**. The super admin
+ * creates named T&C documents (HTML from a template/editor, or an uploaded PDF),
+ * edits them (bumping their version → assigned orgs must re-accept), and deletes
+ * them (blocked while an org still uses one). Effective paths (`api/v1`):
+ * `GET/POST /admin/terms`, `GET /admin/terms/templates`, `POST /admin/terms/pdf`,
+ * `GET/PUT/DELETE /admin/terms/:id`, `PUT /admin/terms/:id/pdf`,
+ * `GET /admin/terms/:id/document`.
  */
 @Controller('admin/terms')
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
@@ -35,23 +41,13 @@ export class AdminTermsController {
   constructor(
     private readonly terms: TermsService,
     private readonly storage: StorageService,
+    private readonly orgService: OrganizationService,
   ) {}
 
+  /** List every T&C document in the library. */
   @Get()
-  async get() {
-    const current = await this.terms.getCurrent();
-    return {
-      success: true,
-      data: {
-        version: current.version,
-        kind: current.kind,
-        text: current.text,
-        title: current.title,
-        fileId: current.fileId,
-        hasDocument: current.kind === 'pdf' && !!current.fileId,
-        updatedAt: current.updatedAt,
-      },
-    };
+  async list() {
+    return { success: true, data: await this.terms.list() };
   }
 
   /** The ready-made templates the editor offers as starting points. */
@@ -60,31 +56,113 @@ export class AdminTermsController {
     return { success: true, data: this.terms.listTemplates() };
   }
 
-  @Put()
-  async update(@Body() dto: UpdateTermsDto, @Req() req: any) {
-    const current = await this.terms.publishHtml(
-      dto.text,
-      dto.title ?? null,
+  /** Create a new HTML T&C document. */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  async create(@Body() dto: UpsertHtmlTermsDto, @Req() req: any) {
+    const doc = await this.terms.create(
+      { kind: 'html', title: dto.title, text: dto.text },
+      req.user.userId,
+    );
+    return { success: true, message: 'Terms & Conditions created', data: doc };
+  }
+
+  /** Create a new PDF T&C document (multipart `file` + `title`). */
+  @Post('pdf')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
+  )
+  async createPdf(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: UpsertPdfTermsDto,
+    @Req() req: any,
+  ) {
+    const fileId = await this.storePdf(file, req.user.userId);
+    const doc = await this.terms.create(
+      { kind: 'pdf', title: dto.title || file.originalname, fileId },
+      req.user.userId,
+    );
+    return { success: true, message: 'Terms & Conditions created', data: doc };
+  }
+
+  @Get(':id')
+  async get(@Param('id') id: string) {
+    return { success: true, data: await this.terms.get(id) };
+  }
+
+  /** Edit an HTML T&C — bumps its version; assigned orgs must re-accept. */
+  @Put(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpsertHtmlTermsDto,
+    @Req() req: any,
+  ) {
+    const doc = await this.terms.update(
+      id,
+      { kind: 'html', title: dto.title, text: dto.text },
       req.user.userId,
     );
     return {
       success: true,
-      message: `Terms & Conditions updated to v${current.version} — all organizations must re-accept`,
-      data: { version: current.version, kind: current.kind },
+      message: `Terms updated to v${doc.version} — assigned organizations must re-accept`,
+      data: doc,
     };
   }
 
-  /** Upload a PDF and publish it as the new terms version. */
-  @Post('pdf')
-  @HttpCode(HttpStatus.OK)
+  /** Replace a T&C's PDF (multipart) — bumps its version. */
+  @Put(':id/pdf')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
   )
-  async publishPdf(
+  async updatePdf(
+    @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
-    @Body() dto: PublishPdfTermsDto,
+    @Body() dto: UpsertPdfTermsDto,
     @Req() req: any,
   ) {
+    const fileId = await this.storePdf(file, req.user.userId);
+    const doc = await this.terms.update(
+      id,
+      { kind: 'pdf', title: dto.title || file.originalname, fileId },
+      req.user.userId,
+    );
+    return {
+      success: true,
+      message: `Terms updated to v${doc.version} — assigned organizations must re-accept`,
+      data: doc,
+    };
+  }
+
+  /** Delete a T&C — refused while any org is still assigned it. */
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  async remove(@Param('id') id: string) {
+    const inUse = await this.orgService.countUsingTerms(id);
+    if (inUse > 0) {
+      throw new ConflictException(
+        `Cannot delete — ${inUse} organization(s) are using this Terms & Conditions. Reassign them first.`,
+      );
+    }
+    await this.terms.remove(id);
+    return { success: true, message: 'Terms & Conditions deleted' };
+  }
+
+  /** Stream a T&C's PDF for the super-admin preview. */
+  @Get(':id/document')
+  async document(@Param('id') id: string, @Res() res: Response) {
+    const { buffer, mimeType, filename } = await this.terms.getDocumentBytes(id);
+    const safeName = filename.replace(/[^\w.\-]+/g, '_');
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.send(buffer);
+  }
+
+  private async storePdf(
+    file: Express.Multer.File,
+    userId: string,
+  ): Promise<string> {
     if (!file) throw new BadRequestException('No PDF provided');
     if (file.mimetype !== 'application/pdf') {
       throw new BadRequestException('The terms document must be a PDF');
@@ -94,29 +172,9 @@ export class AdminTermsController {
       originalName: file.originalname,
       mimeType: file.mimetype,
       buffer: file.buffer,
-      uploadedBy: req.user.userId,
+      uploadedBy: userId,
       category: 'platform-terms',
     });
-    const current = await this.terms.publishPdf(
-      meta.id,
-      dto.title || file.originalname,
-      req.user.userId,
-    );
-    return {
-      success: true,
-      message: `Terms & Conditions updated to v${current.version} (PDF) — all organizations must re-accept`,
-      data: { version: current.version, kind: current.kind, fileId: current.fileId },
-    };
-  }
-
-  /** Stream the current terms PDF for the super-admin preview. */
-  @Get('document')
-  async document(@Res() res: Response) {
-    const { buffer, mimeType, filename } = await this.terms.getDocumentBytes();
-    const safeName = filename.replace(/[^\w.\-]+/g, '_');
-    res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
-    res.setHeader('Cache-Control', 'private, max-age=60');
-    res.send(buffer);
+    return meta.id;
   }
 }

@@ -57,8 +57,7 @@ export class OrgAdminGuard implements CanActivate {
           'Your organization has been suspended — please contact the platform administrator',
         );
       }
-      const needsConsent =
-        !org.consent || org.consent.version < this.terms.getCurrentVersion();
+      const needsConsent = this.terms.needsConsent(org.termsId, org.consent);
       if (needsConsent) {
         throw new ForbiddenException(
           'Please review and accept the latest Terms & Conditions to continue',

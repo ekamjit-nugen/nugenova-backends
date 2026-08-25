@@ -605,8 +605,7 @@ export class AuthService {
     if (org.status === 'suspended') {
       return { route: '/suspended', reason: 'org_suspended', organizationId };
     }
-    const needsConsent =
-      !org.consent || org.consent.version < this.terms.getCurrentVersion();
+    const needsConsent = this.terms.needsConsent(org.termsId, org.consent);
     if (needsConsent) {
       if (membership.role === 'owner' || membership.role === 'admin') {
         return { route: '/consent', reason: 'consent_required', organizationId };

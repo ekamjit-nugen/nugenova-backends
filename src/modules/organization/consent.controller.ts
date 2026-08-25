@@ -2,6 +2,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  NotFoundException,
   Post,
   Req,
   Res,
@@ -53,8 +54,12 @@ export class ConsentController {
    */
   @Get('document')
   async document(@Req() req: any, @Res() res: Response) {
-    this.requireOrgAdmin(req);
-    const { buffer, mimeType, filename } = await this.terms.getDocumentBytes();
+    const orgId = this.requireOrgAdmin(req);
+    const termsId = await this.orgService.getAssignedTermsId(orgId);
+    if (!termsId) {
+      throw new NotFoundException('No Terms & Conditions assigned to this organization');
+    }
+    const { buffer, mimeType, filename } = await this.terms.getDocumentBytes(termsId);
     const safeName = filename.replace(/[^\w.\-]+/g, '_');
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);

@@ -30,22 +30,26 @@ This is the journey the module guarantees:
    team members (optionally assigning each a role + department).
 6. **The owner reviews the org** — lists back the departments, roles, and people.
 
-**The consent gate (versioned).** There is one global Terms & Conditions with a
-version. When the super admin **edits** the terms, the version bumps and **every
-org must re-accept** — a stale org is routed back to `/consent` and blocked from
-`/org/*` until it re-accepts.
+**The consent gate — a T&C library, picked per org.** The super admin maintains a
+**library** of named Terms & Conditions documents. When creating an org they
+**select which T&C** it must accept (`termsId`, **required** — if the library is
+empty the UI prompts to add one first). The org's owner then accepts *that*
+document. When the super admin **edits** a T&C its own `version` bumps and **every
+org assigned it must re-accept** — a stale org is routed back to `/consent` and
+blocked from `/org/*` until it re-accepts. `needsConsent` = the org has a
+`termsId` AND (no consent, or consent for a different doc, or an older version of
+it) — computed from a `TermsService` in-memory `{id → version}` cache.
 
-**Terms source: written or PDF.** A terms version has a `kind`:
-- **`html`** — the super admin starts from one of several **ready-made templates**
-  (Standard SaaS, Startup, Enterprise, Privacy/Data-Processing), edits, and
-  publishes. The org reads the rendered HTML on the consent screen.
-- **`pdf`** — the super admin **uploads a PDF** (stored via the shared
-  `StorageService`, S3 with a Postgres-`bytea` fallback). The org reads the
-  embedded PDF (`GET /consent/document`) and accepts it as-is.
+**Terms source: written or PDF.** Each library document has a `kind`:
+- **`html`** — authored from one of several **ready-made templates** (Standard
+  SaaS, Startup, Enterprise, Privacy/Data-Processing) then edited. The org reads
+  the rendered HTML on the consent screen.
+- **`pdf`** — an **uploaded PDF** (stored via the shared `StorageService`, S3 with
+  a Postgres-`bytea` fallback). The org reads the embedded PDF
+  (`GET /consent/document`) and accepts it as-is.
 
-Either way, publishing bumps the version and forces re-consent. The org always
-reads whatever the *current* version is — the PDF if the latest is a PDF,
-otherwise the template/HTML text.
+**Deleting** a T&C is **blocked while any org is assigned it** (409) — reassign
+first. There is no auto-seeded default; the library starts empty.
 
 **Halt.** The super admin can **halt** an org (status → `suspended`), which fully
 blocks its owner (routed to `/suspended`) until **reactivated**. This is the
@@ -102,15 +106,18 @@ All routes are under the global `/api/v1` prefix.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/admin/organizations` | Provision an org: `{name, ownerEmail, ownerFirstName?, ownerLastName?}` → org (active, consent pending) + owner + owner membership. |
+| POST | `/admin/organizations` | Provision an org: `{name, ownerEmail, termsId (required), ownerFirstName?, ownerLastName?}` → org (active, consent pending) + owner + owner membership. Rejects an unknown/missing `termsId`. |
 | GET | `/admin/organizations` | List all organizations (with status + consent state). |
 | GET | `/admin/organizations/:id` | Fetch one organization. |
 | POST | `/admin/organizations/:id/halt` | Halt (suspend) an org — its owner is fully blocked. |
 | POST | `/admin/organizations/:id/reactivate` | Lift a halt (status → active). |
-| GET / PUT | `/admin/terms` | View / publish the global Terms (HTML). A `PUT` `{text, title?}` bumps the version → every org must re-accept. |
-| GET | `/admin/terms/templates` | The ready-made template catalog (`{id, name, description, html}[]`) offered as editor starting points. |
-| POST | `/admin/terms/pdf` | Upload a PDF (`multipart` `file` + optional `title`) and publish it as the new terms version. |
-| GET | `/admin/terms/document` | Stream the current terms PDF (super-admin preview). |
+| GET | `/admin/terms` | List every T&C document in the library. |
+| GET | `/admin/terms/templates` | The ready-made template catalog (`{id, name, description, html}[]`). |
+| POST | `/admin/terms` | Create an HTML T&C `{title, text}`. |
+| POST | `/admin/terms/pdf` | Create a PDF T&C (`multipart` `file` + `title`). |
+| GET / PUT / DELETE | `/admin/terms/:id` | Get / edit (bumps version → assigned orgs re-accept) / delete (409 if any org uses it) one document. |
+| PUT | `/admin/terms/:id/pdf` | Replace a document's PDF (`multipart`) — bumps version. |
+| GET | `/admin/terms/:id/document` | Stream a document's PDF (super-admin preview). |
 
 ### Org owner (consent)
 
@@ -138,7 +145,8 @@ the org to be **not suspended** and to have **accepted the current Terms**.
 ### Data model (entities → tables)
 
 - **`organizations`** — the tenant (name, unique slug, status `active|suspended`, `consent` jsonb = accepted terms version + who/when/ip, ownerId, createdBy).
-- **`platform_terms`** — the versioned global Terms & Conditions (append-only; current = max version). Each row is a `kind`: `html` (`text` holds the body) or `pdf` (`file_id` → `document_files`), plus a `title`. *TermsConsent + TermsSourceKind migrations.*
+- **`platform_terms`** — the T&C **library**: one row per document (`title`, per-document `version`, `kind` = `html` with `text` or `pdf` with `file_id` → `document_files`). *TermsConsent + TermsSourceKind + TermsLibrary migrations.*
+- **`organizations.terms_id`** — the library document assigned to the org; its `consent` jsonb records the accepted `{termsId, version, who, when, ip}`. *TermsLibrary migration.*
 - **`departments`** — org-scoped grouping (name unique per org, optional head + parent).
 - **`roles`** — reused from `auth`; org-scoped custom roles with a jsonb permission matrix.
 - **`org_memberships`** — reused from `auth`; the people of an org (+ a new `department_id` link added this migration).
