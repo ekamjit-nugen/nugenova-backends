@@ -101,6 +101,38 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('an owner seeds the default roles', ({ given, when, then, and }) => {
+    let org: CreatedOrg;
+    let res: request.Response;
+
+    const seed = (token: string) =>
+      h
+        .api()
+        .post('/api/v1/org/roles/seed-defaults')
+        .set('Authorization', `Bearer ${token}`);
+
+    given('an organization owner', async () => {
+      org = await h.createOrg();
+    });
+    when('they seed the default roles', async () => {
+      res = await seed(org.ownerToken).expect(200);
+    });
+    then(
+      '"HR Manager", "Developer" and "Designer" are among the returned roles',
+      () => {
+        const names = res.body.data.map((r: any) => r.displayName);
+        expect(names).toEqual(
+          expect.arrayContaining(['HR Manager', 'Developer', 'Designer']),
+        );
+      },
+    );
+    and('seeding again does not duplicate them', async () => {
+      const before = res.body.data.length;
+      const again = await seed(org.ownerToken).expect(200);
+      expect(again.body.data.length).toBe(before);
+    });
+  });
+
   test('an employee-tier member cannot manage roles', ({
     given,
     when,

@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { RoleEntity } from '../../auth/entities/role.entity';
 import { CreateRoleDto, UpdateRoleDto } from '../dto';
+import { DEFAULT_ROLES } from '../default-roles';
 
 /**
  * Org-scoped custom roles — CRUD over the shared `roles` table (the same rows
@@ -42,6 +43,31 @@ export class OrgRoleService {
         createdBy,
       }),
     );
+  }
+
+  /**
+   * Seed the org's default custom roles (HR, Developer, Designer) — idempotent,
+   * so it can run at provisioning and be safely re-invoked. Skips any role whose
+   * name already exists for the org. Returns the org's full role list after.
+   */
+  async seedDefaults(orgId: string, createdBy: string): Promise<RoleEntity[]> {
+    const existing = await this.repo.find({
+      where: { organizationId: orgId, isDeleted: false },
+    });
+    const have = new Set(existing.map((r) => r.name));
+    const toCreate = DEFAULT_ROLES.filter((r) => !have.has(r.name)).map((r) =>
+      this.repo.create({
+        organizationId: orgId,
+        name: r.name,
+        displayName: r.displayName,
+        description: r.description,
+        departmentId: null,
+        permissions: r.permissions,
+        createdBy,
+      }),
+    );
+    if (toCreate.length) await this.repo.save(toCreate);
+    return this.list(orgId);
   }
 
   async list(orgId: string): Promise<RoleEntity[]> {

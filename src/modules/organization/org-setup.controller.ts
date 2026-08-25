@@ -111,6 +111,18 @@ export class OrgSetupController {
     return { success: true, data };
   }
 
+  /**
+   * Seed the org's default custom roles (HR, Developer, Designer) — idempotent.
+   * Called by the setup wizard's Departments step so the Team step can assign
+   * roles out of the box. Returns the org's full role list.
+   */
+  @Post('roles/seed-defaults')
+  @HttpCode(HttpStatus.OK)
+  async seedDefaultRoles(@Req() req: any) {
+    const data = await this.roles.seedDefaults(this.orgId(req), req.user.userId);
+    return { success: true, data };
+  }
+
   @Get('roles')
   async listRoles(@Req() req: any) {
     const data = await this.roles.list(this.orgId(req));

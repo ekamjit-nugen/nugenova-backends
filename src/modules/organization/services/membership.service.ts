@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -9,7 +10,9 @@ import { randomUUID } from 'crypto';
 
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
+import { RoleEntity } from '../../auth/entities/role.entity';
 import { AddMemberDto } from '../dto';
+import { ROLE_NAME_TO_TIER } from '../default-roles';
 
 export interface MemberView {
   membershipId: string;
@@ -37,7 +40,40 @@ export class MembershipService {
     private readonly membershipRepo: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity)
     private readonly userRepo: Repository<UserEntity>,
+    @InjectRepository(RoleEntity)
+    private readonly roleRepo: Repository<RoleEntity>,
   ) {}
+
+  /**
+   * Resolve the enforced tier + validated custom role for a new/updated member.
+   * A custom role (`roleId`) scoped to a department may only be assigned to a
+   * member of that same department (the department↔role relation). When no tier
+   * is given, it's derived from the custom role (else defaults to `employee`).
+   */
+  private async resolveRole(
+    orgId: string,
+    input: { role?: string; roleId?: string; departmentId?: string },
+  ): Promise<{ tier: string; roleId: string | null }> {
+    if (!input.roleId) {
+      return { tier: input.role || 'employee', roleId: null };
+    }
+    const role = await this.roleRepo.findOne({
+      where: { id: input.roleId, organizationId: orgId, isDeleted: false },
+    });
+    if (!role) throw new NotFoundException('Role not found for this organization');
+    if (
+      role.departmentId &&
+      input.departmentId &&
+      role.departmentId !== input.departmentId
+    ) {
+      throw new BadRequestException(
+        'That role belongs to a different department than this member. ' +
+          'Pick a role from the same department (or an org-wide role).',
+      );
+    }
+    const tier = input.role || ROLE_NAME_TO_TIER[role.name] || 'employee';
+    return { tier, roleId: role.id };
+  }
 
   async addMember(
     orgId: string,
@@ -67,13 +103,21 @@ export class MembershipService {
       throw new ConflictException('This person is already a member of the organization');
     }
 
+    // Resolve the enforced tier from the (optional) custom role + validate the
+    // department↔role relation before writing the membership.
+    const resolved = await this.resolveRole(orgId, {
+      role: dto.role,
+      roleId: dto.roleId,
+      departmentId: dto.departmentId,
+    });
+
     const membership = await this.membershipRepo.save(
       this.membershipRepo.create({
         userId: user.id,
         email,
         organizationId: orgId,
-        role: dto.role || 'employee',
-        roleId: dto.roleId ?? null,
+        role: resolved.tier,
+        roleId: resolved.roleId,
         departmentId: dto.departmentId ?? null,
         status: 'active',
         invitedBy,

@@ -82,6 +82,44 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('an owner adds a member by a custom role, deriving the tier', ({
+    given,
+    when,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let hrRoleId: string;
+    let res: request.Response;
+
+    given('an organization owner who has seeded the default roles', async () => {
+      org = await h.createOrg();
+      const seeded = await h
+        .api()
+        .post('/api/v1/org/roles/seed-defaults')
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      hrRoleId = seeded.body.data.find((r: any) => r.name === 'hr').id;
+    });
+    when('they add a member with the "HR Manager" custom role', async () => {
+      // No enforced tier passed — it must be derived from the custom role.
+      res = await addMember(org.ownerToken, {
+        email: randomEmail('hr'),
+        roleId: hrRoleId,
+        firstName: 'Hira',
+        lastName: 'Manager',
+      });
+      if (res.body?.data?.userId) h.trackUser(res.body.data.userId);
+    });
+    then(
+      'the member carries that custom role and the derived "manager" tier',
+      () => {
+        expect(res.status).toBe(201);
+        expect(res.body.data.roleId).toBe(hrRoleId);
+        expect(res.body.data.role).toBe('manager');
+      },
+    );
+  });
+
   test('the owner is included in the team list', ({ given, when, then }) => {
     let org: CreatedOrg;
     let res: request.Response;
