@@ -1,14 +1,17 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Repository } from 'typeorm';
 
 import { OrgAdminGuard } from './org-admin.guard';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { TermsService } from '../../terms/terms.service';
+import { RequiredPermission } from './require-permission.decorator';
 
 /**
  * Pure unit specs — NO database, no app boot. Exercises OrgAdminGuard's decision
- * logic: role check + the lifecycle gate (suspended halt, and consent for the
- * CURRENT terms version).
+ * logic: the lifecycle gate (suspended halt, consent for the CURRENT terms
+ * version), the owner/admin tier gate for undecorated routes, and the
+ * fine-grained permission gate for @RequirePermission routes.
  */
 describe('OrgAdminGuard (unit)', () => {
   // Default org: active + consent for v1; current terms v1 → gate is a no-op so
@@ -19,6 +22,7 @@ describe('OrgAdminGuard (unit)', () => {
       consent: { version: 1 } as any,
     },
     currentVersion = 1,
+    required?: RequiredPermission,
   ) => {
     const repo = {
       findOne: jest.fn().mockResolvedValue(org),
@@ -29,12 +33,17 @@ describe('OrgAdminGuard (unit)', () => {
           !consent || consent.version < currentVersion,
       ),
     } as unknown as TermsService;
-    return new OrgAdminGuard(repo, terms);
+    const reflector = {
+      getAllAndOverride: jest.fn().mockReturnValue(required),
+    } as unknown as Reflector;
+    return new OrgAdminGuard(repo, terms, reflector);
   };
 
   const ctxFor = (user: any): ExecutionContext =>
     ({
       switchToHttp: () => ({ getRequest: () => ({ user }) }),
+      getHandler: () => null,
+      getClass: () => null,
     }) as unknown as ExecutionContext;
 
   it('lets an org owner of an active, consented org through', async () => {
@@ -86,12 +95,46 @@ describe('OrgAdminGuard (unit)', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
-  it('rejects an employee-tier member with 403', async () => {
+  it('rejects an employee-tier member on an undecorated (admin-only) route', async () => {
     await expect(
       makeGuard().canActivate(
         ctxFor({ orgRole: 'employee', organizationId: 'org-1' }),
       ),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('lets a permScoped member through when their matrix grants the permission', async () => {
+    await expect(
+      makeGuard(undefined, 1, { resource: 'departments', action: 'view' }).canActivate(
+        ctxFor({
+          orgRole: 'employee',
+          organizationId: 'org-1',
+          permScoped: true,
+          perms: { departments: ['view'] },
+        }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('rejects a permScoped member whose matrix lacks the required permission', async () => {
+    await expect(
+      makeGuard(undefined, 1, { resource: 'roles', action: 'view' }).canActivate(
+        ctxFor({
+          orgRole: 'employee',
+          organizationId: 'org-1',
+          permScoped: true,
+          perms: { departments: ['view'] }, // has departments, not roles
+        }),
+      ),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('lets an owner through a @RequirePermission route without consulting the matrix', async () => {
+    await expect(
+      makeGuard(undefined, 1, { resource: 'roles', action: 'delete' }).canActivate(
+        ctxFor({ orgRole: 'owner', organizationId: 'org-1' }),
+      ),
+    ).resolves.toBe(true);
   });
 
   it('rejects a session with no org context and no platform-admin flag', async () => {

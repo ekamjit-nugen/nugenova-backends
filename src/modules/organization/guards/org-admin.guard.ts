@@ -4,11 +4,17 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { OrganizationEntity } from '../entities/organization.entity';
 import { TermsService } from '../../terms/terms.service';
+import {
+  REQUIRE_PERMISSION,
+  RequiredPermission,
+  permMapAllows,
+} from './require-permission.decorator';
 
 /**
  * Org-admin guard — restricts org-setup routes to the owner/admin of the org the
@@ -31,6 +37,7 @@ export class OrgAdminGuard implements CanActivate {
     @InjectRepository(OrganizationEntity)
     private readonly orgRepo: Repository<OrganizationEntity>,
     private readonly terms: TermsService,
+    private readonly reflector: Reflector,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -45,11 +52,8 @@ export class OrgAdminGuard implements CanActivate {
       throw new ForbiddenException('No organization context on this session');
     }
 
-    const isOrgAdmin = user.orgRole === 'owner' || user.orgRole === 'admin';
-    if (!isOrgAdmin) {
-      throw new ForbiddenException('Organization admin access required');
-    }
-
+    // Lifecycle gate (applies to every org member, admin or not): a suspended or
+    // consent-pending org is confined to /suspended or /consent.
     const org = await this.orgRepo.findOne({ where: { id: orgId } });
     if (org) {
       if (org.status === 'suspended') {
@@ -65,6 +69,29 @@ export class OrgAdminGuard implements CanActivate {
       }
     }
 
-    return true;
+    const isOrgAdmin = user.orgRole === 'owner' || user.orgRole === 'admin';
+
+    // A route tagged with @RequirePermission is reachable by an admin/owner OR
+    // by a permScoped custom-role member whose matrix grants resource:action.
+    // A route WITHOUT it stays owner/admin-only (the setup-wizard surface).
+    const required = this.reflector.getAllAndOverride<RequiredPermission>(
+      REQUIRE_PERMISSION,
+      [context.getHandler(), context.getClass()],
+    );
+
+    if (!required) {
+      if (!isOrgAdmin) {
+        throw new ForbiddenException('Organization admin access required');
+      }
+      return true;
+    }
+
+    if (isOrgAdmin) return true;
+    if (permMapAllows(user.perms, required.resource, required.action)) {
+      return true;
+    }
+    throw new ForbiddenException(
+      `You don't have permission to ${required.action} ${required.resource}`,
+    );
   }
 }
