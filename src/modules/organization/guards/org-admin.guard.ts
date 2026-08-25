@@ -45,8 +45,12 @@ export class OrgAdminGuard implements CanActivate {
     const user = req.user;
     if (!user) throw new ForbiddenException('Not authenticated');
 
-    if (user.isPlatformAdmin === true) return true;
-
+    // `/org/*` is a strictly org-scoped surface: access is by ORG MEMBERSHIP +
+    // role, never by platform-admin. A platform (super) admin is NOT an org
+    // member and must NOT read an org's departments/roles/members here — they
+    // manage tenants through `/admin/*`. (Without this, a super admin whose JWT
+    // carries no organizationId reached the services with a null org filter,
+    // which TypeORM ignores → every org's rows leaked.)
     const orgId = user.organizationId;
     if (!orgId) {
       throw new ForbiddenException('No organization context on this session');

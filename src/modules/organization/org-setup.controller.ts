@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -46,7 +47,12 @@ export class OrgSetupController {
   ) {}
 
   private orgId(req: any): string {
-    return req.user.organizationId;
+    // The OrgAdminGuard already guarantees this, but never let a falsy org id
+    // reach a repository — TypeORM drops a nullish `where` filter, which would
+    // return EVERY org's rows (cross-tenant leak). Fail closed.
+    const id = req.user?.organizationId;
+    if (!id) throw new ForbiddenException('No organization context');
+    return id;
   }
 
   // ── Setup wizard (org profile + progress) ─────────────────────────────────

@@ -138,4 +138,34 @@ defineFeature(feature, (test) => {
       expect(res.status).toBe(403);
     });
   });
+
+  test("the platform super admin cannot read an org's org-scoped data", ({
+    given,
+    when,
+    then,
+  }) => {
+    let depRes: request.Response;
+    let rolRes: request.Response;
+
+    given('an organization owner', async () => {
+      await h.createOrg(); // an org with data exists
+    });
+    when("the platform super admin requests that org's departments and roles", async () => {
+      // A super admin is NOT an org member — /org/* must be closed to them
+      // (they manage tenants via /admin/*). This is the cross-org isolation gate.
+      const sa = await h.createSuperAdmin();
+      depRes = await h
+        .api()
+        .get('/api/v1/org/departments')
+        .set('Authorization', `Bearer ${sa.token}`);
+      rolRes = await h
+        .api()
+        .get('/api/v1/org/roles')
+        .set('Authorization', `Bearer ${sa.token}`);
+    });
+    then('both requests are rejected as forbidden', () => {
+      expect(depRes.status).toBe(403);
+      expect(rolRes.status).toBe(403);
+    });
+  });
 });

@@ -62,12 +62,14 @@ describe('OrgAdminGuard (unit)', () => {
     ).resolves.toBe(true);
   });
 
-  it('lets a platform admin through even without an org context', async () => {
+  it('blocks a platform admin who is not an org member (org data is org-scoped)', async () => {
+    // A super admin has no org membership → no organization context → 403.
+    // They manage tenants via /admin/*, never /org/*. Prevents cross-org leaks.
     await expect(
       makeGuard().canActivate(
-        ctxFor({ isPlatformAdmin: true, organizationId: null, orgRole: null }),
+        ctxFor({ isPlatformAdmin: true, organizationId: null, orgRole: 'member' }),
       ),
-    ).resolves.toBe(true);
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects an owner whose org is suspended (halted) with 403', async () => {

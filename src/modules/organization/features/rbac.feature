@@ -21,3 +21,8 @@ Feature: Permission-scoped role enforcement
     And a member assigned that role
     When the member tries to create a department
     Then the request is rejected as forbidden
+
+  Scenario: the platform super admin cannot read an org's org-scoped data
+    Given an organization owner
+    When the platform super admin requests that org's departments and roles
+    Then both requests are rejected as forbidden
