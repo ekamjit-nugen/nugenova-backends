@@ -7,6 +7,8 @@ import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { TermsService } from '../../terms/terms.service';
+import { MailService } from '../../../bootstrap/mail/mail.service';
+import { ConfigService } from '@nestjs/config';
 
 /**
  * Pure unit specs — NO database. Every repository is a jest mock, so these run
@@ -19,6 +21,7 @@ describe('OrganizationService (unit, no DB)', () => {
   let orgRepo: any;
   let userRepo: any;
   let membershipRepo: any;
+  let mailSend: jest.Mock;
 
   // Echo entities back through create()/save() so the service sees a persisted row.
   const passthrough = () => ({
@@ -32,6 +35,7 @@ describe('OrganizationService (unit, no DB)', () => {
     orgRepo = passthrough();
     userRepo = passthrough();
     membershipRepo = passthrough();
+    mailSend = jest.fn().mockResolvedValue(true);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -50,6 +54,11 @@ describe('OrganizationService (unit, no DB)', () => {
             needsConsent: jest.fn().mockReturnValue(true),
             get: jest.fn(),
           },
+        },
+        { provide: MailService, useValue: { send: mailSend } },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('http://localhost:3111') },
         },
       ],
     }).compile();
@@ -133,6 +142,14 @@ describe('OrganizationService (unit, no DB)', () => {
         }),
       );
       expect(result.owner.email).toBe('owner@example.com');
+
+      // The owner is emailed an invitation to sign in and set up the org.
+      expect(mailSend).toHaveBeenCalledTimes(1);
+      const mail = mailSend.mock.calls[0][0];
+      expect(mail.to).toEqual({ email: 'owner@example.com', name: 'Ada' });
+      expect(mail.subject).toMatch(/invited to set up Acme Corp/i);
+      expect(mail.category).toBe('org-invite');
+      expect(mail.html).toContain('/login');
     });
 
     it('reuses an existing user instead of minting a new one', async () => {

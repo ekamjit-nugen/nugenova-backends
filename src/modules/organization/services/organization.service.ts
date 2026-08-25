@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 
@@ -13,6 +14,8 @@ import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { TermsService } from '../../terms/terms.service';
+import { MailService } from '../../../bootstrap/mail/mail.service';
+import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
 import { CreateOrganizationDto } from '../dto';
 
 export interface OrgPublic {
@@ -52,7 +55,15 @@ export class OrganizationService {
     @InjectRepository(OrgMembershipEntity)
     private readonly membershipRepo: Repository<OrgMembershipEntity>,
     private readonly terms: TermsService,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
   ) {}
+
+  private frontendUrl(): string {
+    return (
+      this.config.get<string>('FRONTEND_URL') || 'http://localhost:3111'
+    ).replace(/\/+$/, '');
+  }
 
   /** True when the org has not accepted its assigned T&C at its current version. */
   needsConsent(o: OrganizationEntity): boolean {
@@ -178,6 +189,26 @@ export class OrganizationService {
     this.logger.log(
       `Org '${org.name}' (${org.id}) provisioned by ${createdByUserId}, owner ${owner.email}`,
     );
+
+    // Invite the owner to sign in and set the org up. send() never throws, so a
+    // mail hiccup doesn't fail provisioning.
+    const ownerName = [owner.firstName, owner.lastName]
+      .filter((p) => p && p !== 'Owner' && p !== 'Pending')
+      .join(' ')
+      .trim();
+    const invite = orgInviteEmail({
+      orgName: org.name,
+      ownerName: ownerName || undefined,
+      ownerEmail: owner.email,
+      loginUrl: `${this.frontendUrl()}/login`,
+    });
+    await this.mail.send({
+      to: { email: owner.email, name: ownerName || undefined },
+      subject: invite.subject,
+      html: invite.html,
+      category: 'org-invite',
+      organizationId: org.id,
+    });
 
     return {
       organization: this.toPublic(org),

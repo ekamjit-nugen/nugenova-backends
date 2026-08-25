@@ -107,6 +107,42 @@ function docListHtml(docTitles: string[]): string {
   return `<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:18px;">${rows}</table>`;
 }
 
+// ── Organization invite ──────────────────────────────────────────────────────
+
+/**
+ * Sent to the owner when a super admin provisions their organization: invites
+ * them to sign in (passwordless) and set the org up.
+ */
+export function orgInviteEmail(params: {
+  orgName: string;
+  ownerName?: string;
+  ownerEmail: string;
+  loginUrl: string;
+}): { subject: string; html: string } {
+  const greeting = params.ownerName ? `Hi ${esc(params.ownerName)},` : 'Hello,';
+  const bodyHtml = `
+    <p style="margin:0 0 12px;">${greeting}</p>
+    <p style="margin:0 0 12px;">You've been invited to administer
+      <strong style="color:#111827;">${esc(params.orgName)}</strong> on Nugenova.</p>
+    <p style="margin:0 0 12px;">Sign in with your email
+      (<strong style="color:#111827;">${esc(params.ownerEmail)}</strong>) to accept the
+      Terms &amp; Conditions and set up your organization — departments, roles, and
+      your team. No password is needed; we'll email you a one-time code each time
+      you sign in.</p>`;
+  return {
+    subject: `You're invited to set up ${params.orgName} on Nugenova`,
+    html: renderBrandedEmail({
+      eyebrow: "You're invited",
+      title: `Set up ${params.orgName} on Nugenova`,
+      bodyHtml,
+      ctaText: 'Sign in to get started',
+      ctaUrl: params.loginUrl,
+      footerNote:
+        'You are receiving this because your organization was created on Nugenova and you were named its administrator.',
+    }),
+  };
+}
+
 // ── Onboarding templates ─────────────────────────────────────────────────────
 
 export function documentsRequestedEmail(params: {
