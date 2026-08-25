@@ -1,10 +1,15 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
+  IsInt,
+  IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -40,6 +45,33 @@ export class CreateOrganizationDto {
 }
 
 /** Create or edit an HTML T&C document in the library. */
+/** Owner setup wizard — update org name + workspace settings (merged). */
+export class UpdateOrgProfileDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name?: string;
+
+  /** Free-form workspace config merged into org.settings (industry, size, etc.). */
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>;
+}
+
+/** Owner setup wizard — advance the step / mark complete. */
+export class UpdateOnboardingDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  step?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  completed?: boolean;
+}
+
 export class UpsertHtmlTermsDto {
   @IsString()
   @MinLength(1)

@@ -18,7 +18,7 @@ Feature: Terms & Conditions consent gate
     Given a super admin has provisioned an organization for a fresh owner
     When the owner accepts the Terms and Conditions
     Then the owner can reach the departments endpoint
-    And logging in again routes the owner to "/dashboard"
+    And logging in again routes the owner to "/setup"
 
   Scenario: the consent screen returns the current terms
     Given a super admin has provisioned an organization for a fresh owner

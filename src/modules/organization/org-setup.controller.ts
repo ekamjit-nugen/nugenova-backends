@@ -16,12 +16,15 @@ import { OrgAdminGuard } from './guards/org-admin.guard';
 import { DepartmentService } from './services/department.service';
 import { OrgRoleService } from './services/org-role.service';
 import { MembershipService } from './services/membership.service';
+import { OrganizationService } from './services/organization.service';
 import {
   AddMemberDto,
   CreateDepartmentDto,
   CreateRoleDto,
   UpdateDepartmentDto,
   UpdateMemberDto,
+  UpdateOnboardingDto,
+  UpdateOrgProfileDto,
   UpdateRoleDto,
 } from './dto';
 
@@ -38,10 +41,34 @@ export class OrgSetupController {
     private readonly departments: DepartmentService,
     private readonly roles: OrgRoleService,
     private readonly members: MembershipService,
+    private readonly orgs: OrganizationService,
   ) {}
 
   private orgId(req: any): string {
     return req.user.organizationId;
+  }
+
+  // ── Setup wizard (org profile + progress) ─────────────────────────────────
+
+  /** The org profile + wizard progress for the owner's setup wizard. */
+  @Get('onboarding')
+  async onboardingState(@Req() req: any) {
+    const data = await this.orgs.getOnboardingState(this.orgId(req));
+    return { success: true, data };
+  }
+
+  /** Update the org name / merge workspace settings (wizard steps 1–2). */
+  @Put('profile')
+  async updateProfile(@Body() dto: UpdateOrgProfileDto, @Req() req: any) {
+    const data = await this.orgs.updateProfile(this.orgId(req), dto);
+    return { success: true, data };
+  }
+
+  /** Advance the wizard step / mark it complete. */
+  @Put('onboarding')
+  async updateOnboarding(@Body() dto: UpdateOnboardingDto, @Req() req: any) {
+    const data = await this.orgs.updateOnboarding(this.orgId(req), dto);
+    return { success: true, data };
   }
 
   // ── Departments ─────────────────────────────────────────────────────────────

@@ -317,6 +317,49 @@ export class OrganizationService {
     return this.toPublic(org);
   }
 
+  // ── Setup wizard (owner) ─────────────────────────────────────────────────
+
+  /** The org profile + wizard progress for the owner's setup wizard. */
+  async getOnboardingState(orgId: string) {
+    const org = await this.getEntity(orgId);
+    return {
+      organizationId: org.id,
+      name: org.name,
+      slug: org.slug,
+      settings: org.settings || {},
+      onboardingStep: org.onboardingStep ?? 0,
+      onboardingCompleted: !!org.onboardingCompleted,
+    };
+  }
+
+  /** Update the org name and/or merge workspace settings (wizard steps 1–2). */
+  async updateProfile(
+    orgId: string,
+    input: { name?: string; settings?: Record<string, unknown> },
+  ) {
+    const org = await this.getEntity(orgId);
+    if (input.name && input.name.trim()) org.name = input.name.trim();
+    if (input.settings && typeof input.settings === 'object') {
+      org.settings = { ...(org.settings || {}), ...input.settings };
+    }
+    await this.orgRepo.save(org);
+    return this.getOnboardingState(orgId);
+  }
+
+  /** Advance the wizard step / mark it complete. */
+  async updateOnboarding(
+    orgId: string,
+    input: { step?: number; completed?: boolean },
+  ) {
+    const org = await this.getEntity(orgId);
+    if (typeof input.step === 'number') org.onboardingStep = input.step;
+    if (typeof input.completed === 'boolean') {
+      org.onboardingCompleted = input.completed;
+    }
+    await this.orgRepo.save(org);
+    return this.getOnboardingState(orgId);
+  }
+
   // ── Halt / reactivate (super admin) ──────────────────────────────────────
 
   async halt(orgId: string, actedBy: string): Promise<OrgPublic> {

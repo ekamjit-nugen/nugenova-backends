@@ -106,9 +106,9 @@ defineFeature(feature, (test) => {
       const res = await departments(org.ownerToken);
       expect(res.status).toBe(200);
     });
-    and('logging in again routes the owner to "/dashboard"', async () => {
+    and('logging in again routes the owner to "/setup"', async () => {
       const res = await verify(org.ownerEmail);
-      expect(res.body.data.route).toBe('/dashboard');
+      expect(res.body.data.route).toBe('/setup');
     });
   });
 

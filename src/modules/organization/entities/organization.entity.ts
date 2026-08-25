@@ -55,8 +55,21 @@ export class OrganizationEntity extends PgBaseEntity {
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   createdBy: string | null;
 
+  /**
+   * Free-form workspace configuration collected by the owner's setup wizard:
+   * `{ industry, size, website, timezone, currency, workModel, workHours:{start,end},
+   * workDays[], leavePolicy, meetingCulture, methodology, logo }`.
+   */
   @Column({ type: 'jsonb', nullable: true, default: null })
   settings: Record<string, unknown> | null;
+
+  /** Owner setup-wizard progress (0 = not started; 1..5 = current step). */
+  @Column({ type: 'int', default: 0 })
+  onboardingStep: number;
+
+  /** Whether the owner finished (or skipped) the setup wizard. */
+  @Column({ type: 'boolean', default: false })
+  onboardingCompleted: boolean;
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
   deletedAt: Date | null;

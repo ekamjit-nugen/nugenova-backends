@@ -8,6 +8,7 @@ import {
   Logger,
   Param,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -19,6 +20,7 @@ import {
   MfaVerifyDto,
   RefreshTokenDto,
   SendOtpDto,
+  UpdateProfileDto,
   VerifyOtpDto,
 } from './dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -185,6 +187,13 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async getCurrentUser(@Req() req: any) {
     const user = await this.authService.getUserById(req.user.userId);
+    return { success: true, data: this.authService.toPublicUser(user) };
+  }
+
+  @Put('me')
+  @UseGuards(JwtAuthGuard)
+  async updateCurrentUser(@Body() dto: UpdateProfileDto, @Req() req: any) {
+    const user = await this.authService.updateProfile(req.user.userId, dto);
     return { success: true, data: this.authService.toPublicUser(user) };
   }
 

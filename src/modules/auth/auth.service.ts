@@ -616,6 +616,13 @@ export class AuthService {
         organizationId,
       };
     }
+    // Owner/admin hasn't finished the workspace setup wizard yet.
+    if (
+      !(org as any).onboardingCompleted &&
+      (membership.role === 'owner' || membership.role === 'admin')
+    ) {
+      return { route: '/setup', reason: 'setup_required', organizationId };
+    }
     return { route: '/dashboard', reason: 'active_user', organizationId };
   }
 
@@ -933,6 +940,26 @@ export class AuthService {
 
   async findUserByEmail(email: string): Promise<UserEntity | null> {
     return this.userRepo.findOne({ where: { email: email.toLowerCase() } });
+  }
+
+  /** Update the current user's own profile (setup wizard step 2). */
+  async updateProfile(
+    userId: string,
+    input: {
+      firstName?: string;
+      lastName?: string;
+      phoneNumber?: string;
+      jobTitle?: string;
+    },
+  ): Promise<UserEntity> {
+    const user = await this.getUserById(userId);
+    if (input.firstName !== undefined) user.firstName = input.firstName.trim();
+    if (input.lastName !== undefined) user.lastName = input.lastName.trim();
+    if (input.phoneNumber !== undefined) {
+      user.phoneNumber = input.phoneNumber.trim() || null;
+    }
+    if (input.jobTitle !== undefined) user.jobTitle = input.jobTitle.trim() || null;
+    return this.userRepo.save(user);
   }
 
   async checkEmail(email: string): Promise<{ exists: boolean; isActive: boolean }> {

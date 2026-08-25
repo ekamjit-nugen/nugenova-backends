@@ -26,6 +26,7 @@ import { OnboardingSourceFile1787660000000 } from '../src/bootstrap/database/mig
 import { TermsConsent1787680000000 } from '../src/bootstrap/database/migrations/1787680000000-TermsConsent';
 import { TermsSourceKind1787700000000 } from '../src/bootstrap/database/migrations/1787700000000-TermsSourceKind';
 import { TermsLibrary1787720000000 } from '../src/bootstrap/database/migrations/1787720000000-TermsLibrary';
+import { OrgOnboarding1787740000000 } from '../src/bootstrap/database/migrations/1787740000000-OrgOnboarding';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 
 /**
@@ -85,6 +86,7 @@ module.exports = async function globalSetup(): Promise<void> {
       TermsConsent1787680000000,
       TermsSourceKind1787700000000,
       TermsLibrary1787720000000,
+      OrgOnboarding1787740000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
