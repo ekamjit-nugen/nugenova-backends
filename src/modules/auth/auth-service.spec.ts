@@ -12,6 +12,7 @@ import { OrganizationEntity } from '../organization/entities/organization.entity
 import { TermsService } from '../terms/terms.service';
 import { AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
+import { MailService } from '../../bootstrap/mail/mail.service';
 
 /**
  * Pure unit specs — NO database. All repositories and collaborators are jest
@@ -69,6 +70,7 @@ describe('AuthService (unit, no DB)', () => {
           provide: TokenRevocationService,
           useValue: { revoke: jest.fn(), isRevoked: jest.fn() },
         },
+        { provide: MailService, useValue: { send: jest.fn().mockResolvedValue(true) } },
       ],
     }).compile();
 
