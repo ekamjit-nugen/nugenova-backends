@@ -18,6 +18,12 @@ Feature: Custom roles
     When they create another role named "Manager+"
     Then the role request is rejected as a conflict
 
+  Scenario: an owner seeds the default roles
+    Given an organization owner
+    When they seed the default roles
+    Then "HR Manager", "Developer" and "Designer" are among the returned roles
+    And seeding again does not duplicate them
+
   @security
   Scenario: an employee-tier member cannot manage roles
     Given an employee-tier member of an organization

@@ -18,7 +18,7 @@ Feature: Terms & Conditions consent gate
     Given a super admin has provisioned an organization for a fresh owner
     When the owner accepts the Terms and Conditions
     Then the owner can reach the departments endpoint
-    And logging in again routes the owner to "/dashboard"
+    And logging in again routes the owner to "/setup"
 
   Scenario: the consent screen returns the current terms
     Given a super admin has provisioned an organization for a fresh owner
@@ -26,10 +26,27 @@ Feature: Terms & Conditions consent gate
     Then it returns the current terms text and version
     And it reports consent as not yet accepted
 
+  Scenario: the editor offers multiple terms templates
+    Given a super admin has provisioned an organization for a fresh owner
+    When the super admin lists the terms templates
+    Then more than one template is returned
+
+  Scenario: publishing a PDF makes the org read and accept the document
+    Given an organization that has accepted the current terms
+    When the super admin publishes a PDF as the new terms
+    Then the consent screen reports a PDF document to read
+    And the owner can download the current terms PDF
+    And after re-accepting, the owner can reach the departments endpoint
+
   Scenario: editing the terms forces the org to re-accept
     Given an organization that has accepted the current terms
     When the super admin publishes a new version of the terms
     Then the owner is blocked from the departments endpoint until they re-accept
+
+  Scenario: a Terms and Conditions assigned to an org cannot be deleted
+    Given an organization that has accepted the current terms
+    When the super admin tries to delete the assigned Terms and Conditions
+    Then the request is rejected as a conflict
 
   Scenario: a super admin halts an organization
     Given an organization that has accepted the current terms

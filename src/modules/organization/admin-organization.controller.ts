@@ -58,4 +58,16 @@ export class AdminOrganizationController {
     const data = await this.orgService.reactivate(id, req.user.userId);
     return { success: true, message: 'Organization reactivated', data };
   }
+
+  /** Re-send the owner's invitation email. */
+  @Post(':id/resend-invite')
+  @HttpCode(HttpStatus.OK)
+  async resendInvite(@Param('id') id: string, @Req() req: any) {
+    const data = await this.orgService.resendInvite(id, req.user.userId);
+    return {
+      success: true,
+      message: `Invitation re-sent to ${data.email}`,
+      data,
+    };
+  }
 }

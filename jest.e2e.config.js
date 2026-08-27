@@ -18,5 +18,8 @@ module.exports = {
   // Serialize files: the target Postgres is SHARED (Supabase locally), so avoid
   // parallel connection storms and fixture races across the e2e specs.
   maxWorkers: 1,
-  testTimeout: 30000,
+  // Supabase (local dev) adds real network latency per request; a scenario that
+  // provisions multiple orgs + members does many round-trips. 60s keeps the
+  // heaviest multi-org setups from flaking without masking real hangs.
+  testTimeout: 60000,
 };

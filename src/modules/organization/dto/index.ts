@@ -1,10 +1,15 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
+  IsInt,
+  IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -32,13 +37,59 @@ export class CreateOrganizationDto {
   @IsString()
   @MaxLength(80)
   ownerLastName?: string;
+
+  /** The T&C document (from the library) the new org must accept. Required. */
+  @IsString()
+  @MaxLength(24)
+  termsId: string;
 }
 
-export class UpdateTermsDto {
+/** Create or edit an HTML T&C document in the library. */
+/** Owner setup wizard — update org name + workspace settings (merged). */
+export class UpdateOrgProfileDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name?: string;
+
+  /** Free-form workspace config merged into org.settings (industry, size, etc.). */
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>;
+}
+
+/** Owner setup wizard — advance the step / mark complete. */
+export class UpdateOnboardingDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  step?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  completed?: boolean;
+}
+
+export class UpsertHtmlTermsDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  title: string;
+
   @IsString()
   @MinLength(10)
   @MaxLength(100000)
   text: string;
+}
+
+/** Create or replace a PDF T&C document (multipart; file carries the PDF). */
+export class UpsertPdfTermsDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  title: string;
 }
 
 export class CreateDepartmentDto {
@@ -148,6 +199,12 @@ export class UpdateRoleDto {
   @IsString()
   @MaxLength(500)
   description?: string;
+
+  // Department this role is scoped to. Send an empty string to clear it back to
+  // org-wide (all departments). Absent = leave unchanged.
+  @IsOptional()
+  @IsString()
+  departmentId?: string;
 
   @IsOptional()
   @IsArray()

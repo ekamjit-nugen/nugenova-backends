@@ -10,6 +10,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AdminPlaybooksModule } from './modules/admin-playbooks/admin-playbooks.module';
 import { OrganizationModule } from './modules/organization/organization.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
+import { PolicyModule } from './modules/policy/policy.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
 
 /**
  * Nugenova backend root module.
@@ -32,6 +34,8 @@ import { OnboardingModule } from './modules/onboarding/onboarding.module';
     AdminPlaybooksModule,
     OrganizationModule,
     OnboardingModule,
+    PolicyModule,
+    AttendanceModule,
   ],
 })
 export class AppModule {}

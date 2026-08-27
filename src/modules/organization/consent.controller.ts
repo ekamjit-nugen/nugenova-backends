@@ -2,13 +2,17 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  NotFoundException,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrganizationService } from './services/organization.service';
+import { TermsService } from '../terms/terms.service';
 
 /**
  * Owner-facing consent surface. Reachable by an org owner/admin REGARDLESS of
@@ -19,7 +23,10 @@ import { OrganizationService } from './services/organization.service';
 @Controller('consent')
 @UseGuards(JwtAuthGuard)
 export class ConsentController {
-  constructor(private readonly orgService: OrganizationService) {}
+  constructor(
+    private readonly orgService: OrganizationService,
+    private readonly terms: TermsService,
+  ) {}
 
   private requireOrgAdmin(req: any): string {
     const orgId = req.user.organizationId;
@@ -38,6 +45,26 @@ export class ConsentController {
       success: true,
       data: await this.orgService.getConsentState(this.requireOrgAdmin(req)),
     };
+  }
+
+  /**
+   * Stream the current terms PDF (when the current terms are a PDF) so the owner
+   * can read it on the consent screen. Any org owner/admin may read the platform
+   * terms document, regardless of org — not the org-scoped `/media` access check.
+   */
+  @Get('document')
+  async document(@Req() req: any, @Res() res: Response) {
+    const orgId = this.requireOrgAdmin(req);
+    const termsId = await this.orgService.getAssignedTermsId(orgId);
+    if (!termsId) {
+      throw new NotFoundException('No Terms & Conditions assigned to this organization');
+    }
+    const { buffer, mimeType, filename } = await this.terms.getDocumentBytes(termsId);
+    const safeName = filename.replace(/[^\w.\-]+/g, '_');
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.send(buffer);
   }
 
   @Post('accept')

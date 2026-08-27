@@ -1,0 +1,14 @@
+# Keep the build context small and never bake secrets/artifacts into the image.
+node_modules
+dist
+.git
+.github
+.env
+.env.*
+!.env.example
+logs
+coverage
+*.log
+.DS_Store
+Thumbs.db
+npm-debug.log*

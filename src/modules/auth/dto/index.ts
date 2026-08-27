@@ -42,3 +42,26 @@ export class MfaVerifyDto {
   @Matches(/^\d{6}$/, { message: 'code must be a 6-digit numeric code' })
   code: string;
 }
+
+/** Update the current user's own profile (setup wizard step 2 + settings). */
+export class UpdateProfileDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  phoneNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  jobTitle?: string;
+}

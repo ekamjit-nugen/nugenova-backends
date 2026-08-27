@@ -12,7 +12,7 @@ Feature: Organization provisioning
   Scenario: the provisioned owner logs in scoped to the new org as owner
     Given a super admin has provisioned an organization for a fresh owner
     When the owner completes OTP verification
-    Then the owner is routed to "/dashboard" scoped to that organization
+    Then the owner is routed to "/setup" scoped to that organization
     And an owner token can reach the org admin surface
 
   Scenario: a super admin can list and fetch organizations

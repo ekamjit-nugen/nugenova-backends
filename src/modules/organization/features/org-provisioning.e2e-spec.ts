@@ -38,11 +38,12 @@ defineFeature(feature, (test) => {
     });
     when('they create an organization with a fresh owner email', async () => {
       ownerEmail = randomEmail('owner');
+      const termsId = await h.createTerms(token);
       res = await h
         .api()
         .post('/api/v1/admin/organizations')
         .set('Authorization', `Bearer ${token}`)
-        .send({ name: randomOrgName(), ownerEmail });
+        .send({ name: randomOrgName(), ownerEmail, termsId });
       if (res.body?.data?.organization?.id) {
         h.trackOrg(res.body.data.organization.id);
       }
@@ -92,10 +93,12 @@ defineFeature(feature, (test) => {
         .send({ email: org.ownerEmail, otp: '000000' });
     });
     then(
-      'the owner is routed to "/dashboard" scoped to that organization',
+      'the owner is routed to "/setup" scoped to that organization',
       () => {
         expect(loginRes.status).toBe(200);
-        expect(loginRes.body.data.route).toBe('/dashboard');
+        // A consented owner who hasn't finished the setup wizard lands on /setup
+        // (the setup gate), not /dashboard. Setup completion is covered elsewhere.
+        expect(loginRes.body.data.route).toBe('/setup');
         expect(loginRes.body.data.organizationId).toBe(org.orgId);
       },
     );

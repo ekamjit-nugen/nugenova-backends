@@ -37,7 +37,7 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Deploy over SSH
+      - name: Deploy over SSH (Docker)
         if: steps.cfg.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -51,9 +51,8 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            # Make node/npm/pm2 resolvable in the non-interactive SSH shell.
+            # docker/compose live in /usr/bin; make them resolvable non-interactively.
             export PATH="$PATH:/usr/local/bin:/usr/bin"
-            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
 
             # Where the repo is cloned. Defaults to ~/nugenova-api; override by
             # setting a DEPLOY_PATH repo secret (e.g. /root/nugenova-api).
@@ -63,17 +62,18 @@ jobs:
             git fetch --all --prune
             git reset --hard origin/main
 
-            echo "→ Installing deps"
-            npm ci
+            echo "→ Building the image"
+            docker compose build
 
-            echo "→ Building"
-            npm run build
-
+            # Migrations run as an explicit one-off container BEFORE the swap, so a
+            # failed migration fails the deploy (the old container keeps serving).
             echo "→ Running migrations"
-            npm run migration:run
+            docker compose run --rm api npm run migration:run
 
-            echo "→ Reloading pm2 (zero-downtime)"
-            pm2 reload ecosystem.config.js --update-env
-            pm2 save
+            echo "→ Starting/replacing the API container"
+            docker compose up -d
+
+            echo "→ Pruning dangling images"
+            docker image prune -f
 
             echo "✅ Deploy complete"

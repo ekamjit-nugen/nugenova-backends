@@ -25,7 +25,8 @@ describe('AuthService (unit, no DB)', () => {
   let service: AuthService;
   let membershipRepo: { find: jest.Mock };
   let orgRepo: { findOne: jest.Mock };
-  let terms: { getCurrentVersion: jest.Mock };
+  let terms: { needsConsent: jest.Mock };
+  let currentTermsVersion: number;
 
   const asUser = (u: Partial<UserEntity>): UserEntity =>
     ({ id: 'u1', ...u }) as UserEntity;
@@ -36,11 +37,21 @@ describe('AuthService (unit, no DB)', () => {
     // (v1), so the routing rules that don't care about the lifecycle behave as
     // before. The consent/suspend tests override.
     orgRepo = {
-      findOne: jest
-        .fn()
-        .mockResolvedValue({ status: 'active', consent: { version: 1 } }),
+      findOne: jest.fn().mockResolvedValue({
+        status: 'active',
+        consent: { version: 1 },
+        onboardingCompleted: true,
+      }),
     };
-    terms = { getCurrentVersion: jest.fn().mockReturnValue(1) };
+    // Model the real TermsService.needsConsent(termsId, consent): stale when
+    // the accepted version is below the assigned doc's current version.
+    currentTermsVersion = 1;
+    terms = {
+      needsConsent: jest.fn(
+        (_termsId: any, consent: any) =>
+          !consent || (consent?.version ?? 0) < currentTermsVersion,
+      ),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -161,7 +172,7 @@ describe('AuthService (unit, no DB)', () => {
         status: 'active',
         consent: { version: 1 },
       });
-      terms.getCurrentVersion.mockReturnValue(2); // terms bumped since acceptance
+      currentTermsVersion = 2; // terms bumped since acceptance
       membershipRepo.find.mockResolvedValue([
         { role: 'owner', status: 'active', organizationId: 'orgC' },
       ]);
@@ -169,6 +180,21 @@ describe('AuthService (unit, no DB)', () => {
         asUser({ setupStage: 'complete' }),
       );
       expect(route).toMatchObject({ route: '/consent', reason: 'consent_required' });
+    });
+
+    it('routes a consented owner who has not finished setup to /onboarding', async () => {
+      orgRepo.findOne.mockResolvedValue({
+        status: 'active',
+        consent: { version: 1 },
+        onboardingCompleted: false,
+      });
+      membershipRepo.find.mockResolvedValue([
+        { role: 'owner', status: 'active', organizationId: 'orgC' },
+      ]);
+      const route = await service.determinePostLoginRoute(
+        asUser({ setupStage: 'complete' }),
+      );
+      expect(route).toMatchObject({ route: '/setup', reason: 'setup_required' });
     });
 
     it('holds a non-owner member of an unconsented org at access-denied', async () => {

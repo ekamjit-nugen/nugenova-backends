@@ -7,6 +7,10 @@ import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { TermsService } from '../../terms/terms.service';
+import { MailService } from '../../../bootstrap/mail/mail.service';
+import { ConfigService } from '@nestjs/config';
+import { PolicyService } from '../../policy/policy.service';
+import { OrgRoleService } from './org-role.service';
 
 /**
  * Pure unit specs — NO database. Every repository is a jest mock, so these run
@@ -19,6 +23,7 @@ describe('OrganizationService (unit, no DB)', () => {
   let orgRepo: any;
   let userRepo: any;
   let membershipRepo: any;
+  let mailSend: jest.Mock;
 
   // Echo entities back through create()/save() so the service sees a persisted row.
   const passthrough = () => ({
@@ -32,6 +37,7 @@ describe('OrganizationService (unit, no DB)', () => {
     orgRepo = passthrough();
     userRepo = passthrough();
     membershipRepo = passthrough();
+    mailSend = jest.fn().mockResolvedValue(true);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -44,7 +50,28 @@ describe('OrganizationService (unit, no DB)', () => {
         },
         {
           provide: TermsService,
-          useValue: { getCurrentVersion: jest.fn().mockReturnValue(1) },
+          useValue: {
+            exists: jest.fn().mockResolvedValue(true),
+            getVersion: jest.fn().mockReturnValue(1),
+            needsConsent: jest.fn().mockReturnValue(true),
+            get: jest.fn(),
+          },
+        },
+        { provide: MailService, useValue: { send: mailSend } },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('http://localhost:3111') },
+        },
+        {
+          provide: PolicyService,
+          useValue: { seedDefaultWorkTiming: jest.fn().mockResolvedValue(null) },
+        },
+        {
+          provide: OrgRoleService,
+          useValue: {
+            seedDefaults: jest.fn().mockResolvedValue([]),
+            systemRoleForTier: jest.fn().mockResolvedValue({ id: 'owner-role-id' }),
+          },
         },
       ],
     }).compile();
@@ -73,6 +100,7 @@ describe('OrganizationService (unit, no DB)', () => {
           name: '  Acme Corp  ',
           ownerEmail: 'Owner@Example.com',
           ownerFirstName: 'Ada',
+          termsId: 'terms-1',
         } as any,
         'super-admin-1',
       );
@@ -127,6 +155,14 @@ describe('OrganizationService (unit, no DB)', () => {
         }),
       );
       expect(result.owner.email).toBe('owner@example.com');
+
+      // The owner is emailed an invitation to sign in and set up the org.
+      expect(mailSend).toHaveBeenCalledTimes(1);
+      const mail = mailSend.mock.calls[0][0];
+      expect(mail.to).toEqual({ email: 'owner@example.com', name: 'Ada' });
+      expect(mail.subject).toMatch(/invited to set up Acme Corp/i);
+      expect(mail.category).toBe('org-invite');
+      expect(mail.html).toContain('/login');
     });
 
     it('reuses an existing user instead of minting a new one', async () => {
@@ -144,7 +180,7 @@ describe('OrganizationService (unit, no DB)', () => {
       orgRepo.save.mockImplementation(async (o: any) => ({ id: 'org-2', ...o }));
 
       await service.createOrganization(
-        { name: 'Beta', ownerEmail: 'owner@example.com' } as any,
+        { name: 'Beta', ownerEmail: 'owner@example.com', termsId: 'terms-1' } as any,
         'super-admin-1',
       );
 
@@ -172,10 +208,80 @@ describe('OrganizationService (unit, no DB)', () => {
 
       await expect(
         service.createOrganization(
-          { name: 'Gamma', ownerEmail: 'owner@example.com' } as any,
+          { name: 'Gamma', ownerEmail: 'owner@example.com', termsId: 'terms-1' } as any,
           'super-admin-1',
         ),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('toPublic lifecycle derivation', () => {
+    const termsSvc = () =>
+      (service as any).terms as {
+        getVersion: jest.Mock;
+        needsConsent: jest.Mock;
+      };
+
+    const base = () =>
+      ({
+        id: 'o',
+        name: 'O',
+        slug: 'o',
+        status: 'active',
+        ownerId: 'u',
+        createdAt: new Date(),
+        termsId: 'terms-1',
+        consent: null,
+        onboardingStep: 0,
+        onboardingCompleted: false,
+      }) as any;
+
+    it('suspended → lifecycle "suspended" regardless of consent/setup', () => {
+      termsSvc().needsConsent.mockReturnValue(false);
+      const pub = service.toPublic({
+        ...base(),
+        status: 'suspended',
+        onboardingCompleted: true,
+      });
+      expect(pub.lifecycle).toBe('suspended');
+    });
+
+    it('never consented → "awaiting_consent"', () => {
+      termsSvc().needsConsent.mockReturnValue(true);
+      const pub = service.toPublic(base());
+      expect(pub.lifecycle).toBe('awaiting_consent');
+    });
+
+    it('accepted before but terms bumped → "reconsent"', () => {
+      termsSvc().needsConsent.mockReturnValue(true);
+      const pub = service.toPublic({
+        ...base(),
+        consent: { version: 1 } as any,
+      });
+      expect(pub.lifecycle).toBe('reconsent');
+    });
+
+    it('consented but wizard unfinished → "setting_up" (with step)', () => {
+      termsSvc().needsConsent.mockReturnValue(false);
+      const pub = service.toPublic({
+        ...base(),
+        consent: { version: 2 } as any,
+        onboardingStep: 2,
+        onboardingCompleted: false,
+      });
+      expect(pub.lifecycle).toBe('setting_up');
+      expect(pub.onboardingStep).toBe(2);
+    });
+
+    it('consented and setup finished → "active"', () => {
+      termsSvc().needsConsent.mockReturnValue(false);
+      const pub = service.toPublic({
+        ...base(),
+        consent: { version: 2 } as any,
+        onboardingCompleted: true,
+      });
+      expect(pub.lifecycle).toBe('active');
+      expect(pub.onboardingCompleted).toBe(true);
     });
   });
 });

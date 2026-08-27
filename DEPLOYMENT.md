@@ -1,5 +1,10 @@
 # Deploying the Nugenova API — `prod-api.nugenova.com`
 
+> **⚠️ Superseded by Docker.** The API now deploys as a **Docker container** —
+> follow **[`DEPLOYMENT.docker.md`](./DEPLOYMENT.docker.md)** for the current
+> setup and the box re-provisioning runbook. This pm2-based guide is kept for
+> reference/rollback only.
+
 The API runs on the **E2E Networks box `164.52.202.240`** under **pm2**, behind
 **nginx** with a Let's Encrypt certificate. Postgres is managed (Supabase), so
 there is **no database on the box** — it only needs Node + pm2 + nginx + a `.env`.

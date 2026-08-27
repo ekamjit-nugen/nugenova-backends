@@ -23,12 +23,29 @@ defineFeature(feature, (test) => {
       .get('/api/v1/org/departments')
       .set('Authorization', `Bearer ${token}`);
 
+  // Edit the org's ASSIGNED T&C (bumps its version → the org must re-accept).
   const editTerms = (org: CreatedOrg, text: string) =>
     h
       .api()
-      .put('/api/v1/admin/terms')
+      .put(`/api/v1/admin/terms/${org.termsId}`)
       .set('Authorization', `Bearer ${org.saToken}`)
-      .send({ text });
+      .send({ title: 'Updated Terms', text });
+
+  const SAMPLE_PDF = Buffer.from(
+    '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF',
+  );
+
+  // Replace the org's assigned T&C with a PDF (also bumps its version).
+  const publishPdfTerms = (org: CreatedOrg) =>
+    h
+      .api()
+      .put(`/api/v1/admin/terms/${org.termsId}/pdf`)
+      .set('Authorization', `Bearer ${org.saToken}`)
+      .field('title', 'Signed Master Agreement')
+      .attach('file', SAMPLE_PDF, {
+        filename: 'terms.pdf',
+        contentType: 'application/pdf',
+      });
 
   const halt = (org: CreatedOrg) =>
     h
@@ -89,9 +106,9 @@ defineFeature(feature, (test) => {
       const res = await departments(org.ownerToken);
       expect(res.status).toBe(200);
     });
-    and('logging in again routes the owner to "/dashboard"', async () => {
+    and('logging in again routes the owner to "/setup"', async () => {
       const res = await verify(org.ownerEmail);
-      expect(res.body.data.route).toBe('/dashboard');
+      expect(res.body.data.route).toBe('/setup');
     });
   });
 
@@ -125,6 +142,72 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the editor offers multiple terms templates', ({ given, when, then }) => {
+    let org: CreatedOrg;
+    let res: request.Response;
+
+    given('a super admin has provisioned an organization for a fresh owner', async () => {
+      org = await h.provisionOrg();
+    });
+    when('the super admin lists the terms templates', async () => {
+      res = await h
+        .api()
+        .get('/api/v1/admin/terms/templates')
+        .set('Authorization', `Bearer ${org.saToken}`);
+    });
+    then('more than one template is returned', () => {
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data.length).toBeGreaterThan(1);
+      expect(res.body.data[0]).toHaveProperty('id');
+      expect(res.body.data[0]).toHaveProperty('html');
+    });
+  });
+
+  test('publishing a PDF makes the org read and accept the document', ({
+    given,
+    when,
+    then,
+    and,
+  }) => {
+    let org: CreatedOrg;
+
+    given('an organization that has accepted the current terms', async () => {
+      org = await h.provisionOrg();
+      await h.acceptConsent(org);
+      expect((await departments(org.ownerToken)).status).toBe(200);
+    });
+    when('the super admin publishes a PDF as the new terms', async () => {
+      const res = await publishPdfTerms(org);
+      expect(res.status).toBe(200);
+      expect(res.body.data.kind).toBe('pdf');
+    });
+    then('the consent screen reports a PDF document to read', async () => {
+      const res = await h
+        .api()
+        .get('/api/v1/consent')
+        .set('Authorization', `Bearer ${org.ownerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.terms.kind).toBe('pdf');
+      expect(res.body.data.terms.hasDocument).toBe(true);
+      expect(res.body.data.needsConsent).toBe(true);
+    });
+    and('the owner can download the current terms PDF', async () => {
+      const res = await h
+        .api()
+        .get('/api/v1/consent/document')
+        .set('Authorization', `Bearer ${org.ownerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('application/pdf');
+    });
+    and('after re-accepting, the owner can reach the departments endpoint', async () => {
+      // Stale consent (new version) blocks until re-accept.
+      expect((await departments(org.ownerToken)).status).toBe(403);
+      await h.acceptConsent(org);
+      expect((await departments(org.ownerToken)).status).toBe(200);
+    });
+  });
+
   test('editing the terms forces the org to re-accept', ({
     given,
     when,
@@ -154,6 +237,29 @@ defineFeature(feature, (test) => {
         expect((await departments(org.ownerToken)).status).toBe(200);
       },
     );
+  });
+
+  test('a Terms and Conditions assigned to an org cannot be deleted', ({
+    given,
+    when,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let res: request.Response;
+
+    given('an organization that has accepted the current terms', async () => {
+      org = await h.provisionOrg();
+      await h.acceptConsent(org);
+    });
+    when('the super admin tries to delete the assigned Terms and Conditions', async () => {
+      res = await h
+        .api()
+        .delete(`/api/v1/admin/terms/${org.termsId}`)
+        .set('Authorization', `Bearer ${org.saToken}`);
+    });
+    then('the request is rejected as a conflict', () => {
+      expect(res.status).toBe(409);
+    });
   });
 
   test('a super admin halts an organization', ({ given, when, then, and }) => {
@@ -210,9 +316,9 @@ defineFeature(feature, (test) => {
     when('the owner tries to publish new terms', async () => {
       res = await h
         .api()
-        .put('/api/v1/admin/terms')
+        .post('/api/v1/admin/terms')
         .set('Authorization', `Bearer ${org.ownerToken}`)
-        .send({ text: '<p>hacked</p>' });
+        .send({ title: 'Hacked', text: '<p>hacked terms</p>' });
     });
     then('the request is rejected as forbidden', () => {
       expect(res.status).toBe(403);

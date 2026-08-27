@@ -15,6 +15,7 @@ import { OrgMembershipEntity } from '../../../auth/entities/org-membership.entit
 import { SessionEntity } from '../../../auth/entities/session.entity';
 import { RevokedTokenEntity } from '../../../auth/entities/revoked-token.entity';
 import { OrganizationEntity } from '../../../organization/entities/organization.entity';
+import { PlatformTermsEntity } from '../../../terms/entities/platform-terms.entity';
 import { OnboardingDocumentRequestEntity } from '../../entities/onboarding-document-request.entity';
 import { OnboardingDocumentTemplateEntity } from '../../entities/onboarding-document-template.entity';
 import { EmailOutboxEntity } from '../../../../bootstrap/mail/email-outbox.entity';
@@ -101,6 +102,7 @@ export async function bootOnboardingApp(): Promise<OnboardingHarness> {
   const outbox = repo<EmailOutboxEntity>(EmailOutboxEntity);
   const files = repo<DocumentFileEntity>(DocumentFileEntity);
   const organizations = repo<OrganizationEntity>(OrganizationEntity);
+  const platformTerms = repo<PlatformTermsEntity>(PlatformTermsEntity);
   const users = repo<UserEntity>(UserEntity);
   const memberships = repo<OrgMembershipEntity>(OrgMembershipEntity);
   const sessions = repo<SessionEntity>(SessionEntity);
@@ -108,6 +110,7 @@ export async function bootOnboardingApp(): Promise<OnboardingHarness> {
 
   const userIds = new Set<string>();
   const orgIds = new Set<string>();
+  const termsIds = new Set<string>();
 
   const api = () => request(app.getHttpServer());
 
@@ -160,11 +163,28 @@ export async function bootOnboardingApp(): Promise<OnboardingHarness> {
 
     async createOnboardingOrg(name = randomOrgName()) {
       const sa = await this.createSuperAdmin();
+      // Org creation requires a T&C from the library — create one to assign.
+      const termsRes = await api()
+        .post('/api/v1/admin/terms')
+        .set('Authorization', `Bearer ${sa.token}`)
+        .send({
+          title: `Onboarding Terms ${newObjectId()}`,
+          text: '<h2>Terms</h2><p>Please accept to continue.</p>',
+        })
+        .expect(201);
+      const termsId = termsRes.body.data.id;
+      termsIds.add(termsId);
       const ownerEmail = randomEmail('owner');
       const res = await api()
         .post('/api/v1/admin/organizations')
         .set('Authorization', `Bearer ${sa.token}`)
-        .send({ name, ownerEmail, ownerFirstName: 'Owner', ownerLastName: 'One' })
+        .send({
+          name,
+          ownerEmail,
+          ownerFirstName: 'Owner',
+          ownerLastName: 'One',
+          termsId,
+        })
         .expect(201);
       const orgId = res.body.data.organization.id;
       const ownerId = res.body.data.owner.id;
@@ -228,6 +248,10 @@ export async function bootOnboardingApp(): Promise<OnboardingHarness> {
       }
       if (oids.length) {
         await organizations.delete({ id: In(oids) }).catch(() => undefined);
+      }
+      const tids = [...termsIds];
+      if (tids.length) {
+        await platformTerms.delete({ id: In(tids) }).catch(() => undefined);
       }
       if (uids.length) {
         await users.delete({ id: In(uids) }).catch(() => undefined);

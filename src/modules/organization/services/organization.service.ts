@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 
@@ -12,7 +14,11 @@ import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { TermsService } from '../../terms/terms.service';
+import { MailService } from '../../../bootstrap/mail/mail.service';
+import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
 import { CreateOrganizationDto } from '../dto';
+import { PolicyService } from '../../policy/policy.service';
+import { OrgRoleService } from './org-role.service';
 
 export interface OrgPublic {
   id: string;
@@ -21,13 +27,35 @@ export interface OrgPublic {
   status: string; // active | suspended
   ownerId: string | null;
   createdAt: Date;
-  /** Whether the org has accepted the CURRENT T&C version. */
+  /** The T&C document assigned to this org (from the library). */
+  termsId: string | null;
+  /** Whether the org has accepted its assigned T&C at its current version. */
   consentAccepted: boolean;
   /** True when consent is missing or stale (must (re-)accept). */
   needsConsent: boolean;
   consentVersion: number | null;
   consentAcceptedAt: string | null;
-  currentTermsVersion: number;
+  /** Current version of the org's assigned T&C (null if none assigned). */
+  currentTermsVersion: number | null;
+  /** Owner setup-wizard progress (0 = not started; 1..3 = current step). */
+  onboardingStep: number;
+  /** Whether the owner finished (or skipped) the setup wizard. */
+  onboardingCompleted: boolean;
+  /**
+   * The org's position in its lifecycle, derived for the super-admin console so
+   * every state is visible at a glance:
+   *  - `suspended`        — manually halted (owner blocked)
+   *  - `awaiting_consent` — provisioned, owner has never accepted the T&C
+   *  - `reconsent`        — accepted before, but the T&C changed → must re-accept
+   *  - `setting_up`       — consent accepted, owner is running the setup wizard
+   *  - `active`           — consent accepted and setup finished
+   */
+  lifecycle:
+    | 'suspended'
+    | 'awaiting_consent'
+    | 'reconsent'
+    | 'setting_up'
+    | 'active';
 }
 
 /**
@@ -48,11 +76,26 @@ export class OrganizationService {
     @InjectRepository(OrgMembershipEntity)
     private readonly membershipRepo: Repository<OrgMembershipEntity>,
     private readonly terms: TermsService,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
+    private readonly policies: PolicyService,
+    private readonly roles: OrgRoleService,
   ) {}
 
-  /** True when the org has not accepted the CURRENT T&C version. */
+  private frontendUrl(): string {
+    return (
+      this.config.get<string>('FRONTEND_URL') || 'http://localhost:3111'
+    ).replace(/\/+$/, '');
+  }
+
+  /** True when the org has not accepted its assigned T&C at its current version. */
   needsConsent(o: OrganizationEntity): boolean {
-    return !o.consent || o.consent.version < this.terms.getCurrentVersion();
+    return this.terms.needsConsent(o.termsId, o.consent);
+  }
+
+  /** How many orgs are assigned a given T&C — gates deletion of that document. */
+  async countUsingTerms(termsId: string): Promise<number> {
+    return this.orgRepo.count({ where: { termsId, deletedAt: null as any } });
   }
 
   private async getEntity(id: string): Promise<OrganizationEntity> {
@@ -78,8 +121,23 @@ export class OrganizationService {
   }
 
   toPublic(o: OrganizationEntity): OrgPublic {
-    const currentTermsVersion = this.terms.getCurrentVersion();
+    const currentTermsVersion = this.terms.getVersion(o.termsId);
     const needsConsent = this.needsConsent(o);
+    const onboardingCompleted = !!o.onboardingCompleted;
+
+    // Derive the single lifecycle state the super-admin console reads.
+    let lifecycle: OrgPublic['lifecycle'];
+    if (o.status === 'suspended') {
+      lifecycle = 'suspended';
+    } else if (needsConsent) {
+      // A recorded (now stale) consent version means they accepted once before.
+      lifecycle = o.consent?.version != null ? 'reconsent' : 'awaiting_consent';
+    } else if (!onboardingCompleted) {
+      lifecycle = 'setting_up';
+    } else {
+      lifecycle = 'active';
+    }
+
     return {
       id: o.id,
       name: o.name,
@@ -87,11 +145,15 @@ export class OrganizationService {
       status: o.status,
       ownerId: o.ownerId,
       createdAt: o.createdAt,
+      termsId: o.termsId ?? null,
       consentAccepted: !needsConsent,
       needsConsent,
       consentVersion: o.consent?.version ?? null,
       consentAcceptedAt: o.consent?.acceptedAt ?? null,
       currentTermsVersion,
+      onboardingStep: o.onboardingStep ?? 0,
+      onboardingCompleted,
+      lifecycle,
     };
   }
 
@@ -115,20 +177,37 @@ export class OrganizationService {
       owner = await this.userRepo.save(owner);
     }
 
+    // A T&C must be chosen from the library and must exist.
+    if (!dto.termsId || !(await this.terms.exists(dto.termsId))) {
+      throw new BadRequestException(
+        'A valid Terms & Conditions must be selected for the organization',
+      );
+    }
+
     const slug = await this.uniqueSlug(dto.name);
     // Provisioned orgs are `active` with NO consent yet — the owner can sign in
     // but is routed to the consent screen and blocked from the app until they
-    // accept the current Terms & Conditions. `suspended` is a manual halt.
+    // accept the assigned Terms & Conditions. `suspended` is a manual halt.
     const org = await this.orgRepo.save(
       this.orgRepo.create({
         name: dto.name.trim(),
         slug,
         status: 'active',
+        termsId: dto.termsId,
         consent: null,
         ownerId: owner.id,
         createdBy: createdByUserId,
       }),
     );
+
+    // Seed the org's roles first so every tier is a real, visible row and the
+    // owner can be attached to the actual Owner role (roleId), not a bare tier.
+    await this.roles
+      .seedDefaults(org.id, createdByUserId)
+      .catch((e) =>
+        this.logger.warn(`Role seed failed for ${org.id}: ${e?.message ?? e}`),
+      );
+    const ownerRole = await this.roles.systemRoleForTier(org.id, 'owner');
 
     // Owner membership — refuse a duplicate (idempotency guard).
     const existing = await this.membershipRepo.findOne({
@@ -142,6 +221,7 @@ export class OrganizationService {
         userId: owner.id,
         organizationId: org.id,
         role: 'owner',
+        roleId: ownerRole?.id ?? null,
         status: 'active',
         joinedAt: new Date(),
         invitedBy: createdByUserId,
@@ -157,14 +237,74 @@ export class OrganizationService {
     owner.isActive = true;
     await this.userRepo.save(owner);
 
+    // Seed the org's default work-timing policy so a policy governs every
+    // employee's clock-in from day one — attendance sits behind policy, and a
+    // required work-timing policy must apply to every employee. Best-effort.
+    await this.policies
+      .seedDefaultWorkTiming(org.id, createdByUserId)
+      .catch((e) =>
+        this.logger.warn(`Default policy seed failed for ${org.id}: ${e?.message ?? e}`),
+      );
+
     this.logger.log(
       `Org '${org.name}' (${org.id}) provisioned by ${createdByUserId}, owner ${owner.email}`,
     );
+
+    // Invite the owner to sign in and set the org up.
+    await this.sendOwnerInvite(org, owner);
 
     return {
       organization: this.toPublic(org),
       owner: { id: owner.id, email: owner.email },
     };
+  }
+
+  /**
+   * Email the org's owner an invitation to sign in and set the org up. send()
+   * never throws, so a mail hiccup doesn't fail the caller. Returns whether it
+   * was accepted for delivery.
+   */
+  private async sendOwnerInvite(
+    org: OrganizationEntity,
+    owner: UserEntity,
+  ): Promise<boolean> {
+    const ownerName = [owner.firstName, owner.lastName]
+      .filter((p) => p && p !== 'Owner' && p !== 'Pending')
+      .join(' ')
+      .trim();
+    const invite = orgInviteEmail({
+      orgName: org.name,
+      ownerName: ownerName || undefined,
+      ownerEmail: owner.email,
+      loginUrl: `${this.frontendUrl()}/login`,
+    });
+    return this.mail.send({
+      to: { email: owner.email, name: ownerName || undefined },
+      subject: invite.subject,
+      html: invite.html,
+      category: 'org-invite',
+      organizationId: org.id,
+    });
+  }
+
+  /** Re-send the owner invitation email (super admin action). */
+  async resendInvite(
+    orgId: string,
+    actedBy: string,
+  ): Promise<{ sent: boolean; email: string }> {
+    const org = await this.getEntity(orgId);
+    if (!org.ownerId) {
+      throw new BadRequestException('This organization has no owner to invite');
+    }
+    const owner = await this.userRepo.findOne({ where: { id: org.ownerId } });
+    if (!owner) {
+      throw new NotFoundException('Owner account not found');
+    }
+    const sent = await this.sendOwnerInvite(org, owner);
+    this.logger.log(
+      `Invitation re-sent for org ${org.id} to ${owner.email} by ${actedBy}`,
+    );
+    return { sent, email: owner.email };
   }
 
   async list(): Promise<OrgPublic[]> {
@@ -181,13 +321,28 @@ export class OrganizationService {
 
   // ── Consent (owner) ──────────────────────────────────────────────────────
 
-  /** The consent state + current T&C text for the owner's consent screen. */
+  /** The T&C id assigned to an org (for streaming its PDF). */
+  async getAssignedTermsId(orgId: string): Promise<string | null> {
+    const org = await this.getEntity(orgId);
+    return org.termsId ?? null;
+  }
+
+  /** The consent state + the org's assigned T&C for the owner's consent screen. */
   async getConsentState(orgId: string) {
     const org = await this.getEntity(orgId);
-    const current = await this.terms.getCurrent();
+    const doc = org.termsId ? await this.terms.get(org.termsId) : null;
     return {
       organization: { id: org.id, name: org.name, status: org.status },
-      terms: { version: current.version, text: current.text },
+      terms: doc
+        ? {
+            id: doc.id,
+            version: doc.version,
+            kind: doc.kind,
+            text: doc.text,
+            title: doc.title,
+            hasDocument: doc.kind === 'pdf' && !!doc.fileId,
+          }
+        : null,
       accepted: !this.needsConsent(org),
       acceptedVersion: org.consent?.version ?? null,
       acceptedAt: org.consent?.acceptedAt ?? null,
@@ -195,7 +350,7 @@ export class OrganizationService {
     };
   }
 
-  /** Record the owner's acceptance of the CURRENT T&C version. */
+  /** Record the owner's acceptance of the org's assigned T&C at its version. */
   async acceptConsent(
     orgId: string,
     userId: string,
@@ -203,9 +358,13 @@ export class OrganizationService {
     ua?: string,
   ): Promise<OrgPublic> {
     const org = await this.getEntity(orgId);
-    const current = await this.terms.getCurrent();
+    if (!org.termsId) {
+      throw new BadRequestException('No Terms & Conditions assigned to this organization');
+    }
+    const doc = await this.terms.get(org.termsId);
     org.consent = {
-      version: current.version,
+      termsId: doc.id,
+      version: doc.version,
       acceptedByUserId: userId,
       acceptedAt: new Date().toISOString(),
       ipAddress: ip ?? null,
@@ -213,9 +372,52 @@ export class OrganizationService {
     };
     await this.orgRepo.save(org);
     this.logger.log(
-      `Org ${org.id} accepted Terms v${current.version} (user ${userId})`,
+      `Org ${org.id} accepted Terms ${doc.id} v${doc.version} (user ${userId})`,
     );
     return this.toPublic(org);
+  }
+
+  // ── Setup wizard (owner) ─────────────────────────────────────────────────
+
+  /** The org profile + wizard progress for the owner's setup wizard. */
+  async getOnboardingState(orgId: string) {
+    const org = await this.getEntity(orgId);
+    return {
+      organizationId: org.id,
+      name: org.name,
+      slug: org.slug,
+      settings: org.settings || {},
+      onboardingStep: org.onboardingStep ?? 0,
+      onboardingCompleted: !!org.onboardingCompleted,
+    };
+  }
+
+  /** Update the org name and/or merge workspace settings (wizard steps 1–2). */
+  async updateProfile(
+    orgId: string,
+    input: { name?: string; settings?: Record<string, unknown> },
+  ) {
+    const org = await this.getEntity(orgId);
+    if (input.name && input.name.trim()) org.name = input.name.trim();
+    if (input.settings && typeof input.settings === 'object') {
+      org.settings = { ...(org.settings || {}), ...input.settings };
+    }
+    await this.orgRepo.save(org);
+    return this.getOnboardingState(orgId);
+  }
+
+  /** Advance the wizard step / mark it complete. */
+  async updateOnboarding(
+    orgId: string,
+    input: { step?: number; completed?: boolean },
+  ) {
+    const org = await this.getEntity(orgId);
+    if (typeof input.step === 'number') org.onboardingStep = input.step;
+    if (typeof input.completed === 'boolean') {
+      org.onboardingCompleted = input.completed;
+    }
+    await this.orgRepo.save(org);
+    return this.getOnboardingState(orgId);
   }
 
   // ── Halt / reactivate (super admin) ──────────────────────────────────────

@@ -70,14 +70,19 @@ defineFeature(feature, (test) => {
       res = await overview(org.ownerToken);
     });
     then(
-      'the overview counts show one department, one role, and two people',
+      'the overview counts one department and two people, and its roles include the new one',
       () => {
         expect(res.status).toBe(200);
         expect(res.body.data.organizationId).toBe(org.orgId);
         expect(res.body.data.counts.departments).toBe(1);
-        expect(res.body.data.counts.roles).toBe(1);
         // owner + the added member.
         expect(res.body.data.counts.people).toBe(2);
+        // The org seeds its tier roles (owner/admin/manager/… + defaults) at
+        // creation, so the count is the full role list, not just the one made
+        // here — assert it stays consistent with the payload and includes ours.
+        expect(res.body.data.counts.roles).toBe(res.body.data.roles.length);
+        expect(res.body.data.counts.roles).toBeGreaterThan(1);
+        expect(res.body.data.roles.map((r: any) => r.id)).toContain(roleId);
       },
     );
     and('the overview lists the created department, role, and people', () => {

@@ -1,0 +1,33 @@
+# Production compose for the Nugenova API (prod-api.nugenova.com).
+#
+# Postgres is managed (Supabase) — there is NO database container here. The app
+# reads every secret from the box's `.env` (DATABASE_URL, JWT_SECRET, PORT, …).
+# The published port is bound to host LOOPBACK only, so nginx (same host, with
+# the Let's Encrypt cert) is the sole public entrypoint → 127.0.0.1:${PORT}.
+services:
+  api:
+    build: .
+    image: nugenova-api:latest
+    container_name: nugenova-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      # Bind all interfaces INSIDE the container so the port mapping works; the
+      # mapping below still only exposes it on the host's loopback.
+      HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${PORT:-4100}:${PORT:-4100}"
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const p=process.env.PORT||4100;require('http').get('http://127.0.0.1:'+p+'/api/v1/health',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

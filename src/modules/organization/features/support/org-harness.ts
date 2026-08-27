@@ -19,6 +19,7 @@ import { RevokedTokenEntity } from '../../../auth/entities/revoked-token.entity'
 import { RoleEntity } from '../../../auth/entities/role.entity';
 import { OrganizationEntity } from '../../entities/organization.entity';
 import { DepartmentEntity } from '../../entities/department.entity';
+import { PlatformTermsEntity } from '../../../terms/entities/platform-terms.entity';
 import { newObjectId } from '../../../../bootstrap/database/object-id';
 
 export const DEV_OTP = process.env.DEV_OTP_CODE || '000000';
@@ -30,6 +31,8 @@ export interface CreatedOrg {
   ownerEmail: string;
   ownerToken: string;
   saToken: string;
+  /** The T&C document assigned to this org at creation. */
+  termsId: string;
 }
 
 export interface OrgTestHarness {
@@ -41,6 +44,7 @@ export interface OrgTestHarness {
   roles: Repository<RoleEntity>;
   sessions: Repository<SessionEntity>;
   revokedTokens: Repository<RevokedTokenEntity>;
+  platformTerms: Repository<PlatformTermsEntity>;
 
   /** Issue an authenticated request (supertest) against the booted app. */
   api(): ReturnType<typeof request>;
@@ -59,9 +63,13 @@ export interface OrgTestHarness {
     org: CreatedOrg,
   ): Promise<{ email: string; userId: string; token: string }>;
 
+  /** Create a T&C document (as super admin) and return its id. */
+  createTerms(saToken: string, title?: string): Promise<string>;
+
   /** Register ids for teardown. */
   trackUser(id: string): void;
   trackOrg(id: string): void;
+  trackTerms(id: string): void;
 
   cleanup(): Promise<void>;
 }
@@ -111,9 +119,11 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
   const roles = repo<RoleEntity>(RoleEntity);
   const sessions = repo<SessionEntity>(SessionEntity);
   const revokedTokens = repo<RevokedTokenEntity>(RevokedTokenEntity);
+  const platformTerms = repo<PlatformTermsEntity>(PlatformTermsEntity);
 
   const userIds = new Set<string>();
   const orgIds = new Set<string>();
+  const termsIds = new Set<string>();
 
   const api = () => request(app.getHttpServer());
 
@@ -146,6 +156,7 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
     roles,
     sessions,
     revokedTokens,
+    platformTerms,
     api,
     mintToken,
     trackUser: (id: string) => {
@@ -153,6 +164,23 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
     },
     trackOrg: (id: string) => {
       if (id) orgIds.add(id);
+    },
+    trackTerms: (id: string) => {
+      if (id) termsIds.add(id);
+    },
+
+    async createTerms(saToken: string, title = `Test Terms ${newObjectId()}`) {
+      const res = await api()
+        .post('/api/v1/admin/terms')
+        .set('Authorization', `Bearer ${saToken}`)
+        .send({
+          title,
+          text: '<h2>Test Terms</h2><p>Please accept to continue.</p>',
+        })
+        .expect(201);
+      const id = res.body.data.id;
+      termsIds.add(id);
+      return id;
     },
 
     async createSuperAdmin() {
@@ -177,11 +205,19 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
 
     async provisionOrg(name = randomOrgName()) {
       const sa = await this.createSuperAdmin();
+      // Org creation requires a T&C from the library — create one to assign.
+      const termsId = await this.createTerms(sa.token);
       const ownerEmail = randomEmail('owner');
       const res = await api()
         .post('/api/v1/admin/organizations')
         .set('Authorization', `Bearer ${sa.token}`)
-        .send({ name, ownerEmail, ownerFirstName: 'Owner', ownerLastName: 'One' })
+        .send({
+          name,
+          ownerEmail,
+          ownerFirstName: 'Owner',
+          ownerLastName: 'One',
+          termsId,
+        })
         .expect(201);
       const orgId = res.body.data.organization.id;
       const ownerId = res.body.data.owner.id;
@@ -195,6 +231,7 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
         ownerEmail,
         ownerToken,
         saToken: sa.token,
+        termsId,
       };
     },
 
@@ -252,6 +289,10 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
       }
       if (oids.length) {
         await organizations.delete({ id: In(oids) }).catch(() => undefined);
+      }
+      const tids = [...termsIds];
+      if (tids.length) {
+        await platformTerms.delete({ id: In(tids) }).catch(() => undefined);
       }
       if (uids.length) {
         await users.delete({ id: In(uids) }).catch(() => undefined);

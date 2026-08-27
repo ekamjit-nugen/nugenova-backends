@@ -9,6 +9,11 @@ Feature: Team membership
     Then the member is created active with that role and department
     And the new member appears in the team list
 
+  Scenario: an owner adds a member by a custom role, deriving the tier
+    Given an organization owner who has seeded the default roles
+    When they add a member with the "HR Manager" custom role
+    Then the member carries that custom role and the derived "manager" tier
+
   Scenario: the owner is included in the team list
     Given an organization owner
     When they list team members
