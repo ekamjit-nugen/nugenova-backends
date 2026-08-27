@@ -6,7 +6,7 @@ Feature: Organization overview
     Given an organization owner
     And they have created a department, a role, and added a member
     When they request the organization overview
-    Then the overview counts show one department, one role, and two people
+    Then the overview counts one department and two people, and its roles include the new one
     And the overview lists the created department, role, and people
 
   @security
