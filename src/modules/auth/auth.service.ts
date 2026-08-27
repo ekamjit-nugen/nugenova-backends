@@ -20,6 +20,7 @@ import { OrganizationEntity } from '../organization/entities/organization.entity
 import { TermsService } from '../terms/terms.service';
 import { AuditAction, AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
+import { MailService } from '../../bootstrap/mail/mail.service';
 
 export interface AuthTokens {
   accessToken: string;
@@ -95,6 +96,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly tokenRevocation: TokenRevocationService,
+    private readonly mail: MailService,
   ) {}
 
   // ── OTP ──────────────────────────────────────────────────────────────────
@@ -185,7 +187,11 @@ export class AuthService {
       await this.userRepo.save(user);
     }
 
-    this.logger.log(`[DEV] OTP for ${email}: ${otp}`);
+    // Never print the OTP in production logs (that would leak a live login
+    // code); only surface it for local/dev debugging.
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.log(`[DEV] OTP for ${email}: ${otp}`);
+    }
 
     // Dev-only email skip — mirrors the verifyOtp bypass. When DEV_OTP_BYPASS is
     // on (non-prod), the magic code is always accepted, so sending mail is moot.
@@ -212,15 +218,31 @@ export class AuthService {
   }
 
   /**
-   * Deliver the OTP by email. Phase 1 has no mail transport wired, so this logs
-   * and returns — real delivery (ZeptoMail/SES) is a later integration. In dev
-   * the DEV_OTP_BYPASS path skips this entirely.
+   * Deliver the OTP by email via the shared MailService (ZeptoMail/SMTP in
+   * prod; the `outbox` driver just records it in dev/CI). `send()` never throws
+   * — it returns false on a delivery failure, which we log. The DEV_OTP_BYPASS
+   * path skips this entirely (the magic code is always accepted).
    */
-  private async sendOtpEmail(email: string, _otp: string): Promise<void> {
-    this.logger.warn(
-      `No mail transport configured — OTP for ${email} was not emailed. ` +
-        `Enable DEV_OTP_BYPASS for local login, or wire a mailer.`,
-    );
+  private async sendOtpEmail(email: string, otp: string): Promise<void> {
+    const html = `
+      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:8px">
+        <h2 style="color:#0F172A;margin:0 0 8px">Your Nugenova sign-in code</h2>
+        <p style="color:#334155;margin:0 0 16px">Enter this code to finish signing in. It expires in a few minutes.</p>
+        <div style="font-size:32px;font-weight:700;letter-spacing:8px;color:#2E86C1;background:#EFF6FF;border-radius:12px;padding:16px;text-align:center">${otp}</div>
+        <p style="color:#94A3B8;font-size:12px;margin:16px 0 0">If you didn't request this, you can safely ignore this email.</p>
+      </div>`;
+    const delivered = await this.mail.send({
+      to: { email },
+      subject: `${otp} is your Nugenova sign-in code`,
+      html,
+      category: 'otp',
+    });
+    if (!delivered) {
+      this.logger.warn(
+        `OTP email to ${email} was not delivered (mailer returned false). ` +
+          `Check MAIL_DRIVER / ZEPTOMAIL_* on this host.`,
+      );
+    }
   }
 
   async verifyOtp(
