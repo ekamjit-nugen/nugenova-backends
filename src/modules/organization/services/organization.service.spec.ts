@@ -9,6 +9,8 @@ import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { TermsService } from '../../terms/terms.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { ConfigService } from '@nestjs/config';
+import { PolicyService } from '../../policy/policy.service';
+import { OrgRoleService } from './org-role.service';
 
 /**
  * Pure unit specs — NO database. Every repository is a jest mock, so these run
@@ -59,6 +61,17 @@ describe('OrganizationService (unit, no DB)', () => {
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('http://localhost:3111') },
+        },
+        {
+          provide: PolicyService,
+          useValue: { seedDefaultWorkTiming: jest.fn().mockResolvedValue(null) },
+        },
+        {
+          provide: OrgRoleService,
+          useValue: {
+            seedDefaults: jest.fn().mockResolvedValue([]),
+            systemRoleForTier: jest.fn().mockResolvedValue({ id: 'owner-role-id' }),
+          },
         },
       ],
     }).compile();

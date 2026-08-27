@@ -54,31 +54,39 @@ describe('OrgRoleService (unit, no DB)', () => {
   });
 
   describe('seedDefaults', () => {
-    it('creates the default roles when none exist (idempotent shape)', async () => {
+    it('creates the system tier roles + default custom roles when none exist', async () => {
       repo.find.mockResolvedValueOnce([]); // none present yet
-      repo.find.mockResolvedValueOnce(DEFAULT_ROLES.map((r, i) => ({ id: `r${i}`, ...r }))); // list() after
+      repo.find.mockResolvedValueOnce([]); // list() after
       await service.seedDefaults('org-1', 'creator');
       const created = repo.save.mock.calls[0][0];
       expect(Array.isArray(created)).toBe(true);
-      expect(created.map((r: any) => r.name).sort()).toEqual(
-        DEFAULT_ROLES.map((r) => r.name).sort(),
-      );
+      const names = created.map((r: any) => r.name);
+      // System tiers are seeded as real, visible role rows...
+      expect(names).toEqual(expect.arrayContaining(['owner', 'admin', 'manager', 'employee', 'member', 'viewer']));
+      // ...plus the default custom roles.
+      expect(names).toEqual(expect.arrayContaining(DEFAULT_ROLES.map((r) => r.name)));
+      // Owner is a system role with a non-empty (full-access) matrix.
+      const owner = created.find((r: any) => r.name === 'owner');
+      expect(owner.isSystem).toBe(true);
+      expect(owner.tier).toBe('owner');
+      expect(owner.permissions.length).toBeGreaterThan(0);
     });
 
     it('skips roles that already exist (no duplicates)', async () => {
-      // HR already present → only developer + designer get created.
-      repo.find.mockResolvedValueOnce([{ id: 'hrx', name: 'hr' }]);
+      // owner + hr already present → they are not re-created.
+      repo.find.mockResolvedValueOnce([{ id: 'ox', name: 'owner' }, { id: 'hrx', name: 'hr' }]);
       repo.find.mockResolvedValueOnce([]);
       await service.seedDefaults('org-1', 'creator');
-      const created = repo.save.mock.calls[0][0];
-      const names = created.map((r: any) => r.name);
+      const names = repo.save.mock.calls[0][0].map((r: any) => r.name);
+      expect(names).not.toContain('owner');
       expect(names).not.toContain('hr');
+      expect(names).toContain('manager');
       expect(names).toContain('developer');
-      expect(names).toContain('designer');
     });
 
-    it('does nothing when every default already exists', async () => {
-      repo.find.mockResolvedValueOnce(DEFAULT_ROLES.map((r) => ({ id: r.name, name: r.name })));
+    it('does nothing when every role already exists', async () => {
+      const allNames = ['owner', 'admin', 'manager', 'employee', 'member', 'viewer', ...DEFAULT_ROLES.map((r) => r.name)];
+      repo.find.mockResolvedValueOnce(allNames.map((n) => ({ id: n, name: n })));
       repo.find.mockResolvedValueOnce([]);
       await service.seedDefaults('org-1', 'creator');
       expect(repo.save).not.toHaveBeenCalled();
@@ -97,6 +105,22 @@ describe('OrgRoleService (unit, no DB)', () => {
       await service.remove('org-1', 'r1');
       expect(role.isDeleted).toBe(true);
       expect(repo.save).toHaveBeenCalledWith(expect.objectContaining({ isDeleted: true }));
+    });
+
+    it('scopes a role to a department on update', async () => {
+      const role: any = { id: 'r1', organizationId: 'org-1', departmentId: null };
+      repo.findOne.mockResolvedValue(role);
+      repo.save.mockImplementation(async (r: any) => r);
+      await service.update('org-1', 'r1', { departmentId: 'dept-eng' } as any);
+      expect(role.departmentId).toBe('dept-eng');
+    });
+
+    it('clears a role back to org-wide when departmentId is an empty string', async () => {
+      const role: any = { id: 'r1', organizationId: 'org-1', departmentId: 'dept-eng' };
+      repo.findOne.mockResolvedValue(role);
+      repo.save.mockImplementation(async (r: any) => r);
+      await service.update('org-1', 'r1', { departmentId: '' } as any);
+      expect(role.departmentId).toBeNull();
     });
   });
 });

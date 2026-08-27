@@ -51,13 +51,14 @@ describe('MembershipService (unit, no DB)', () => {
     membershipRepo.findOne.mockResolvedValue(null); // no existing membership
   };
 
-  it('adds a member with an enforced tier (no custom role)', async () => {
+  it('attaches the tier system role when no custom role is picked', async () => {
     freshUser();
+    // The org's Manager system role backs the 'manager' tier.
+    roleRepo.findOne.mockResolvedValue({ id: 'sys-manager', tier: 'manager', isSystem: true });
     await service.addMember('org-1', { email: 'a@b.com', role: 'manager' } as any, 'inviter');
     expect(membershipRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ role: 'manager', roleId: null }),
+      expect.objectContaining({ role: 'manager', roleId: 'sys-manager' }),
     );
-    expect(roleRepo.findOne).not.toHaveBeenCalled();
   });
 
   it('derives the enforced tier from a custom role when none is passed', async () => {
@@ -92,6 +93,39 @@ describe('MembershipService (unit, no DB)', () => {
     await expect(
       service.addMember('org-1', { email: 'a@b.com', role: 'employee' } as any, 'inviter'),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('updateMember: assigning a custom role derives the enforced tier', async () => {
+    membershipRepo.findOne.mockResolvedValue({
+      id: 'm1', organizationId: 'org-1', role: 'employee', roleId: null, departmentId: null,
+    });
+    roleRepo.findOne.mockResolvedValue({ id: 'hr-role', name: 'hr', departmentId: null, isDeleted: false });
+    await service.updateMember('org-1', 'm1', { roleId: 'hr-role' });
+    // hr → manager tier; roleId set.
+    expect(membershipRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'manager', roleId: 'hr-role' }),
+    );
+  });
+
+  it('updateMember: a dept-scoped role also places the member in that department', async () => {
+    membershipRepo.findOne.mockResolvedValue({
+      id: 'm1', organizationId: 'org-1', role: 'employee', roleId: null, departmentId: null,
+    });
+    roleRepo.findOne.mockResolvedValue({ id: 'r', name: 'lead', departmentId: 'dept-eng', isDeleted: false });
+    await service.updateMember('org-1', 'm1', { roleId: 'r' });
+    expect(membershipRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ roleId: 'r', departmentId: 'dept-eng' }),
+    );
+  });
+
+  it('updateMember: rejects a dept-scoped role that conflicts with the chosen department', async () => {
+    membershipRepo.findOne.mockResolvedValue({
+      id: 'm1', organizationId: 'org-1', role: 'employee', roleId: null, departmentId: null,
+    });
+    roleRepo.findOne.mockResolvedValue({ id: 'r', name: 'lead', departmentId: 'dept-eng', isDeleted: false });
+    await expect(
+      service.updateMember('org-1', 'm1', { roleId: 'r', departmentId: 'dept-sales' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('refuses to remove the organization owner', async () => {

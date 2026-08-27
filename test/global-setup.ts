@@ -27,7 +27,16 @@ import { TermsConsent1787680000000 } from '../src/bootstrap/database/migrations/
 import { TermsSourceKind1787700000000 } from '../src/bootstrap/database/migrations/1787700000000-TermsSourceKind';
 import { TermsLibrary1787720000000 } from '../src/bootstrap/database/migrations/1787720000000-TermsLibrary';
 import { OrgOnboarding1787740000000 } from '../src/bootstrap/database/migrations/1787740000000-OrgOnboarding';
+import { AttendanceHolidays1787800000000 } from '../src/bootstrap/database/migrations/1787800000000-AttendanceHolidays';
+import { Policies1787810000000 } from '../src/bootstrap/database/migrations/1787810000000-Policies';
+import { PolicyVersionsAttachments1787820000000 } from '../src/bootstrap/database/migrations/1787820000000-PolicyVersionsAttachments';
+import { RoleTierSystem1787830000000 } from '../src/bootstrap/database/migrations/1787830000000-RoleTierSystem';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
+import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
+import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
+import { PolicyEntity } from '../src/modules/policy/entities/policy.entity';
+import { PolicyAcknowledgementEntity } from '../src/modules/policy/entities/policy-acknowledgement.entity';
+import { PolicyVersionEntity } from '../src/modules/policy/entities/policy-version.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -71,6 +80,11 @@ module.exports = async function globalSetup(): Promise<void> {
       OnboardingDocumentTemplateEntity,
       OnboardingDocumentRequestEntity,
       PlatformTermsEntity,
+      AttendanceEntity,
+      HolidayEntity,
+      PolicyEntity,
+      PolicyAcknowledgementEntity,
+      PolicyVersionEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -87,6 +101,10 @@ module.exports = async function globalSetup(): Promise<void> {
       TermsSourceKind1787700000000,
       TermsLibrary1787720000000,
       OrgOnboarding1787740000000,
+      AttendanceHolidays1787800000000,
+      Policies1787810000000,
+      PolicyVersionsAttachments1787820000000,
+      RoleTierSystem1787830000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

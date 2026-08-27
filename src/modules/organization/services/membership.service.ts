@@ -22,6 +22,7 @@ export interface MemberView {
   lastName: string | null;
   role: string;
   roleId: string | null;
+  secondaryRoleId: string | null;
   departmentId: string | null;
   status: string;
   joinedAt: Date | null;
@@ -53,9 +54,20 @@ export class MembershipService {
   private async resolveRole(
     orgId: string,
     input: { role?: string; roleId?: string; departmentId?: string },
-  ): Promise<{ tier: string; roleId: string | null }> {
+  ): Promise<{ tier: string; roleId: string | null; departmentId: string | null }> {
+    // No custom role picked → attach the SYSTEM role for the requested tier, so
+    // every member holds a real, visible role row (never a bare tier). Falls
+    // back to the raw tier only if the org has no seeded system role (legacy).
     if (!input.roleId) {
-      return { tier: input.role || 'employee', roleId: null };
+      const tier = input.role || 'employee';
+      const sys = await this.roleRepo.findOne({
+        where: { organizationId: orgId, tier, isSystem: true, isDeleted: false },
+      });
+      return {
+        tier,
+        roleId: sys?.id ?? null,
+        departmentId: input.departmentId ?? null,
+      };
     }
     const role = await this.roleRepo.findOne({
       where: { id: input.roleId, organizationId: orgId, isDeleted: false },
@@ -71,8 +83,12 @@ export class MembershipService {
           'Pick a role from the same department (or an org-wide role).',
       );
     }
-    const tier = input.role || ROLE_NAME_TO_TIER[role.name] || 'employee';
-    return { tier, roleId: role.id };
+    // Tier is DERIVED from the assigned role (its `tier`, then legacy name map).
+    const tier = role.tier || ROLE_NAME_TO_TIER[role.name] || input.role || 'employee';
+    // A department-scoped role coherently places the member in that department
+    // (an explicit departmentId wins; validated equal above).
+    const departmentId = input.departmentId ?? role.departmentId ?? null;
+    return { tier, roleId: role.id, departmentId };
   }
 
   async addMember(
@@ -118,7 +134,7 @@ export class MembershipService {
         organizationId: orgId,
         role: resolved.tier,
         roleId: resolved.roleId,
-        departmentId: dto.departmentId ?? null,
+        departmentId: resolved.departmentId,
         status: 'active',
         invitedBy,
         joinedAt: new Date(),
@@ -170,9 +186,41 @@ export class MembershipService {
       where: { id: membershipId, organizationId: orgId },
     });
     if (!m) throw new NotFoundException('Member not found');
-    if (patch.role !== undefined) m.role = patch.role;
-    if (patch.roleId !== undefined) m.roleId = patch.roleId || null;
+
+    // Apply the department first so role↔department validation sees the new dept.
     if (patch.departmentId !== undefined) m.departmentId = patch.departmentId || null;
+
+    if (patch.roleId !== undefined) {
+      if (!patch.roleId) {
+        // Clearing the custom role — attach the SYSTEM role for the tier so the
+        // member still holds a real, visible role row (not a bare tier).
+        const tier = patch.role ?? m.role;
+        const resolved = await this.resolveRole(orgId, { role: tier });
+        m.role = resolved.tier;
+        m.roleId = resolved.roleId;
+      } else {
+        // Assigning a custom role: derive the enforced tier + validate that a
+        // department-scoped role matches this member's department (mirrors add).
+        const resolved = await this.resolveRole(orgId, {
+          role: patch.role,
+          roleId: patch.roleId,
+          departmentId: m.departmentId ?? undefined,
+        });
+        m.roleId = resolved.roleId;
+        m.role = resolved.tier;
+        // A dept-scoped role also places the member in that department.
+        if (patch.departmentId === undefined && resolved.departmentId) {
+          m.departmentId = resolved.departmentId;
+        }
+      }
+    } else if (patch.role !== undefined) {
+      // Only the tier changed (e.g. the Directory's inline role switch) — keep
+      // roleId pointing at that tier's system role.
+      const resolved = await this.resolveRole(orgId, { role: patch.role });
+      m.role = resolved.tier;
+      m.roleId = resolved.roleId;
+    }
+
     await this.membershipRepo.save(m);
     const user = m.userId
       ? await this.userRepo.findOne({ where: { id: m.userId } })
@@ -200,6 +248,7 @@ export class MembershipService {
       lastName: user?.lastName ?? null,
       role: m.role,
       roleId: m.roleId,
+      secondaryRoleId: m.secondaryRoleId ?? null,
       departmentId: m.departmentId ?? null,
       status: m.status,
       joinedAt: m.joinedAt,

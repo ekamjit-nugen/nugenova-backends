@@ -17,6 +17,8 @@ import { TermsService } from '../../terms/terms.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
 import { CreateOrganizationDto } from '../dto';
+import { PolicyService } from '../../policy/policy.service';
+import { OrgRoleService } from './org-role.service';
 
 export interface OrgPublic {
   id: string;
@@ -76,6 +78,8 @@ export class OrganizationService {
     private readonly terms: TermsService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
+    private readonly policies: PolicyService,
+    private readonly roles: OrgRoleService,
   ) {}
 
   private frontendUrl(): string {
@@ -196,6 +200,15 @@ export class OrganizationService {
       }),
     );
 
+    // Seed the org's roles first so every tier is a real, visible row and the
+    // owner can be attached to the actual Owner role (roleId), not a bare tier.
+    await this.roles
+      .seedDefaults(org.id, createdByUserId)
+      .catch((e) =>
+        this.logger.warn(`Role seed failed for ${org.id}: ${e?.message ?? e}`),
+      );
+    const ownerRole = await this.roles.systemRoleForTier(org.id, 'owner');
+
     // Owner membership — refuse a duplicate (idempotency guard).
     const existing = await this.membershipRepo.findOne({
       where: { userId: owner.id, organizationId: org.id },
@@ -208,6 +221,7 @@ export class OrganizationService {
         userId: owner.id,
         organizationId: org.id,
         role: 'owner',
+        roleId: ownerRole?.id ?? null,
         status: 'active',
         joinedAt: new Date(),
         invitedBy: createdByUserId,
@@ -222,6 +236,15 @@ export class OrganizationService {
     if (owner.setupStage !== 'complete') owner.setupStage = 'complete';
     owner.isActive = true;
     await this.userRepo.save(owner);
+
+    // Seed the org's default work-timing policy so a policy governs every
+    // employee's clock-in from day one — attendance sits behind policy, and a
+    // required work-timing policy must apply to every employee. Best-effort.
+    await this.policies
+      .seedDefaultWorkTiming(org.id, createdByUserId)
+      .catch((e) =>
+        this.logger.warn(`Default policy seed failed for ${org.id}: ${e?.message ?? e}`),
+      );
 
     this.logger.log(
       `Org '${org.name}' (${org.id}) provisioned by ${createdByUserId}, owner ${owner.email}`,

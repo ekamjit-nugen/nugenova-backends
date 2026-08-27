@@ -19,3 +19,4 @@ coverage/
 
 # pm2 runtime logs
 logs/
+.claude/

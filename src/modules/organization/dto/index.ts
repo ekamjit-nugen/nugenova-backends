@@ -200,6 +200,12 @@ export class UpdateRoleDto {
   @MaxLength(500)
   description?: string;
 
+  // Department this role is scoped to. Send an empty string to clear it back to
+  // org-wide (all departments). Absent = leave unchanged.
+  @IsOptional()
+  @IsString()
+  departmentId?: string;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

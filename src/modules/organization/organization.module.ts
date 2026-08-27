@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
+import { PolicyModule } from '../policy/policy.module';
 import { OrganizationEntity } from './entities/organization.entity';
 import { DepartmentEntity } from './entities/department.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
@@ -30,6 +31,7 @@ import { AdminTermsController } from './admin-terms.controller';
 @Module({
   imports: [
     AuthModule,
+    PolicyModule,
     TypeOrmModule.forFeature([
       OrganizationEntity,
       DepartmentEntity,

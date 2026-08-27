@@ -32,7 +32,25 @@ export class RoleEntity extends PgBaseEntity {
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   departmentId: string | null;
 
-  /** [{ resource: string, actions: string[] }] */
+  /**
+   * The enforced tier a holder receives (owner|admin|manager|employee|member|
+   * viewer). Every role — including the seeded SYSTEM roles that back the
+   * standard tiers — carries this, so a member's tier is DERIVED from their
+   * assigned role rather than hardcoded on the membership.
+   */
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  tier: string | null;
+
+  /**
+   * A built-in role (Owner/Admin/Manager/Employee/Member/Viewer) seeded for
+   * every org. Shown on the Roles page with a "System" badge; cannot be deleted,
+   * and Owner/Admin (full-access `*` matrix) cannot be edited into a lockout.
+   */
+  @Column({ type: 'boolean', default: false })
+  isSystem: boolean;
+
+  /** [{ resource: string, actions: string[] }]. Owner/Admin system roles carry
+   *  the full resource×action matrix so their access is explicit and visible. */
   @Column({ type: 'jsonb', default: () => "'[]'" })
   permissions: Array<{ resource: string; actions: string[] }>;
 
