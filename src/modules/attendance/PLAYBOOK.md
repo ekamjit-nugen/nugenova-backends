@@ -155,6 +155,49 @@ enforced from the resolved policy. A default work-timing policy is seeded for
 every org, so a policy always applies. (`AttendanceService.resolveContext` →
 `PolicyService.resolveForEmployee`.)
 
+**Location at clock-in (office geo-fence).** When an office policy governs the
+employee, `POST /attendance/check-in` **requires** a `{location:{latitude,
+longitude}}` and rejects a clock-in with no location or one outside the fence
+(`enforceWorkLocation`, haversine vs. each office's `radiusKm` / the policy's
+`geoFenceRadiusKm`, default 2 km). The web client captures it via
+`navigator.geolocation` and sends it on clock-in; home/hybrid policies never block.
+When the browser/OS **blocks** location and the policy requires it, the client
+shows a **"Turn on location to clock in"** help modal with steps tailored to the
+detected browser (Chrome/Edge/Firefox/Safari) AND operating system
+(macOS/Windows/iOS/Android/Linux) — `detectEnableSteps()` — plus a "Try again".
+An outside-the-fence rejection (location WAS read) shows the plain error instead.
+Because an office policy tracks the person, it is **consent-gated** — see the
+policy playbook's "Location tracking → consent required": the geo-fence template is
+`acknowledgementRequired`, so an attached employee must accept (login gate) before
+it applies.
+
+Each record persists the `checkInLocation` (lat/long/accuracy) + a `geoCheck`
+breadcrumb (`mode`, `verified`, `distanceKm`, `officeName`), both already returned
+by the list endpoints. The web attendance table surfaces them in a **Location**
+column (`geoSummary`): "At <office> · N km" (verified inside), "Outside fence · N
+km", "Work from home", or "No location". Clicking a located record's badge
+**expands the row inline (collapsible, animated)** to reveal the full breadcrumb
+(coordinates, accuracy, distance, office, geo-fence result) and a **View on map**
+link (`google.com/maps?q=lat,long`) — no modal.
+
+**Self vs. management view.** A member without `attendance:view` (owner/admin/HR or
+a matrix role) sees **only their own** records — the org-wide `/attendance` fetch
+and the Activity feed are gated off, and the web self-view offers date-range
+filters (today / this week / this month / last month / all / custom, default
+today) over their own history.
+
+**Work-from-home is a request → approval flow (no self-declare).** WFH is never
+self-declared at clock-in. An employee **requests** a date range
+(`POST /attendance/wfh-requests`, `GET .../mine`, `POST .../:id/cancel`); an
+owner/HR **reviews** it (`GET .../pending`, `PUT .../:id/review` — `attendance:view`
+/`:edit`). At clock-in `isWfh` is decided by `WfhRequestService.hasApprovedForDay`
+(an approved request covering today in the org tz) — an approved day records the
+record as `wfh` and **skips the office geo-fence**; every other clock-in is
+geo-fenced normally. Entity `wfh_requests` (migration `WfhRequests1787850000000`).
+The web clock button reads "Clock In (WFH)" on an approved day; the "Work from
+Home" tab holds the request modal, the member's own requests, and (for managers)
+the pending-approvals queue.
+
 ## Deferred (Phase 2 — dependency-gated)
 
 - **Shift CRUD** — the resolver already honours `shift`-category timing policies;

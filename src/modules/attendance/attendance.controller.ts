@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AttendanceAccessGuard } from './guards/attendance-access.guard';
 import { RequirePermission } from '../organization/guards/require-permission.decorator';
 import { AttendanceService, Caller } from './services/attendance.service';
+import { WfhRequestService } from './services/wfh-request.service';
 import {
   ApproveEntryDto,
   AttendanceQueryDto,
@@ -25,7 +26,9 @@ import {
   HolidayQueryDto,
   ManualEntryDto,
   RequestEditDto,
+  RequestWfhDto,
   ReviewEditDto,
+  ReviewWfhDto,
   StatsQueryDto,
 } from './dto';
 
@@ -38,7 +41,10 @@ import {
 @Controller()
 @UseGuards(JwtAuthGuard, AttendanceAccessGuard)
 export class AttendanceController {
-  constructor(private readonly attendance: AttendanceService) {}
+  constructor(
+    private readonly attendance: AttendanceService,
+    private readonly wfh: WfhRequestService,
+  ) {}
 
   private caller(req: any): Caller {
     const u = req.user;
@@ -167,6 +173,59 @@ export class AttendanceController {
   ) {
     const data = await this.attendance.reviewAttendanceEdit(this.caller(req), id, dto);
     return { success: true, message: 'Edit request reviewed', data };
+  }
+
+  // ── work-from-home requests ─────────────────────────────────────────────────
+  // WFH is request → owner/HR approval → an approved day makes a normal clock-in
+  // count as WFH (no geo-fence). Static routes are declared before `:id`.
+
+  @Post('attendance/wfh-requests')
+  @HttpCode(HttpStatus.CREATED)
+  async requestWfh(@Body() dto: RequestWfhDto, @Req() req: any) {
+    const c = this.caller(req);
+    const data = await this.wfh.create(c.orgId, c.userId, dto);
+    return { success: true, message: 'WFH request submitted for approval', data };
+  }
+
+  @Get('attendance/wfh-requests/mine')
+  async myWfhRequests(@Req() req: any) {
+    const c = this.caller(req);
+    const data = await this.wfh.listMine(c.orgId, c.userId);
+    return { success: true, data };
+  }
+
+  @Get('attendance/wfh-requests/pending')
+  @RequirePermission('attendance', 'view')
+  async pendingWfhRequests(@Req() req: any) {
+    const data = await this.wfh.listPending(this.caller(req).orgId);
+    return { success: true, data };
+  }
+
+  @Get('attendance/wfh-requests')
+  @RequirePermission('attendance', 'view')
+  async allWfhRequests(@Req() req: any) {
+    const data = await this.wfh.listAll(this.caller(req).orgId);
+    return { success: true, data };
+  }
+
+  @Post('attendance/wfh-requests/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancelWfhRequest(@Param('id') id: string, @Req() req: any) {
+    const c = this.caller(req);
+    await this.wfh.cancel(c.orgId, id, c.userId);
+    return { success: true, message: 'WFH request cancelled' };
+  }
+
+  @Put('attendance/wfh-requests/:id/review')
+  @RequirePermission('attendance', 'edit')
+  async reviewWfhRequest(
+    @Param('id') id: string,
+    @Body() dto: ReviewWfhDto,
+    @Req() req: any,
+  ) {
+    const c = this.caller(req);
+    const data = await this.wfh.review(c.orgId, id, dto.approved, c.userId, dto.note);
+    return { success: true, message: 'WFH request reviewed', data };
   }
 
   // ── holidays ────────────────────────────────────────────────────────────────

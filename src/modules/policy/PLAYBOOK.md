@@ -39,6 +39,22 @@ in-effect timing policies (`category ∈ working_hours | attendance | shift` wit
 15-min grace, applicableTo `all`) so every employee always has a governing policy.
 Change it, or add a department/specific override, and attendance follows.
 
+## Location tracking → consent required
+
+An **office** work-location policy geo-locates the employee at clock-in (location
+must be captured and inside the fence, else the clock-in is blocked). Because that
+tracks the person, a location policy **must be consented to**: the ready-made
+**"Work From Office (Geo-fenced, 2 km)"** and **"Night Shift"** templates carry
+`acknowledgementRequired: true`, so `POST /policies/from-template/:name` clones a
+policy that is consent-gated by default (the caller can override via
+`acknowledgementRequired` in the body). Once it's active and applies to an
+employee, they appear in `/policies/pending-acknowledgements` and the login
+acceptance gate holds them until they accept — the gate now renders the full
+work-location detail (mode, geo-fence radius, offices) so they see exactly what
+they're consenting to. HR sets the geo-fence centre by typing lat/long **or**
+capturing their device location ("Use my location") in the policy editor; office
+mode with no office point warns and blocks clock-in until one is added.
+
 ## Authorization
 
 Same org-scoped model as attendance (`PolicyAccessGuard`): fail-closed on a
@@ -123,7 +139,10 @@ Additive and reversible. `npm run migration:revert` drops both tables; remove
 ## Scenarios & tests
 
 `features/policy.feature` (CRUD, org-scoping, super-admin isolation, RBAC,
-acknowledgement) + `../attendance/features/attendance-policy.feature` (the
-dependency: policy governs clock-in status, department override, WFH, geo-fence),
-bound to supertest specs. Pure units: `util/policy-eligibility` (effective window +
+acknowledgement, **location-template → consent**: a Work-From-Office policy cloned
+from the geo-fence template is acknowledgement-required and gates an applicable
+employee until accepted) + `../attendance/features/attendance-policy.feature` (the
+dependency: policy governs clock-in status, department override, WFH, **office
+geo-fence blocks outside / allows inside / not-fenced for WFH**), bound to
+supertest specs. Pure units: `util/policy-eligibility` (effective window +
 applicability). Live CI status is merged into this playbook by `admin-playbooks`.

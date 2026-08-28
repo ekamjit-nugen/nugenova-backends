@@ -23,6 +23,7 @@ import {
   CreatePolicyDto,
   PolicyQueryDto,
   UpdatePolicyDto,
+  UpdateOnboardingConfigDto,
 } from './dto';
 
 class SetActiveDto {
@@ -110,6 +111,51 @@ export class PolicyController {
   async pendingAcks(@Req() req: any) {
     const data = await this.policies.pendingAcknowledgements(this.orgId(req), req.user.userId);
     return { success: true, data };
+  }
+
+  /**
+   * The caller's resolved work context — the single work-timing/location/WFH
+   * policy that governs their day (specific ▸ dept ▸ all). Drives the Settings →
+   * Work Preferences view. Null fields ⇒ no governing policy (e.g. the owner).
+   */
+  @Get('my-work-context')
+  async myWorkContext(@Req() req: any) {
+    const data = await this.policies.resolveForEmployee(this.orgId(req), req.user.userId);
+    return { success: true, data };
+  }
+
+  // ── onboarding requirements config ──────────────────────────────────────────
+  // Declared BEFORE `:id` so 'onboarding-catalog'/'onboarding-config' aren't
+  // captured as a policy id.
+
+  /** The document catalog + defaults for the Settings → Onboarding editor. */
+  @Get('onboarding-catalog')
+  @RequirePermission('policies', 'view')
+  async onboardingCatalog() {
+    return { success: true, data: this.policies.onboardingCatalog() };
+  }
+
+  /** The org's live onboarding requirements (saved selection, else defaults). */
+  @Get('onboarding-config')
+  @RequirePermission('policies', 'view')
+  async getOnboardingConfig(@Req() req: any) {
+    const data = await this.policies.getOnboardingConfig(this.orgId(req));
+    return { success: true, data };
+  }
+
+  /** Create-or-update the org's onboarding requirements. */
+  @Put('onboarding-config')
+  @RequirePermission('policies', 'edit')
+  async updateOnboardingConfig(
+    @Body() dto: UpdateOnboardingConfigDto,
+    @Req() req: any,
+  ) {
+    const data = await this.policies.upsertOnboardingConfig(
+      this.orgId(req),
+      dto,
+      req.user.userId,
+    );
+    return { success: true, message: 'Onboarding requirements updated', data };
   }
 
   @Get()

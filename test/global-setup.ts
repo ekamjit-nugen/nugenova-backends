@@ -17,6 +17,7 @@ import { EmailOutboxEntity } from '../src/bootstrap/mail/email-outbox.entity';
 import { DocumentFileEntity } from '../src/bootstrap/storage/document-file.entity';
 import { OnboardingDocumentTemplateEntity } from '../src/modules/onboarding/entities/onboarding-document-template.entity';
 import { OnboardingDocumentRequestEntity } from '../src/modules/onboarding/entities/onboarding-document-request.entity';
+import { MemberOnboardingEntity } from '../src/modules/onboarding/entities/member-onboarding.entity';
 import { AuthUsersInitial1787316090532 } from '../src/bootstrap/database/migrations/1787316090532-AuthUsersInitial';
 import { AuthSessionsRolesTokens1787334496372 } from '../src/bootstrap/database/migrations/1787334496372-AuthSessionsRolesTokens';
 import { OrganizationDepartments1787546870935 } from '../src/bootstrap/database/migrations/1787546870935-OrganizationDepartments';
@@ -31,12 +32,19 @@ import { AttendanceHolidays1787800000000 } from '../src/bootstrap/database/migra
 import { Policies1787810000000 } from '../src/bootstrap/database/migrations/1787810000000-Policies';
 import { PolicyVersionsAttachments1787820000000 } from '../src/bootstrap/database/migrations/1787820000000-PolicyVersionsAttachments';
 import { RoleTierSystem1787830000000 } from '../src/bootstrap/database/migrations/1787830000000-RoleTierSystem';
+import { MemberOnboarding1787840000000 } from '../src/bootstrap/database/migrations/1787840000000-MemberOnboarding';
+import { WfhRequests1787850000000 } from '../src/bootstrap/database/migrations/1787850000000-WfhRequests';
+import { Notifications1787860000000 } from '../src/bootstrap/database/migrations/1787860000000-Notifications';
+import { NotificationPreferences1787870000000 } from '../src/bootstrap/database/migrations/1787870000000-NotificationPreferences';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
+import { WfhRequestEntity } from '../src/modules/attendance/entities/wfh-request.entity';
 import { PolicyEntity } from '../src/modules/policy/entities/policy.entity';
 import { PolicyAcknowledgementEntity } from '../src/modules/policy/entities/policy-acknowledgement.entity';
 import { PolicyVersionEntity } from '../src/modules/policy/entities/policy-version.entity';
+import { NotificationEntity } from '../src/modules/notification/entities/notification.entity';
+import { NotificationPreferenceEntity } from '../src/modules/notification/entities/notification-preference.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -79,12 +87,16 @@ module.exports = async function globalSetup(): Promise<void> {
       DocumentFileEntity,
       OnboardingDocumentTemplateEntity,
       OnboardingDocumentRequestEntity,
+      MemberOnboardingEntity,
       PlatformTermsEntity,
       AttendanceEntity,
       HolidayEntity,
+      WfhRequestEntity,
       PolicyEntity,
       PolicyAcknowledgementEntity,
       PolicyVersionEntity,
+      NotificationEntity,
+      NotificationPreferenceEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -105,6 +117,10 @@ module.exports = async function globalSetup(): Promise<void> {
       Policies1787810000000,
       PolicyVersionsAttachments1787820000000,
       RoleTierSystem1787830000000,
+      MemberOnboarding1787840000000,
+      WfhRequests1787850000000,
+      Notifications1787860000000,
+      NotificationPreferences1787870000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

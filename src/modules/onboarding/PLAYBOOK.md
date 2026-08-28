@@ -230,3 +230,99 @@ Gherkin scenarios live in `src/modules/onboarding/features/*.feature`, bound to
 supertest integration specs (`*.e2e-spec.ts`, jest-cucumber) plus pure unit
 specs (guards, email templates, routing gate). Live pass/fail + coverage from the
 latest CI run are merged into this playbook by the `admin-playbooks` API.
+
+---
+
+# Part 2 — Employee Onboarding Lifecycle
+
+> Distinct from the org document-approval flow above. This is the **HR
+> onboarding of a new hire**: their documents, checklist, probation and progress.
+> In Nexora **the person IS the `OrgMembership`** — there is no separate HR
+> Employee entity — so a lifecycle record attaches to a membership.
+
+## What it does
+
+An org configures **what a hire must submit/complete** once (the onboarding
+**policy config**). HR then **initiates** onboarding for a member — a record is
+seeded from that config with a document checklist, a task checklist, a probation
+window and a target date. The hire **self-serves** on *My Onboarding* (uploads
+documents, ticks welcome tasks); HR **verifies/rejects** documents and
+**completes** the onboarding. A policy edit **reconciles onto** in-progress
+onboardings on the next read (never discarding already-submitted work).
+
+## Requirements are policy-driven
+
+The requirements live on the org's `onboarding` **policy** (a singleton row,
+`category: onboarding`, `applicableTo: all`) carrying an `onboardingConfig` in
+`extra_config`. When none is saved, catalog defaults apply (so an org that never
+opens Settings still onboards sensibly). Catalog + defaults:
+`src/modules/policy/onboarding-catalog.ts`.
+
+- `GET  /policies/onboarding-catalog` — the grouped document catalog + defaults (policies:view)
+- `GET  /policies/onboarding-config` — the org's live requirements (policies:view)
+- `PUT  /policies/onboarding-config` — save the requirements (policies:edit)
+
+## Endpoints
+
+### HR / admin / owner (`onboarding:manage` or an owner/admin/HR tier)
+- `POST /onboarding/lifecycle/initiate` — start onboarding for a member (by membership id **or** userId)
+- `GET  /onboarding/lifecycle` — all onboardings (reconciled-on-read)
+- `GET  /onboarding/lifecycle/active-membership-ids` — membershipIds already onboarding/onboarded (the initiate-picker filter)
+- `GET  /onboarding/lifecycle/:id` — one record
+- `POST /onboarding/lifecycle/:id/documents/:key/verify` — verify an uploaded document
+- `POST /onboarding/lifecycle/:id/documents/:key/reject` — reject with a note (re-opens the slot)
+- `POST /onboarding/lifecycle/:id/complete` — mark completed
+- `POST /onboarding/lifecycle/:id/cancel` — cancel (supersedable on re-initiate)
+
+Gated by `OnboardingAccessGuard` (owner/admin/HR tiers, or a permScoped
+`onboarding:manage` role; org-lifecycle gate as elsewhere).
+
+### Employee self-service (any authenticated member)
+- `GET  /onboarding/me` — my active onboarding, or `null`
+- `POST /onboarding/me/documents/:key/upload` — attach an uploaded file id to a slot
+- `POST /onboarding/me/checklist/:key/complete` — tick a self-serviceable task (403 on HR/IT-owned tasks)
+
+Document bytes flow through the generic `POST /media/upload` → `fileId`, recorded
+against the slot.
+
+## Data model
+
+- `member_onboardings` — one record per onboarded membership. `documents[]` and
+  `checklist[]` are jsonb slot arrays; `status` = pending → in_progress →
+  completed | cancelled; probation/target dates denormalized. Entity:
+  `entities/member-onboarding.entity.ts`.
+
+## Lifecycle rules
+
+- **Initiate** seeds docs+checklist from the policy config, computes
+  `probationEndDate` (start + months) and `targetDate` (start + targetDays),
+  emails the hire a welcome, and **supersedes** any prior *cancelled* record. A
+  member with a pending/in_progress/completed onboarding can't be re-initiated.
+- **Reconcile-on-read** (list / get / my) syncs a record's documents to the live
+  policy: adds newly-required docs (pending), drops policy-removed docs **only if
+  still pending**, refreshes title/required, orders to the policy. Completed /
+  cancelled records are skipped (historical).
+- **Self-complete guard**: a hire may only complete tasks assigned to them or in
+  a self-serviceable category (documents/welcome/training) — never IT/compliance.
+- **Daily reminder**: `@Cron('0 10 * * *')` emails hires with outstanding items
+  (email-only — Nexora has no in-app notification module yet).
+
+## Migration
+
+- **Entity:** `MemberOnboardingEntity` → `member_onboardings`.
+- **Migration:** `MemberOnboarding1787840000000` (creates the table + indexes).
+  Registered in `test/global-setup.ts` (the hardcoded entity + migration lists).
+
+## Rollback
+
+Drop the `MemberOnboarding` migration (drops `member_onboardings`) and remove the
+`MemberOnboardingController` / `MyOnboardingController` from the module. The
+policy `onboardingConfig` is inert config on an existing table — safe to leave.
+
+## Scenarios & tests
+
+`features/onboarding-config.feature`, `onboarding-lifecycle.feature`,
+`onboarding-self-service.feature` (jest-cucumber e2e). The lifecycle covers
+initiate, duplicate-block, verify, reject, reconcile-on-read, complete, and the
+employee/HR authorization split; self-service covers read, upload, self-complete,
+the IT-task block, and the no-onboarding empty result.

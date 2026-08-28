@@ -112,6 +112,30 @@ export class ReviewEditDto {
   rejectionReason?: string;
 }
 
+export class RequestWfhDto {
+  @IsISO8601()
+  startDate: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
+export class ReviewWfhDto {
+  @IsBoolean()
+  approved: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
 export class AttendanceQueryDto {
   @IsOptional()
   @IsISO8601()

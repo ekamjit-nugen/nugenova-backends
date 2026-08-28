@@ -197,66 +197,8 @@ defineFeature(feature, (test) => {
     });
   });
 
-  // ── WFH governed by policy ──────────────────────────────────────────────────
-
-  test('WFH is rejected on a day the policy does not allow', ({ given, when, then }) => {
-    givenOrg(given);
-    given(/^a WFH policy allowing only "monday" applies to the employee$/, async () => {
-      const notToday = weekdayIST() === 'monday' ? 'tuesday' : 'monday';
-      await createPolicy(ctx.org, {
-        policyName: 'WFH Mon',
-        category: 'attendance',
-        applicableTo: 'all',
-        workTiming: { startTime: '09:00', endTime: '18:00', timezone: 'Asia/Kolkata' },
-        workLocation: { mode: 'hybrid' },
-        wfhConfig: { allowedDays: [notToday] },
-      }).expect(201);
-    });
-    when(/^the employee declares WFH and clocks in on a "tuesday"$/, async () => {
-      res = await clockIn(ctx.token, { workMode: 'home' });
-    });
-    then(/^the clock-in is rejected$/, () => {
-      expect(res.status).toBe(400);
-    });
-  });
-
-  test('WFH is rejected once the monthly cap is reached', ({ given, and, when, then }) => {
-    givenOrg(given);
-    given(/^a WFH policy with a monthly cap of 1 applies to the employee$/, async () => {
-      await createPolicy(ctx.org, {
-        policyName: 'WFH Cap',
-        category: 'attendance',
-        applicableTo: 'all',
-        workTiming: { startTime: '09:00', endTime: '18:00', timezone: 'Asia/Kolkata' },
-        workLocation: { mode: 'hybrid' },
-        wfhConfig: { allowedDays: [], maxDaysPerMonth: 1 },
-      }).expect(201);
-    });
-    and(/^the employee has already worked from home once this month$/, async () => {
-      // Seed a prior-day WFH record so the cap counts it (a same-day re-clock
-      // would just 409). Anchor it to yesterday's IST day.
-      const y = new Date(Date.now() - 86_400_000);
-      const anchor = new Date(Date.UTC(y.getUTCFullYear(), y.getUTCMonth(), y.getUTCDate()));
-      await attendance.save(
-        attendance.create({
-          organizationId: ctx.org.orgId,
-          employeeId: ctx.userId,
-          date: anchor,
-          status: 'wfh',
-          entryType: 'system',
-          workSegments: [],
-        }),
-      );
-    });
-    when(/^the employee declares WFH and clocks in again this month$/, async () => {
-      res = await clockIn(ctx.token, { workMode: 'home' });
-    });
-    then(/^the clock-in is rejected$/, () => {
-      expect(res.status).toBe(400);
-    });
-  });
-
   // ── office geo-fence governed by policy ─────────────────────────────────────
+  // (WFH is now a request/approval flow — see wfh-request.e2e-spec.ts.)
 
   const OFFICE = { latitude: 12.9716, longitude: 77.5946 }; // Bengaluru
   const FAR = { latitude: 13.0827, longitude: 80.2707 }; // Chennai (~290 km)
@@ -302,28 +244,4 @@ defineFeature(feature, (test) => {
     });
   });
 
-  test('a WFH-declared clock-in is not geo-fenced', ({ given, and, when, then }) => {
-    givenOrg(given);
-    given(/^an office policy with a geo-fence around the office applies to the employee$/, async () => {
-      await clearSeededDefault(ctx.org.orgId);
-      // Office policy but WFH allowed today so the WFH branch is reachable.
-      await createPolicy(ctx.org, {
-        policyName: 'Office + WFH',
-        category: 'attendance',
-        applicableTo: 'all',
-        workTiming: { startTime: '00:00', endTime: '23:59', timezone: 'Asia/Kolkata' },
-        workLocation: { mode: 'office', geoFenceRadiusKm: 2, offices: [{ name: 'HQ', ...OFFICE }] },
-        wfhConfig: { allowedDays: [] },
-      }).expect(201);
-    });
-    and(/^WFH is allowed for the employee today$/, async () => {
-      // no-op: allowedDays [] means WFH is unrestricted by day.
-    });
-    when(/^the employee declares WFH and clocks in from anywhere$/, async () => {
-      res = await clockIn(ctx.token, { workMode: 'home', location: FAR });
-    });
-    then(/^the clock-in succeeds$/, () => {
-      expect(res.status).toBe(201);
-    });
-  });
 });

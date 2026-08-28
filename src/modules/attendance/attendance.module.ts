@@ -3,13 +3,16 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { PolicyModule } from '../policy/policy.module';
+import { NotificationModule } from '../notification/notification.module';
 import { AttendanceEntity } from './entities/attendance.entity';
 import { HolidayEntity } from './entities/holiday.entity';
+import { WfhRequestEntity } from './entities/wfh-request.entity';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 
 import { AttendanceService } from './services/attendance.service';
+import { WfhRequestService } from './services/wfh-request.service';
 import { AttendanceAccessGuard } from './guards/attendance-access.guard';
 import { AttendanceController } from './attendance.controller';
 
@@ -26,16 +29,18 @@ import { AttendanceController } from './attendance.controller';
   imports: [
     AuthModule,
     PolicyModule,
+    NotificationModule,
     TypeOrmModule.forFeature([
       AttendanceEntity,
       HolidayEntity,
+      WfhRequestEntity,
       OrganizationEntity,
       OrgMembershipEntity,
       UserEntity,
     ]),
   ],
   controllers: [AttendanceController],
-  providers: [AttendanceService, AttendanceAccessGuard],
+  providers: [AttendanceService, WfhRequestService, AttendanceAccessGuard],
   exports: [AttendanceService],
 })
 export class AttendanceModule {}

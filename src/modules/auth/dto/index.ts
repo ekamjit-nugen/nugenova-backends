@@ -64,4 +64,40 @@ export class UpdateProfileDto {
   @IsString()
   @MaxLength(120)
   jobTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  department?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  bio?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  location?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  timezone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  linkedIn?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  github?: string;
+
+  /** A data-URL (base64) avatar, ~256px. Empty string clears it. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2_000_000)
+  avatar?: string;
 }
