@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
+import { NotificationModule } from '../notification/notification.module';
 import { PolicyEntity } from './entities/policy.entity';
 import { PolicyAcknowledgementEntity } from './entities/policy-acknowledgement.entity';
 import { PolicyVersionEntity } from './entities/policy-version.entity';
@@ -22,6 +23,7 @@ import { PolicyController } from './policy.controller';
 @Module({
   imports: [
     AuthModule,
+    NotificationModule,
     TypeOrmModule.forFeature([
       PolicyEntity,
       PolicyAcknowledgementEntity,

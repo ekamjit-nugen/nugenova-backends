@@ -3,10 +3,13 @@ import {
   IsBoolean,
   IsIn,
   IsISO8601,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
+  Max,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -113,8 +116,61 @@ export class CreateFromTemplateDto {
 
   @IsOptional() @IsArray() @IsString({ each: true })
   applicableIds?: string[];
+
+  /** Override the template's acknowledgement default (location templates → true). */
+  @IsOptional() @IsBoolean()
+  acknowledgementRequired?: boolean;
 }
 
 export class AcknowledgePolicyDto {
   @IsOptional() @IsNumber() version?: number;
+}
+
+// ── onboarding requirements config ──────────────────────────────────────────
+
+const CHECKLIST_CATEGORIES = [
+  'documents',
+  'welcome',
+  'training',
+  'it_setup',
+  'compliance',
+  'other',
+];
+const ASSIGNED_TO = ['self', 'hr', 'it'];
+
+export class OnboardingConfigDocumentDto {
+  @IsString() @MaxLength(64) key: string;
+  @IsString() @MaxLength(160) title: string;
+  @IsBoolean() required: boolean;
+}
+
+export class OnboardingConfigChecklistItemDto {
+  @IsString() @MaxLength(64) key: string;
+  @IsString() @MaxLength(200) title: string;
+  @IsIn(CHECKLIST_CATEGORIES) category: string;
+  @IsIn(ASSIGNED_TO) assignedTo: string;
+}
+
+export class UpdateOnboardingConfigDto {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OnboardingConfigDocumentDto)
+  documents?: OnboardingConfigDocumentDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OnboardingConfigChecklistItemDto)
+  checklist?: OnboardingConfigChecklistItemDto[];
+
+  @IsOptional() @IsInt() @Min(0) @Max(24) defaultProbationMonths?: number;
+
+  @IsOptional() @IsInt() @Min(1) @Max(365) targetDays?: number;
+
+  /** Profile field keys a new hire must fill for "profile complete". */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  profileFields?: string[];
 }

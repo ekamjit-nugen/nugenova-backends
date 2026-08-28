@@ -274,3 +274,60 @@ export function orgActivatedEmail(params: {
     }),
   };
 }
+
+// ── Employee onboarding lifecycle ────────────────────────────────────────────
+
+/** Sent to a new hire the moment HR initiates their onboarding. */
+export function onboardingWelcomeEmail(params: {
+  employeeName?: string | null;
+  orgName: string;
+  documentTitles: string[];
+  taskTitles: string[];
+  onboardingUrl: string;
+}): { subject: string; html: string } {
+  const greeting = params.employeeName ? `Hi ${esc(params.employeeName)},` : 'Welcome!';
+  const items = [...params.documentTitles, ...params.taskTitles];
+  const bodyHtml = `
+    <p style="margin:0 0 12px;">${greeting}</p>
+    <p style="margin:0 0 12px;">Welcome to <strong style="color:#111827;">${esc(
+      params.orgName,
+    )}</strong>! We're excited to have you. To get you set up, please complete your onboarding — upload the requested documents and tick off your welcome tasks.</p>
+    ${items.length ? `<p style="margin:0;">Here's what's waiting for you:</p>${docListHtml(items)}` : ''}`;
+  return {
+    subject: `Welcome to ${params.orgName} — let's get you onboarded`,
+    html: renderBrandedEmail({
+      eyebrow: 'Onboarding',
+      title: `Welcome to ${params.orgName}`,
+      bodyHtml,
+      ctaText: 'Start onboarding',
+      ctaUrl: params.onboardingUrl,
+      footerNote: 'You are receiving this because you were added to a team on Nugenova.',
+    }),
+  };
+}
+
+/** Daily nudge to a hire with outstanding onboarding items. */
+export function onboardingReminderEmail(params: {
+  employeeName?: string | null;
+  orgName: string;
+  pendingTitles: string[];
+  onboardingUrl: string;
+}): { subject: string; html: string } {
+  const greeting = params.employeeName ? `Hi ${esc(params.employeeName)},` : 'Hello,';
+  const bodyHtml = `
+    <p style="margin:0 0 12px;">${greeting}</p>
+    <p style="margin:0 0 12px;">Just a friendly reminder to finish your onboarding at
+      <strong style="color:#111827;">${esc(params.orgName)}</strong>. A few items are still outstanding:</p>
+    ${docListHtml(params.pendingTitles)}`;
+  return {
+    subject: `Reminder: ${params.pendingTitles.length} onboarding item(s) still to do`,
+    html: renderBrandedEmail({
+      eyebrow: 'Onboarding reminder',
+      title: 'Almost there — a few items left',
+      bodyHtml,
+      ctaText: 'Finish onboarding',
+      ctaUrl: params.onboardingUrl,
+      accent: '#F59E0B',
+    }),
+  };
+}

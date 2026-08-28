@@ -5,10 +5,13 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -214,3 +217,43 @@ export class SubmitDocumentDto {
   @Type(() => FieldValueDto)
   fieldValues?: FieldValueDto[];
 }
+
+// ── employee onboarding lifecycle ───────────────────────────────────────────
+
+/** HR: start onboarding for an existing member. Requirements come from policy. */
+export class InitiateOnboardingDto {
+  /** The membership (or the member's userId) to onboard. */
+  @IsString()
+  @MaxLength(24)
+  membershipId: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startDate?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(24)
+  probationMonths?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  targetDays?: number;
+
+  /** Optional buddy / reporting manager (a userId in the same org). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  reportingManagerId?: string;
+}
+
+/** Employee self-service: mark an uploaded document against its slot. */
+export class UploadOnboardingDocumentDto {
+  @IsString()
+  @MaxLength(24)
+  fileId: string;
+}
+

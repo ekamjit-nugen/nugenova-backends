@@ -19,6 +19,7 @@ import { PolicyAcknowledgementEntity } from './entities/policy-acknowledgement.e
 import { PolicyVersionEntity } from './entities/policy-version.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { NotifierService } from '../notification/notifier.service';
 import { isPolicyEffective, matchesApplicability, EmployeeScope } from './util/policy-eligibility';
 import { DEFAULT_ORG_WORK_TIMING, POLICY_TEMPLATES } from './default-policies';
 import {
@@ -26,7 +27,16 @@ import {
   UpdatePolicyDto,
   PolicyQueryDto,
   CreateFromTemplateDto,
+  UpdateOnboardingConfigDto,
 } from './dto';
+import {
+  OnboardingConfig,
+  ONBOARDING_DOCUMENT_CATALOG,
+  PROFILE_FIELD_CATALOG,
+  catalogByGroup,
+  defaultOnboardingConfig,
+  sanitizeProfileFields,
+} from './onboarding-catalog';
 
 /** What attendance needs to govern a clock-in for one employee. */
 export interface ResolvedWorkContext {
@@ -39,6 +49,17 @@ export interface ResolvedWorkContext {
 
 const byUpdatedAtDesc = (a: PolicyEntity, b: PolicyEntity) =>
   (b.updatedAt?.getTime() || 0) - (a.updatedAt?.getTime() || 0);
+
+/**
+ * The org OWNER is never a subject of the org's own policies — they author and
+ * govern policies rather than being bound by them. So an owner is excluded from
+ * applicability, the login acknowledgement gate, compliance counts and
+ * policy-published notifications, even for an `all`-employees policy. (Only the
+ * owner tier is exempt; admins/managers/employees are all normal subjects.)
+ */
+export function isPolicyExemptRole(role: string | null | undefined): boolean {
+  return role === 'owner';
+}
 
 /**
  * PolicyService — the org rulebook. Every method is org-scoped from the acting
@@ -64,7 +85,66 @@ export class PolicyService {
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    private readonly notifier: NotifierService,
   ) {}
+
+  /**
+   * Announce a policy that has just gone live to the members it applies to. Only
+   * the userId-resolvable audiences are notified here: `all` (every active member)
+   * and `specific` (the listed userIds). Department/designation audiences are left
+   * to the login acknowledgement gate. Never throws (fire-and-forget).
+   */
+  private async notifyPublished(
+    policy: PolicyEntity,
+    actorId: string,
+  ): Promise<void> {
+    try {
+      if (!policy.isActive || policy.isTemplate) return;
+      const orgId = policy.organizationId;
+      if (!orgId) return;
+      // The owner is never a policy subject, so never notified — even for `all`.
+      const owners = await this.memberships.find({
+        where: { organizationId: orgId, role: 'owner' },
+      });
+      const ownerIds = new Set(owners.map((m) => m.userId).filter(Boolean) as string[]);
+
+      let recipientIds: string[] = [];
+      if (policy.applicableTo === 'all') {
+        const members = await this.memberships.find({
+          where: { organizationId: orgId, status: 'active' },
+        });
+        recipientIds = members
+          .filter((m) => !isPolicyExemptRole(m.role))
+          .map((m) => m.userId)
+          .filter(Boolean) as string[];
+      } else if (policy.applicableTo === 'specific') {
+        recipientIds = (policy.applicableIds || []).filter(Boolean);
+      } else {
+        return; // department/designation — covered by the acknowledgement gate
+      }
+      const excluded = new Set([...(policy.excludedEmployeeIds || []), ...ownerIds]);
+      const ackLine = policy.acknowledgementRequired
+        ? ' Please review and acknowledge it.'
+        : '';
+      for (const userId of recipientIds) {
+        if (excluded.has(userId)) continue;
+        await this.notifier.notify({
+          organizationId: orgId,
+          userId,
+          actorId,
+          type: 'policy_published',
+          title: policy.acknowledgementRequired
+            ? 'New policy to acknowledge'
+            : 'New policy published',
+          body: `"${policy.policyName}" is now in effect.${ackLine}`,
+          data: { actionUrl: '/policies', policyId: policy.id },
+          priority: policy.acknowledgementRequired ? 'high' : 'normal',
+        });
+      }
+    } catch (err) {
+      this.logger.error(`notifyPublished failed (policy=${policy.id}): ${String(err)}`);
+    }
+  }
 
   // ── seed: a default work-timing policy for a new org ────────────────────────
 
@@ -130,7 +210,9 @@ export class PolicyService {
       createdBy: userId,
       updatedBy: userId,
     });
-    return this.repo.save(policy);
+    const saved = await this.repo.save(policy);
+    void this.notifyPublished(saved, userId);
+    return saved;
   }
 
   async list(orgId: string, q: PolicyQueryDto = {}): Promise<PolicyEntity[]> {
@@ -156,6 +238,7 @@ export class PolicyService {
   async update(orgId: string, id: string, dto: UpdatePolicyDto, userId: string): Promise<PolicyEntity> {
     const policy = await this.get(orgId, id);
     if (policy.isTemplate) throw new ForbiddenException('Templates cannot be edited');
+    const wasActive = policy.isActive;
 
     const keys = Object.keys(dto);
     const onlyToggle =
@@ -187,16 +270,22 @@ export class PolicyService {
     if (dto.isActive !== undefined) policy.isActive = dto.isActive;
     policy.updatedBy = userId;
     if (!onlyToggle) policy.version += 1;
-    return this.repo.save(policy);
+    const saved = await this.repo.save(policy);
+    // Announce only on an inactive → active transition (publish), not on every edit.
+    if (!wasActive && saved.isActive) void this.notifyPublished(saved, userId);
+    return saved;
   }
 
   /** Activate / deactivate without a version bump (the list toggle). */
   async setActive(orgId: string, id: string, isActive: boolean, userId: string) {
     const policy = await this.get(orgId, id);
     if (policy.isTemplate) throw new ForbiddenException('Templates cannot be toggled');
+    const wasActive = policy.isActive;
     policy.isActive = isActive;
     policy.updatedBy = userId;
-    return this.repo.save(policy);
+    const saved = await this.repo.save(policy);
+    if (!wasActive && saved.isActive) void this.notifyPublished(saved, userId);
+    return saved;
   }
 
   private async snapshotVersion(policy: PolicyEntity, userId: string, summary: string) {
@@ -281,6 +370,10 @@ export class PolicyService {
       isTemplate: false,
       templateName: null,
       sourceTemplateId: null,
+      // A location-tracking template defaults to requiring acknowledgement so
+      // attached employees must consent; the caller can override either way.
+      acknowledgementRequired:
+        dto.acknowledgementRequired ?? tmpl.acknowledgementRequired ?? false,
       isActive: false, // draft until activated (like a normal create)
       version: 1,
       createdBy: userId,
@@ -338,6 +431,112 @@ export class PolicyService {
     });
   }
 
+  // ── onboarding requirements config ──────────────────────────────────────────
+
+  /** The full document catalog (grouped) + defaults, for the Settings UI. */
+  onboardingCatalog() {
+    return {
+      documents: catalogByGroup(),
+      profileFields: PROFILE_FIELD_CATALOG,
+      defaults: defaultOnboardingConfig(),
+    };
+  }
+
+  /**
+   * The org's onboarding policy row (category `onboarding`, applicableTo `all`) —
+   * a singleton per org that carries the requirements config in `extraConfig`.
+   * Not auto-seeded: `getOnboardingConfig` falls back to catalog defaults so an
+   * org that never opens Settings still onboards sensibly.
+   */
+  private async findOnboardingPolicy(orgId: string): Promise<PolicyEntity | null> {
+    return this.repo.findOne({
+      where: {
+        organizationId: orgId,
+        category: 'onboarding',
+        applicableTo: 'all',
+        isDeleted: false,
+      },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  /** Resolve the org's live onboarding requirements (saved config, else defaults). */
+  async getOnboardingConfig(orgId: string): Promise<OnboardingConfig> {
+    const policy = await this.findOnboardingPolicy(orgId);
+    const stored = (policy?.extraConfig?.onboarding as OnboardingConfig) || null;
+    if (!stored) return defaultOnboardingConfig();
+    const fallback = defaultOnboardingConfig();
+    // Refresh doc titles from the catalog (a custom doc keeps its own title).
+    const titleByKey = new Map(ONBOARDING_DOCUMENT_CATALOG.map((d) => [d.key, d.title]));
+    return {
+      documents: (stored.documents || []).map((d) => ({
+        key: d.key,
+        title: titleByKey.get(d.key) || d.title,
+        required: !!d.required,
+      })),
+      checklist: stored.checklist || fallback.checklist,
+      defaultProbationMonths:
+        typeof stored.defaultProbationMonths === 'number'
+          ? stored.defaultProbationMonths
+          : fallback.defaultProbationMonths,
+      targetDays:
+        typeof stored.targetDays === 'number' ? stored.targetDays : fallback.targetDays,
+      profileFields: stored.profileFields
+        ? sanitizeProfileFields(stored.profileFields)
+        : fallback.profileFields,
+    };
+  }
+
+  /** Create-or-update the org's onboarding requirements config. */
+  async upsertOnboardingConfig(
+    orgId: string,
+    dto: UpdateOnboardingConfigDto,
+    userId: string,
+  ): Promise<OnboardingConfig> {
+    const current = await this.getOnboardingConfig(orgId);
+    const titleByKey = new Map(ONBOARDING_DOCUMENT_CATALOG.map((d) => [d.key, d.title]));
+    const next: OnboardingConfig = {
+      documents: (dto.documents ?? current.documents).map((d) => ({
+        key: d.key,
+        title: titleByKey.get(d.key) || d.title,
+        required: !!d.required,
+      })),
+      checklist: (dto.checklist ?? current.checklist).map((c) => ({
+        key: c.key,
+        title: c.title,
+        category: c.category as OnboardingConfig['checklist'][number]['category'],
+        assignedTo: c.assignedTo as OnboardingConfig['checklist'][number]['assignedTo'],
+      })),
+      defaultProbationMonths:
+        dto.defaultProbationMonths ?? current.defaultProbationMonths,
+      targetDays: dto.targetDays ?? current.targetDays,
+      profileFields: dto.profileFields
+        ? sanitizeProfileFields(dto.profileFields)
+        : current.profileFields,
+    };
+
+    let policy = await this.findOnboardingPolicy(orgId);
+    if (!policy) {
+      policy = this.repo.create({
+        organizationId: orgId,
+        policyName: 'Onboarding Requirements',
+        description: 'What every new hire must submit and complete to finish onboarding.',
+        category: 'onboarding',
+        applicableTo: 'all',
+        applicableIds: [],
+        excludedEmployeeIds: [],
+        isActive: true,
+        acknowledgementRequired: false,
+        createdBy: userId,
+        updatedBy: userId,
+      });
+    }
+    policy.extraConfig = { ...(policy.extraConfig || {}), onboarding: next };
+    policy.updatedBy = userId;
+    await this.repo.save(policy);
+    return next;
+  }
+
   private normAttachments(list?: { fileId: string; name: string; mimeType: string; size: number; uploadedAt?: string }[]) {
     if (!list) return null;
     return list.map((a) => ({
@@ -362,6 +561,7 @@ export class PolicyService {
     const applicable = members.filter(
       (m) =>
         m.userId &&
+        !isPolicyExemptRole(m.role) && // the owner is never a policy subject
         matchesApplicability(policy, {
           _id: m.userId,
           departmentId: m.departmentId,
@@ -427,15 +627,25 @@ export class PolicyService {
 
   // ── the resolver attendance consumes ───────────────────────────────────────
 
-  /** Build the applicability scope for an employee from their org membership. */
-  private async employeeScope(orgId: string, userId: string): Promise<EmployeeScope> {
+  /**
+   * Build the applicability scope for an employee from their org membership, and
+   * flag whether they're exempt from policies (the owner). One membership read
+   * serves both.
+   */
+  private async scopeFor(
+    orgId: string,
+    userId: string,
+  ): Promise<{ scope: EmployeeScope; exempt: boolean }> {
     const m = await this.memberships.findOne({
       where: { organizationId: orgId, userId },
     });
     return {
-      _id: userId, // Nexora: 'specific' applicability targets the userId
-      departmentId: m?.departmentId ?? null,
-      designationId: m?.roleId ?? null, // Nexora: Role stands in for Designation
+      scope: {
+        _id: userId, // Nexora: 'specific' applicability targets the userId
+        departmentId: m?.departmentId ?? null,
+        designationId: m?.roleId ?? null, // Nexora: Role stands in for Designation
+      },
+      exempt: isPolicyExemptRole(m?.role),
     };
   }
 
@@ -447,7 +657,11 @@ export class PolicyService {
    */
   async resolveForEmployee(orgId: string, userId: string): Promise<ResolvedWorkContext> {
     const now = new Date();
-    const scope = await this.employeeScope(orgId, userId);
+    const { scope, exempt } = await this.scopeFor(orgId, userId);
+    // The owner is not governed by the org's work-timing policies.
+    if (exempt) {
+      return { policyId: null, policyName: null, workTiming: null, workLocation: null, wfhConfig: null };
+    }
 
     const all = await this.repo.find({
       where: { organizationId: orgId, isDeleted: false, isActive: true, isTemplate: false },
@@ -488,7 +702,9 @@ export class PolicyService {
 
   /** Employee-facing: the policies that apply to them (for the read/ack list). */
   async listApplicable(orgId: string, userId: string): Promise<PolicyEntity[]> {
-    const scope = await this.employeeScope(orgId, userId);
+    const { scope, exempt } = await this.scopeFor(orgId, userId);
+    // The owner is not a subject of the org's policies (no ack gate, no applies-to).
+    if (exempt) return [];
     const all = await this.repo.find({
       where: { organizationId: orgId, isDeleted: false, isActive: true, isTemplate: false },
       order: { createdAt: 'DESC' },

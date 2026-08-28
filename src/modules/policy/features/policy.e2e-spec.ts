@@ -411,4 +411,94 @@ defineFeature(feature, (test) => {
       expect(pendingIds).toContain(emp.userId);
     });
   });
+
+  test("the org owner is exempt from the org's own required policies", ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let id: string;
+    let res: request.Response;
+    given('an organization with an active required policy applicable to everyone', async () => {
+      o = await org();
+      const c = await create(o, {
+        ...wt(),
+        acknowledgementRequired: true,
+        isActive: true,
+        applicableTo: 'all',
+      }).expect(201);
+      id = c.body.data.id;
+    });
+    when('the owner lists their pending acknowledgements', async () => {
+      res = await h
+        .api()
+        .get(`${API}/policies/pending-acknowledgements`)
+        .set('Authorization', `Bearer ${o.ownerToken}`);
+    });
+    then('the owner has nothing pending', () => {
+      expect(res.status).toBe(200);
+      expect((res.body.data as any[]).map((p) => p.id)).not.toContain(id);
+    });
+    and('the owner is not counted among who must acknowledge the policy', async () => {
+      const status = await h
+        .api()
+        .get(`${API}/policies/${id}/acknowledgements`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .expect(200);
+      const everyone = [
+        ...(status.body.data.pending as any[]),
+        ...(status.body.data.acked as any[]),
+      ].map((r) => r.userId);
+      expect(everyone).not.toContain(o.ownerId);
+    });
+  });
+
+  test('a work-from-office policy from the template requires consent to be geo-located', ({
+    given,
+    when,
+    then,
+    and,
+  }) => {
+    let o: CreatedOrg;
+    let id: string;
+    let res: request.Response;
+    given('an organization owner', async () => {
+      o = await org();
+    });
+    when(
+      'the owner creates a policy from the "Work From Office (Geo-fenced, 2 km)" template',
+      async () => {
+        res = await h
+          .api()
+          .post(
+            `${API}/policies/from-template/${encodeURIComponent(
+              'Work From Office (Geo-fenced, 2 km)',
+            )}`,
+          )
+          .set('Authorization', `Bearer ${o.ownerToken}`)
+          .send({ applicableTo: 'all' });
+        id = res.body?.data?.id;
+      },
+    );
+    then('the created policy requires acknowledgement', () => {
+      expect(res.status).toBe(201);
+      expect(res.body.data.acknowledgementRequired).toBe(true);
+      expect(res.body.data.workLocation?.mode).toBe('office');
+    });
+    and(
+      'once activated, an applicable employee must consent before it takes effect',
+      async () => {
+        await h
+          .api()
+          .put(`${API}/policies/${id}/active`)
+          .set('Authorization', `Bearer ${o.ownerToken}`)
+          .send({ isActive: true })
+          .expect(200);
+        const emp = await h.createEmployeeMember(o);
+        const pending = await h
+          .api()
+          .get(`${API}/policies/pending-acknowledgements`)
+          .set('Authorization', `Bearer ${emp.token}`)
+          .expect(200);
+        expect((pending.body.data as any[]).map((p) => p.id)).toContain(id);
+      },
+    );
+  });
 });

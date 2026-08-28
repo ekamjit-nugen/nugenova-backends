@@ -19,6 +19,7 @@ import { HolidayEntity } from '../entities/holiday.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { PolicyService } from '../../policy/policy.service';
+import { WfhRequestService } from './wfh-request.service';
 import {
   WorkLocationConfig,
   WfhConfig,
@@ -115,6 +116,7 @@ export class AttendanceService {
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
     private readonly policyService: PolicyService,
+    private readonly wfhRequests: WfhRequestService,
   ) {}
 
   // ── tz + policy helpers ─────────────────────────────────────────────────────
@@ -440,20 +442,19 @@ export class AttendanceService {
     const { start } = this.getTodayDateRange();
     const { end } = this.getTodayDateRange();
     const now = new Date();
-    const isWfh = dto.workMode === 'home';
     const location = (dto.location as GeoLocation) || null;
     const ip = c.ip || null;
     const method = dto.method || 'web';
 
-    // Resolve the governing policy: it decides the work timing (the "late"
-    // line), the office geo-fence, and the WFH rules. A WFH-declared clock-in is
-    // checked against the WFH policy (allowed days + monthly cap) and is NOT
-    // geo-fenced; a normal clock-in is checked against the work-location.
-    // (Approved-leave conflict guard G-C1 lands with the Leave module.)
-    const { wt, workLocation, wfhConfig } = await this.resolveContext(c.userId, c.orgId);
+    // WFH is no longer self-declared: it counts as work-from-home only when the
+    // employee has an APPROVED WFH request covering today (owner/HR-gated). An
+    // approved WFH day skips the office geo-fence; every other clock-in is checked
+    // against the resolved policy's work-location.
+    const dayKey = dayKeyInTz(now, this.orgTimezone());
+    const isWfh = await this.wfhRequests.hasApprovedForDay(c.orgId, c.userId, dayKey);
+    const { wt, workLocation } = await this.resolveContext(c.userId, c.orgId);
     let geoCheck: GeoCheck;
     if (isWfh) {
-      await this.enforceWfhPolicy(wfhConfig, c.userId, c.orgId, now);
       geoCheck = { mode: 'home', verified: null, distanceKm: null, officeName: null };
     } else {
       geoCheck = this.enforceWorkLocation(workLocation, location);

@@ -12,6 +12,8 @@ import { OrganizationModule } from './modules/organization/organization.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { PolicyModule } from './modules/policy/policy.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
+import { NotificationModule } from './modules/notification/notification.module';
+import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 
 /**
  * Nugenova backend root module.
@@ -36,6 +38,8 @@ import { AttendanceModule } from './modules/attendance/attendance.module';
     OnboardingModule,
     PolicyModule,
     AttendanceModule,
+    NotificationModule,
+    AdminPlatformModule,
   ],
 })
 export class AppModule {}

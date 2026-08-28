@@ -14,7 +14,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { AuthService, AuthTokens, LoginResult } from './auth.service';
+import { AuthService, AuthTokens, LoginResult, describeDevice } from './auth.service';
 import {
   MfaAuthenticateDto,
   MfaVerifyDto,
@@ -91,10 +91,12 @@ export class AuthController {
     @Res({ passthrough: true }) response: any,
   ) {
     const ipAddress = req.ip || req.connection?.remoteAddress;
+    const deviceInfo = describeDevice(req.headers?.['user-agent']);
     const result = await this.authService.verifyOtp(
       body.email,
       body.otp,
       ipAddress,
+      deviceInfo,
     );
 
     if (result.mfaRequired) {
@@ -120,10 +122,12 @@ export class AuthController {
     @Res({ passthrough: true }) response: any,
   ) {
     const ipAddress = req.ip || req.connection?.remoteAddress;
+    const deviceInfo = describeDevice(req.headers?.['user-agent']);
     const result = await this.authService.authenticateMfa(
       body.mfaChallengeToken,
       body.code,
       ipAddress,
+      deviceInfo,
     );
     return this.finishLogin(result, response);
   }

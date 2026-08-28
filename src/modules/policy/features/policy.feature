@@ -84,3 +84,15 @@ Feature: Policies — org-scoped CRUD, roles, isolation, acknowledgement
     When the employee lists their pending acknowledgements
     Then the required policy is listed as pending
     And once the employee acknowledges it, nothing is pending
+
+  Scenario: the org owner is exempt from the org's own required policies
+    Given an organization with an active required policy applicable to everyone
+    When the owner lists their pending acknowledgements
+    Then the owner has nothing pending
+    And the owner is not counted among who must acknowledge the policy
+
+  Scenario: a work-from-office policy from the template requires consent to be geo-located
+    Given an organization owner
+    When the owner creates a policy from the "Work From Office (Geo-fenced, 2 km)" template
+    Then the created policy requires acknowledgement
+    And once activated, an applicable employee must consent before it takes effect

@@ -32,6 +32,12 @@ export interface PolicyTemplateDef {
   workTiming?: WorkTimingConfig;
   workLocation?: WorkLocationConfig;
   wfhConfig?: WfhConfig;
+  /**
+   * Default for the cloned policy's acknowledgement gate. Location-tracking
+   * templates default to `true` so every employee the policy is attached to must
+   * consent (to being geo-located at clock-in) before it takes effect.
+   */
+  acknowledgementRequired?: boolean;
 }
 
 /**
@@ -54,6 +60,8 @@ export const POLICY_TEMPLATES: PolicyTemplateDef[] = [
     description: 'Clock-in must be inside the office geo-fence.',
     workTiming: { ...DEFAULT_ORG_WORK_TIMING },
     workLocation: { mode: 'office', geoFenceRadiusKm: 2, offices: [] },
+    // Location tracking → employees must consent before it applies.
+    acknowledgementRequired: true,
   },
   {
     templateName: 'Work From Home (Anywhere)',
@@ -84,5 +92,6 @@ export const POLICY_TEMPLATES: PolicyTemplateDef[] = [
       isNightShift: true,
     },
     workLocation: { mode: 'office', geoFenceRadiusKm: 2, offices: [] },
+    acknowledgementRequired: true,
   },
 ];

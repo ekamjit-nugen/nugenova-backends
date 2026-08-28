@@ -1,71 +1,63 @@
-Feature: Organization onboarding document lifecycle
-  A super admin requests documents from a newly-provisioned organization; the
-  owner submits or signs each; the super admin reviews them; and the organization
-  is activated only once every document is approved.
+Feature: Employee onboarding lifecycle (HR)
+  HR starts onboarding for a member; requirements are seeded from the org's
+  onboarding policy config. HR verifies or rejects uploaded documents, completes
+  or cancels the onboarding, and a policy edit reconciles onto in-progress
+  onboardings on the next read.
 
-  Scenario: a super admin requests documents from an onboarding org
-    Given a super admin has provisioned an onboarding organization
-    When the super admin requests an agreement and an incorporation certificate
-    Then two documents are created for the organization
-    And each requested document starts in the requested state
+  Scenario: HR initiates onboarding for a member
+    Given an organization with an employee member
+    When the owner initiates onboarding for that member
+    Then an onboarding is created seeded with documents and a checklist
+    And the member appears in the active onboarding list
 
-  Scenario: requesting a document already requested for an org is skipped
-    Given an onboarding org already has an incorporation certificate requested
-    When the super admin requests the incorporation certificate again
-    Then no new document is created and it is reported as skipped
+  Scenario: a second onboarding for the same member is blocked
+    Given an organization with an employee member
+    And the owner has initiated onboarding for that member
+    When the owner initiates onboarding for that member again
+    Then the second initiate is rejected as a bad request
 
-  Scenario: the owner sees the requested documents as a checklist
-    Given an onboarding org has two documents requested
-    When the owner opens their onboarding checklist
-    Then the owner sees both requested documents
-    And the onboarding summary reports none approved yet
+  Scenario: HR verifies an uploaded document
+    Given an organization with an onboarding whose member has uploaded a document
+    When the owner verifies that document
+    Then the document is marked verified
 
-  Scenario: the owner signs a signature document by typing their name
-    Given an onboarding org with a signature document requested
-    When the owner signs it with a typed signature
-    Then the document moves to the submitted state
-    And the stored signature records the signer name and typed method
+  Scenario: HR rejects an uploaded document with a note
+    Given an organization with an onboarding whose member has uploaded a document
+    When the owner rejects that document with a note
+    Then the document is marked rejected with the note
 
-  Scenario: the owner uploads a required document
-    Given an onboarding org with an upload document requested
-    And the owner has uploaded a file
-    When the owner submits the upload document with that file
-    Then the document moves to the submitted state
+  Scenario: a policy edit reconciles onto an in-progress onboarding
+    Given an organization with an employee member
+    And the owner has initiated onboarding for that member
+    When the owner adds a passport to the onboarding requirements
+    And the owner reads that onboarding
+    Then the onboarding now includes a pending passport document
 
-  Scenario: signing without a signer name is rejected
-    Given an onboarding org with a signature document requested
-    When the owner tries to sign it without a name
-    Then the submission is rejected as a bad request
+  Scenario: HR completes an onboarding
+    Given an organization with an employee member
+    And the owner has initiated onboarding for that member
+    When the owner completes that onboarding
+    Then the onboarding status is completed
+    And re-initiating onboarding for that member is blocked
 
-  Scenario: submitting an upload document without a file is rejected
-    Given an onboarding org with an upload document requested
-    When the owner tries to submit it without a file
-    Then the submission is rejected as a bad request
+  @security
+  Scenario: an employee cannot read the onboarding list
+    Given an organization with an employee member
+    When the employee requests the onboarding list
+    Then the onboarding list request is rejected as forbidden
 
-  Scenario: a super admin approves a submitted document
-    Given an onboarding org with a signed, submitted document
-    When the super admin approves the document
-    Then the document moves to the approved state
+  Scenario: an HR role granting employees:edit can manage onboarding
+    Given an organization with a member whose custom role grants employees:edit
+    When that HR member requests the onboarding list
+    Then the onboarding list is returned
 
-  Scenario: approving a document that is not submitted is rejected
-    Given an onboarding org with a document still in the requested state
-    When the super admin tries to approve that requested document
-    Then the approval is rejected as a bad request
+  Scenario: filling in your profile auto-completes the profile checklist task
+    Given an organization with an onboarding for a member
+    When the member fills in their profile
+    Then their "Complete your profile" task is done on the next read
 
-  Scenario: a rejected document is reopened for resubmission
-    Given an onboarding org with a signed, submitted document
-    When the super admin rejects the document with a reason
-    Then the document moves to the rejected state
-    And the owner can sign and resubmit it back to submitted
-
-  Scenario: a super admin uploads a PDF with placed fields and the owner fills and signs it
-    Given a super admin has provisioned an onboarding organization
-    And the super admin uploads a PDF and requests it with a signature and a name field
-    When the owner fills the name field and signs the placed signature field
-    Then the document moves to the submitted state
-    And the stored signature records the drawn method and the filled field values
-
-  Scenario: approving documents never changes the organization status
-    Given an onboarding org whose only document has been submitted
-    When the super admin approves that document
-    Then the document is approved and the organization stays active
+  Scenario: the profile task follows the owner's required-fields configuration
+    Given an organization that requires only the department profile field
+    And an onboarding for a member of that org
+    When the member fills in only their department
+    Then their "Complete your profile" task is done on the next read

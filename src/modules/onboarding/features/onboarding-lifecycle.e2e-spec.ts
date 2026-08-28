@@ -1,490 +1,390 @@
 import { defineFeature, loadFeature } from 'jest-cucumber';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
 import request from 'supertest';
 
 import {
-  bootOnboardingApp,
-  OnboardingHarness,
-  OnboardingOrg,
-} from './support/onboarding-harness';
+  bootOrgTestApp,
+  OrgTestHarness,
+  CreatedOrg,
+} from '../../organization/features/support/org-harness';
+import { newObjectId } from '../../../bootstrap/database/object-id';
+import { MemberOnboardingEntity } from '../entities/member-onboarding.entity';
+import { PolicyEntity } from '../../policy/entities/policy.entity';
 
 const feature = loadFeature('./onboarding-lifecycle.feature', {
   loadRelativePath: true,
 });
+const API = '/api/v1';
+
+interface Member {
+  email: string;
+  userId: string;
+  token: string;
+}
 
 defineFeature(feature, (test) => {
-  let h: OnboardingHarness;
+  let h: OrgTestHarness;
+  let onboardings: Repository<MemberOnboardingEntity>;
+  let policies: Repository<PolicyEntity>;
+  const orgIds = new Set<string>();
+
   beforeAll(async () => {
-    h = await bootOnboardingApp();
+    h = await bootOrgTestApp();
+    onboardings = h.app.get(getRepositoryToken(MemberOnboardingEntity));
+    policies = h.app.get(getRepositoryToken(PolicyEntity));
   });
   afterAll(async () => {
+    const ids = [...orgIds];
+    if (ids.length) {
+      await onboardings.delete({ organizationId: In(ids) }).catch(() => undefined);
+      await policies.delete({ organizationId: In(ids) }).catch(() => undefined);
+    }
     await h.cleanup();
   });
 
-  const submit = (org: OnboardingOrg, id: string, body: any) =>
-    h
-      .api()
-      .post(`/api/v1/onboarding/documents/${id}/submit`)
-      .set('Authorization', `Bearer ${org.ownerToken}`)
-      .send(body);
+  const orgWithMember = async (): Promise<{ o: CreatedOrg; member: Member }> => {
+    const o = await h.createOrg();
+    orgIds.add(o.orgId);
+    const member = await h.createEmployeeMember(o);
+    return { o, member };
+  };
 
-  const approve = (org: OnboardingOrg, id: string, note?: string) =>
-    h
-      .api()
-      .post(`/api/v1/admin/onboarding-documents/${id}/approve`)
-      .set('Authorization', `Bearer ${org.saToken}`)
-      .send({ note });
+  const initiate = (o: CreatedOrg, membershipId: string, body: any = {}) =>
+    h.api()
+      .post(`${API}/onboarding/lifecycle/initiate`)
+      .set('Authorization', `Bearer ${o.ownerToken}`)
+      .send({ membershipId, ...body });
 
-  const reject = (org: OnboardingOrg, id: string, note: string) =>
-    h
-      .api()
-      .post(`/api/v1/admin/onboarding-documents/${id}/reject`)
-      .set('Authorization', `Bearer ${org.saToken}`)
-      .send({ note });
+  const list = (o: CreatedOrg, token = o.ownerToken) =>
+    h.api()
+      .get(`${API}/onboarding/lifecycle`)
+      .set('Authorization', `Bearer ${token}`);
 
-  test('a super admin requests documents from an onboarding org', ({
-    given,
-    when,
-    then,
-    and,
-  }) => {
-    let org: OnboardingOrg;
-    let created: any[];
+  const uploadAsMember = (member: Member, key: string) =>
+    h.api()
+      .post(`${API}/onboarding/me/documents/${key}/upload`)
+      .set('Authorization', `Bearer ${member.token}`)
+      .send({ fileId: newObjectId() });
 
-    given('a super admin has provisioned an onboarding organization', async () => {
-      org = await h.createOnboardingOrg();
-    });
-    when(
-      'the super admin requests an agreement and an incorporation certificate',
-      async () => {
-        created = await h.requestDocs(org, {
-          customDocuments: [
-            { title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' },
-            { title: 'Certificate of Incorporation', category: 'registration', requiresUpload: true },
-          ],
-        });
-      },
-    );
-    then('two documents are created for the organization', () => {
-      expect(created).toHaveLength(2);
-    });
-    and('each requested document starts in the requested state', () => {
-      expect(created.every((d) => d.status === 'requested')).toBe(true);
-    });
-  });
-
-  test('requesting a document already requested for an org is skipped', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
+  test('HR initiates onboarding for a member', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let member: Member;
     let res: request.Response;
-
-    given(
-      'an onboarding org already has an incorporation certificate requested',
-      async () => {
-        org = await h.createOnboardingOrg();
-        await h.requestDocs(org, {
-          templateKeys: ['builtin_incorporation_certificate'],
-        });
-      },
-    );
-    when('the super admin requests the incorporation certificate again', async () => {
-      res = await h
-        .api()
-        .post(`/api/v1/admin/organizations/${org.orgId}/documents`)
-        .set('Authorization', `Bearer ${org.saToken}`)
-        .send({ templateKeys: ['builtin_incorporation_certificate'] });
+    given('an organization with an employee member', async () => {
+      ({ o, member } = await orgWithMember());
     });
-    then('no new document is created and it is reported as skipped', () => {
-      expect(res.status).toBe(201);
-      expect(res.body.data.count).toBe(0);
-      expect(res.body.data.skipped).toHaveLength(1);
-    });
-  });
-
-  test('the owner sees the requested documents as a checklist', ({
-    given,
-    when,
-    then,
-    and,
-  }) => {
-    let org: OnboardingOrg;
-    let res: request.Response;
-
-    given('an onboarding org has two documents requested', async () => {
-      org = await h.createOnboardingOrg();
-      await h.requestDocs(org, {
-        customDocuments: [
-            { title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' },
-            { title: 'Certificate of Incorporation', category: 'registration', requiresUpload: true },
-          ],
-      });
-    });
-    when('the owner opens their onboarding checklist', async () => {
-      res = await h
-        .api()
-        .get('/api/v1/onboarding')
-        .set('Authorization', `Bearer ${org.ownerToken}`);
-    });
-    then('the owner sees both requested documents', () => {
-      expect(res.status).toBe(200);
-      expect(res.body.data.documents).toHaveLength(2);
-    });
-    and('the onboarding summary reports none approved yet', () => {
-      expect(res.body.data.summary.approved).toBe(0);
-      expect(res.body.data.summary.allApproved).toBe(false);
-    });
-  });
-
-  test('the owner signs a signature document by typing their name', ({
-    given,
-    when,
-    then,
-    and,
-  }) => {
-    let org: OnboardingOrg;
-    let res: request.Response;
-
-    given(
-      'an onboarding org with a signature document requested',
-      async () => {
-        org = await h.createOnboardingOrg();
-        await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
-      },
-    );
-    when('the owner signs it with a typed signature', async () => {
-      const list = await h
-        .api()
-        .get('/api/v1/onboarding')
-        .set('Authorization', `Bearer ${org.ownerToken}`);
-      const doc = list.body.data.documents[0];
-      res = await submit(org, doc.id, {
-        signerName: 'Olivia Owner',
-        method: 'typed',
-      });
-    });
-    then('the document moves to the submitted state', () => {
-      expect(res.status).toBe(201);
-      expect(res.body.data.status).toBe('submitted');
-    });
-    and('the stored signature records the signer name and typed method', () => {
-      expect(res.body.data.signature.signerName).toBe('Olivia Owner');
-      expect(res.body.data.signature.method).toBe('typed');
-    });
-  });
-
-  test('the owner uploads a required document', ({ given, and, when, then }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let fileId: string;
-    let res: request.Response;
-
-    given('an onboarding org with an upload document requested', async () => {
-      org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, {
-        templateKeys: ['builtin_incorporation_certificate'],
-      });
-      docId = created[0].id;
-    });
-    and('the owner has uploaded a file', async () => {
-      const up = await h
-        .api()
-        .post('/api/v1/media/upload')
-        .set('Authorization', `Bearer ${org.ownerToken}`)
-        .attach('file', Buffer.from('%PDF-1.4 fake'), {
-          filename: 'cert.pdf',
-          contentType: 'application/pdf',
-        });
-      expect(up.status).toBe(201);
-      fileId = up.body.data.id;
-    });
-    when('the owner submits the upload document with that file', async () => {
-      res = await submit(org, docId, { submittedFileId: fileId });
-    });
-    then('the document moves to the submitted state', () => {
-      expect(res.status).toBe(201);
-      expect(res.body.data.status).toBe('submitted');
-    });
-  });
-
-  test('signing without a signer name is rejected', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let res: request.Response;
-
-    given(
-      'an onboarding org with a signature document requested',
-      async () => {
-        org = await h.createOnboardingOrg();
-        const created = await h.requestDocs(org, {
-          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
-        });
-        docId = created[0].id;
-      },
-    );
-    when('the owner tries to sign it without a name', async () => {
-      res = await submit(org, docId, { method: 'typed' });
-    });
-    then('the submission is rejected as a bad request', () => {
-      expect(res.status).toBe(400);
-    });
-  });
-
-  test('submitting an upload document without a file is rejected', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let res: request.Response;
-
-    given('an onboarding org with an upload document requested', async () => {
-      org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, {
-        templateKeys: ['builtin_incorporation_certificate'],
-      });
-      docId = created[0].id;
-    });
-    when('the owner tries to submit it without a file', async () => {
-      res = await submit(org, docId, {});
-    });
-    then('the submission is rejected as a bad request', () => {
-      expect(res.status).toBe(400);
-    });
-  });
-
-  test('a super admin approves a submitted document', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let res: request.Response;
-
-    given('an onboarding org with a signed, submitted document', async () => {
-      org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
-      docId = created[0].id;
-      await submit(org, docId, { signerName: 'Olivia Owner', method: 'typed' });
-    });
-    when('the super admin approves the document', async () => {
-      res = await approve(org, docId);
-    });
-    then('the document moves to the approved state', () => {
-      expect(res.status).toBe(201);
-      expect(res.body.data.document.status).toBe('approved');
-    });
-  });
-
-  test('approving a document that is not submitted is rejected', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let res: request.Response;
-
-    given(
-      'an onboarding org with a document still in the requested state',
-      async () => {
-        org = await h.createOnboardingOrg();
-        const created = await h.requestDocs(org, {
-          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
-        });
-        docId = created[0].id;
-      },
-    );
-    when('the super admin tries to approve that requested document', async () => {
-      res = await approve(org, docId);
-    });
-    then('the approval is rejected as a bad request', () => {
-      expect(res.status).toBe(400);
-    });
-  });
-
-  test('a rejected document is reopened for resubmission', ({
-    given,
-    when,
-    then,
-    and,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let res: request.Response;
-
-    given('an onboarding org with a signed, submitted document', async () => {
-      org = await h.createOnboardingOrg();
-      const created = await h.requestDocs(org, { customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }] });
-      docId = created[0].id;
-      await submit(org, docId, { signerName: 'Olivia Owner', method: 'typed' });
-    });
-    when('the super admin rejects the document with a reason', async () => {
-      res = await reject(org, docId, 'Signature illegible, please redo');
-    });
-    then('the document moves to the rejected state', () => {
-      expect(res.status).toBe(201);
-      expect(res.body.data.document.status).toBe('rejected');
-    });
-    and('the owner can sign and resubmit it back to submitted', async () => {
-      const resubmit = await submit(org, docId, {
-        signerName: 'Olivia Owner',
-        method: 'typed',
-      });
-      expect(resubmit.status).toBe(201);
-      expect(resubmit.body.data.status).toBe('submitted');
-    });
-  });
-
-  test('a super admin uploads a PDF with placed fields and the owner fills and signs it', ({
-    given,
-    and,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let submitRes: request.Response;
-
-    given('a super admin has provisioned an onboarding organization', async () => {
-      org = await h.createOnboardingOrg();
-    });
-    and(
-      'the super admin uploads a PDF and requests it with a signature and a name field',
-      async () => {
-        const up = await h
-          .api()
-          .post(`/api/v1/admin/organizations/${org.orgId}/upload`)
-          .set('Authorization', `Bearer ${org.saToken}`)
-          .attach('file', Buffer.from('%PDF-1.4 placed-fields'), {
-            filename: 'agreement.pdf',
-            contentType: 'application/pdf',
-          });
-        expect(up.status).toBe(201);
-        const sourceFileId = up.body.data.id;
-        const created = await h.requestDocs(org, {
-          customDocuments: [
-            {
-              title: 'Prepared Service Agreement',
-              category: 'agreement',
-              sourceFileId,
-              fields: [
-                {
-                  key: 'name1',
-                  type: 'name',
-                  page: 0,
-                  xPct: 10,
-                  yPct: 70,
-                  wPct: 40,
-                  hPct: 5,
-                  required: true,
-                  label: 'Full name',
-                },
-                {
-                  key: 'sig1',
-                  type: 'signature',
-                  page: 0,
-                  xPct: 10,
-                  yPct: 80,
-                  wPct: 30,
-                  hPct: 8,
-                  required: true,
-                  label: 'Signature',
-                },
-              ],
-            },
-          ],
-        });
-        docId = created[0].id;
-        // A PDF-with-signature-field doc requires a signature, not an upload.
-        expect(created[0].requiresSignature).toBe(true);
-        expect(created[0].requiresUpload).toBe(false);
-        expect(created[0].sourceFileId).toBe(sourceFileId);
-      },
-    );
-    when(
-      'the owner fills the name field and signs the placed signature field',
-      async () => {
-        const upSig = await h
-          .api()
-          .post('/api/v1/media/upload')
-          .set('Authorization', `Bearer ${org.ownerToken}`)
-          .attach('file', Buffer.from('\x89PNG\r\n signature'), {
-            filename: 'sig.png',
-            contentType: 'image/png',
-          });
-        expect(upSig.status).toBe(201);
-        submitRes = await submit(org, docId, {
-          signerName: 'Yara Owner',
-          method: 'drawn',
-          signatureFileId: upSig.body.data.id,
-          fieldValues: [{ key: 'name1', value: 'Yara Owner' }],
-        });
-      },
-    );
-    then('the document moves to the submitted state', () => {
-      expect(submitRes.status).toBe(201);
-      expect(submitRes.body.data.status).toBe('submitted');
-    });
-    and(
-      'the stored signature records the drawn method and the filled field values',
-      async () => {
-        const view = await h
-          .api()
-          .get(`/api/v1/admin/organizations/${org.orgId}/onboarding`)
-          .set('Authorization', `Bearer ${org.saToken}`);
-        const doc = view.body.data.documents.find((d: any) => d.id === docId);
-        expect(doc.signature.method).toBe('drawn');
-        expect(doc.signature.signatureFileId).toBeTruthy();
-        expect(doc.signature.fieldValues.name1).toBe('Yara Owner');
-      },
-    );
-  });
-
-  test('approving documents never changes the organization status', ({
-    given,
-    when,
-    then,
-  }) => {
-    let org: OnboardingOrg;
-    let docId: string;
-    let res: request.Response;
-
-    given(
-      'an onboarding org whose only document has been submitted',
-      async () => {
-        org = await h.createOnboardingOrg();
-        const created = await h.requestDocs(org, {
-          customDocuments: [{ title: 'Service Agreement', category: 'agreement', requiresSignature: true, bodyHtml: '<p>sign</p>' }],
-        });
-        docId = created[0].id;
-        await submit(org, docId, {
-          signerName: 'Olivia Owner',
-          method: 'typed',
-        });
-      },
-    );
-    when('the super admin approves that document', async () => {
-      res = await approve(org, docId);
+    when('the owner initiates onboarding for that member', async () => {
+      res = await initiate(o, member.userId);
     });
     then(
-      'the document is approved and the organization stays active',
-      async () => {
+      'an onboarding is created seeded with documents and a checklist',
+      () => {
         expect(res.status).toBe(201);
-        expect(res.body.data.document.status).toBe('approved');
-        expect(res.body.data.orgStatus).toBe('active');
-        const orgRow = await h.organizations.findOne({
-          where: { id: org.orgId },
-        });
-        expect(orgRow?.status).toBe('active');
+        expect(res.body.data.documents.length).toBeGreaterThan(0);
+        expect(res.body.data.checklist.length).toBeGreaterThan(0);
+        expect(res.body.data.status).toBe('pending');
       },
     );
+    and('the member appears in the active onboarding list', async () => {
+      const l = await list(o);
+      const ids = l.body.data.map((r: any) => r.userId);
+      expect(ids).toContain(member.userId);
+    });
+  });
+
+  test('a second onboarding for the same member is blocked', ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let res: request.Response;
+    given('an organization with an employee member', async () => {
+      ({ o, member } = await orgWithMember());
+    });
+    and('the owner has initiated onboarding for that member', async () => {
+      await initiate(o, member.userId).expect(201);
+    });
+    when('the owner initiates onboarding for that member again', async () => {
+      res = await initiate(o, member.userId);
+    });
+    then('the second initiate is rejected as a bad request', () => {
+      expect(res.status).toBe(400);
+    });
+  });
+
+  test('HR verifies an uploaded document', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let id: string;
+    let key: string;
+    let res: request.Response;
+    given(
+      'an organization with an onboarding whose member has uploaded a document',
+      async () => {
+        const { o: org, member } = await orgWithMember();
+        o = org;
+        const created = await initiate(o, member.userId).expect(201);
+        id = created.body.data.id;
+        key = created.body.data.documents[0].key;
+        await uploadAsMember(member, key).expect(200);
+      },
+    );
+    when('the owner verifies that document', async () => {
+      res = await h
+        .api()
+        .post(`${API}/onboarding/lifecycle/${id}/documents/${key}/verify`)
+        .set('Authorization', `Bearer ${o.ownerToken}`);
+    });
+    then('the document is marked verified', () => {
+      expect(res.status).toBe(200);
+      const slot = res.body.data.documents.find((d: any) => d.key === key);
+      expect(slot.status).toBe('verified');
+    });
+  });
+
+  test('HR rejects an uploaded document with a note', ({
+    given,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let id: string;
+    let key: string;
+    let res: request.Response;
+    given(
+      'an organization with an onboarding whose member has uploaded a document',
+      async () => {
+        const { o: org, member } = await orgWithMember();
+        o = org;
+        const created = await initiate(o, member.userId).expect(201);
+        id = created.body.data.id;
+        key = created.body.data.documents[0].key;
+        await uploadAsMember(member, key).expect(200);
+      },
+    );
+    when('the owner rejects that document with a note', async () => {
+      res = await h
+        .api()
+        .post(`${API}/onboarding/lifecycle/${id}/documents/${key}/reject`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ note: 'Blurry scan — please re-upload' });
+    });
+    then('the document is marked rejected with the note', () => {
+      expect(res.status).toBe(200);
+      const slot = res.body.data.documents.find((d: any) => d.key === key);
+      expect(slot.status).toBe('rejected');
+      expect(slot.note).toContain('Blurry');
+    });
+  });
+
+  test('a policy edit reconciles onto an in-progress onboarding', ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let id: string;
+    let readRes: request.Response;
+    given('an organization with an employee member', async () => {
+      ({ o, member } = await orgWithMember());
+    });
+    and('the owner has initiated onboarding for that member', async () => {
+      const created = await initiate(o, member.userId).expect(201);
+      id = created.body.data.id;
+    });
+    when('the owner adds a passport to the onboarding requirements', async () => {
+      // Read current config, append the passport, save it back.
+      const cfg = await h
+        .api()
+        .get(`${API}/policies/onboarding-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .expect(200);
+      const docs = [
+        ...cfg.body.data.documents,
+        { key: 'passport', title: 'Passport', required: true },
+      ];
+      await h
+        .api()
+        .put(`${API}/policies/onboarding-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ documents: docs })
+        .expect(200);
+    });
+    and('the owner reads that onboarding', async () => {
+      readRes = await h
+        .api()
+        .get(`${API}/onboarding/lifecycle/${id}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`);
+    });
+    then('the onboarding now includes a pending passport document', () => {
+      expect(readRes.status).toBe(200);
+      const slot = readRes.body.data.documents.find(
+        (d: any) => d.key === 'passport',
+      );
+      expect(slot).toBeTruthy();
+      expect(slot.status).toBe('pending');
+    });
+  });
+
+  test('HR completes an onboarding', ({ given, and, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let id: string;
+    let res: request.Response;
+    given('an organization with an employee member', async () => {
+      ({ o, member } = await orgWithMember());
+    });
+    and('the owner has initiated onboarding for that member', async () => {
+      const created = await initiate(o, member.userId).expect(201);
+      id = created.body.data.id;
+    });
+    when('the owner completes that onboarding', async () => {
+      res = await h
+        .api()
+        .post(`${API}/onboarding/lifecycle/${id}/complete`)
+        .set('Authorization', `Bearer ${o.ownerToken}`);
+    });
+    then('the onboarding status is completed', () => {
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('completed');
+    });
+    and('re-initiating onboarding for that member is blocked', async () => {
+      const again = await initiate(o, member.userId);
+      expect(again.status).toBe(400);
+    });
+  });
+
+  test('an employee cannot read the onboarding list', ({
+    given,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let res: request.Response;
+    given('an organization with an employee member', async () => {
+      ({ o, member } = await orgWithMember());
+    });
+    when('the employee requests the onboarding list', async () => {
+      res = await list(o, member.token);
+    });
+    then('the onboarding list request is rejected as forbidden', () => {
+      expect(res.status).toBe(403);
+    });
+  });
+
+  test('an HR role granting employees:edit can manage onboarding', ({
+    given,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let hrToken: string;
+    let res: request.Response;
+    given(
+      'an organization with a member whose custom role grants employees:edit',
+      async () => {
+        o = await h.createOrg();
+        orgIds.add(o.orgId);
+        const role = await h
+          .api()
+          .post(`${API}/org/roles`)
+          .set('Authorization', `Bearer ${o.ownerToken}`)
+          .send({
+            name: 'HR Manager',
+            permissions: [{ resource: 'employees', actions: ['view', 'create', 'edit'] }],
+          })
+          .expect(201);
+        const email = `hr+${Date.now()}@nugenova.test`;
+        const member = await h
+          .api()
+          .post(`${API}/org/members`)
+          .set('Authorization', `Bearer ${o.ownerToken}`)
+          .send({ email, roleId: role.body.data.id, firstName: 'Hr', lastName: 'Manager' })
+          .expect(201);
+        h.trackUser(member.body.data.userId);
+        hrToken = await h.mintToken(email);
+      },
+    );
+    when('that HR member requests the onboarding list', async () => {
+      res = await list(o, hrToken);
+    });
+    then('the onboarding list is returned', () => {
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data)).toBe(true);
+    });
+  });
+
+  test('filling in your profile auto-completes the profile checklist task', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an onboarding for a member', async () => {
+      ({ o, member } = await orgWithMember());
+      await initiate(o, member.userId).expect(201);
+    });
+    when('the member fills in their profile', async () => {
+      await h
+        .api()
+        .put(`${API}/auth/me`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .send({ firstName: 'Emp', lastName: 'Loyee', jobTitle: 'Engineer', phoneNumber: '+91 90000 00000' })
+        .expect(200);
+    });
+    then('their "Complete your profile" task is done on the next read', async () => {
+      const me = await h
+        .api()
+        .get(`${API}/onboarding/me`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .expect(200);
+      const task = (me.body.data.checklist as any[]).find((c) => c.key === 'profile_complete');
+      expect(task?.status).toBe('done');
+    });
+  });
+
+  test("the profile task follows the owner's required-fields configuration", ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization that requires only the department profile field', async () => {
+      o = await h.createOrg();
+      orgIds.add(o.orgId);
+      await h
+        .api()
+        .put(`${API}/policies/onboarding-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ profileFields: ['department'] })
+        .expect(200);
+    });
+    and('an onboarding for a member of that org', async () => {
+      member = await h.createEmployeeMember(o);
+      await initiate(o, member.userId).expect(201);
+    });
+    when('the member fills in only their department', async () => {
+      // No jobTitle/phone — only the configured field. Proves it's not hardcoded.
+      await h
+        .api()
+        .put(`${API}/auth/me`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .send({ firstName: 'Emp', lastName: 'Loyee', department: 'Engineering' })
+        .expect(200);
+    });
+    then('their "Complete your profile" task is done on the next read', async () => {
+      const me = await h
+        .api()
+        .get(`${API}/onboarding/me`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .expect(200);
+      const task = (me.body.data.checklist as any[]).find((c) => c.key === 'profile_complete');
+      expect(task?.status).toBe('done');
+    });
   });
 });

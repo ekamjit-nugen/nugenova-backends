@@ -7,10 +7,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { In, LessThan, MoreThan, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import * as speakeasy from 'speakeasy';
+import * as QRCode from 'qrcode';
 
 import { UserEntity } from './entities/user.entity';
 import { OrgMembershipEntity } from './entities/org-membership.entity';
@@ -56,6 +57,44 @@ export interface LoginResult {
  * the persistence layer changed (Mongoose Model → TypeORM Repository, `_id` →
  * `id`). REST responses still expose the id as `id`/`_id` for frontend parity.
  */
+/** Where a session was created — captured at login for the Security page. */
+export interface DeviceContext {
+  deviceInfo?: string;
+  ipAddress?: string | null;
+}
+
+/**
+ * Turn a raw User-Agent into a short, human label ("Chrome on macOS") for the
+ * active-sessions list. No dependency — a small substring match covers the
+ * common browsers/OSes; anything unrecognised falls back to "Browser".
+ */
+export function describeDevice(ua?: string | null): string {
+  if (!ua || typeof ua !== 'string') return 'Unknown device';
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\/|Opera/.test(ua)
+      ? 'Opera'
+      : /Chrome\//.test(ua) && !/Chromium/.test(ua)
+        ? 'Chrome'
+        : /Firefox\//.test(ua)
+          ? 'Firefox'
+          : /Version\/.*Safari/.test(ua)
+            ? 'Safari'
+            : 'Browser';
+  const os = /Windows/.test(ua)
+    ? 'Windows'
+    : /iPhone|iPad/.test(ua)
+      ? 'iOS'
+      : /Mac OS X|Macintosh/.test(ua)
+        ? 'macOS'
+        : /Android/.test(ua)
+          ? 'Android'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : '';
+  return os ? `${browser} on ${os}` : browser;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -249,6 +288,7 @@ export class AuthService {
     email: string,
     otp: string,
     ipAddress?: string,
+    deviceInfo?: string,
   ): Promise<{
     verified: boolean;
     mfaRequired?: boolean;
@@ -409,7 +449,10 @@ export class AuthService {
       };
     }
 
-    return this.issueLoginResult(user, isNewUser);
+    return this.issueLoginResult(user, isNewUser, {
+      deviceInfo,
+      ipAddress: ipAddress ?? null,
+    });
   }
 
   /** 5-min JWT proving the email-OTP step passed; `purpose` claim prevents reuse. */
@@ -423,11 +466,12 @@ export class AuthService {
   private async issueLoginResult(
     user: UserEntity,
     isNewUser: boolean,
+    device?: DeviceContext,
   ): Promise<LoginResult> {
     // Invite auto-claim is a later feature (Phase 2 people) — no-op for now.
     const routingUser = (await this.userRepo.findOne({ where: { id: user.id } })) || user;
     const route = await this.determinePostLoginRoute(routingUser);
-    const tokens = await this.generateTokens(routingUser, route.organizationId);
+    const tokens = await this.generateTokens(routingUser, route.organizationId, device);
     return { verified: true, user: routingUser, tokens, isNewUser, route };
   }
 
@@ -435,6 +479,7 @@ export class AuthService {
     challengeToken: string,
     code: string,
     ipAddress?: string,
+    deviceInfo?: string,
   ): Promise<LoginResult> {
     let payload: any;
     try {
@@ -509,7 +554,10 @@ export class AuthService {
       ipAddress,
     });
 
-    return this.issueLoginResult(user, false);
+    return this.issueLoginResult(user, false, {
+      deviceInfo,
+      ipAddress: ipAddress ?? null,
+    });
   }
 
   // ── Post-login routing ─────────────────────────────────────────────────────
@@ -650,7 +698,11 @@ export class AuthService {
 
   // ── Token generation ───────────────────────────────────────────────────────
 
-  async generateTokens(user: UserEntity, orgId?: string): Promise<AuthTokens> {
+  async generateTokens(
+    user: UserEntity,
+    orgId?: string,
+    device?: DeviceContext,
+  ): Promise<AuthTokens> {
     const resolvedOrgId = orgId || user.defaultOrganizationId || null;
 
     let orgRole = 'member';
@@ -762,8 +814,8 @@ export class AuthService {
         this.sessionRepo.create({
           userId: user.id,
           refreshTokenFamily: tokenFamily,
-          deviceInfo: 'Unknown',
-          ipAddress: null,
+          deviceInfo: device?.deviceInfo?.trim() || 'Unknown device',
+          ipAddress: device?.ipAddress ?? null,
           lastUsedAt: new Date(),
           isRevoked: false,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -865,9 +917,11 @@ export class AuthService {
   }
 
   async getSessions(userId: string): Promise<SessionEntity[]> {
+    // Only genuinely-active sessions: not revoked AND not past expiry (an expired
+    // session is dead even if the sweep hasn't removed it yet).
     return this.sessionRepo.find({
-      where: { userId, isRevoked: false },
-      order: { createdAt: 'DESC' },
+      where: { userId, isRevoked: false, expiresAt: MoreThan(new Date()) },
+      order: { lastUsedAt: 'DESC', createdAt: 'DESC' },
     });
   }
 
@@ -883,7 +937,7 @@ export class AuthService {
 
   async setupMFA(
     userId: string,
-  ): Promise<{ secret: string; otpauthUrl: string }> {
+  ): Promise<{ secret: string; otpauthUrl: string; qrCodeDataUrl: string }> {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
 
@@ -897,10 +951,18 @@ export class AuthService {
     user.mfaMethod = 'totp';
     await this.userRepo.save(user);
 
-    return {
-      secret: secret.base32,
-      otpauthUrl: secret.otpauth_url || '',
-    };
+    const otpauthUrl = secret.otpauth_url || '';
+    // Render the otpauth URL as a scannable QR (PNG data-URL) so the user can
+    // scan it instead of typing the key. Falls back to '' if rendering fails —
+    // the manual key entry still works.
+    let qrCodeDataUrl = '';
+    try {
+      if (otpauthUrl) qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl, { margin: 1, width: 200 });
+    } catch (err) {
+      this.logger.warn(`QR generation failed: ${String(err)}`);
+    }
+
+    return { secret: secret.base32, otpauthUrl, qrCodeDataUrl };
   }
 
   async verifyMFA(
@@ -972,15 +1034,30 @@ export class AuthService {
       lastName?: string;
       phoneNumber?: string;
       jobTitle?: string;
+      department?: string;
+      bio?: string;
+      location?: string;
+      timezone?: string;
+      linkedIn?: string;
+      github?: string;
+      avatar?: string;
     },
   ): Promise<UserEntity> {
     const user = await this.getUserById(userId);
-    if (input.firstName !== undefined) user.firstName = input.firstName.trim();
+    // Names can't be blanked (truthy guard); the rest clear to null on empty.
+    if (input.firstName && input.firstName.trim()) user.firstName = input.firstName.trim();
     if (input.lastName !== undefined) user.lastName = input.lastName.trim();
-    if (input.phoneNumber !== undefined) {
-      user.phoneNumber = input.phoneNumber.trim() || null;
-    }
-    if (input.jobTitle !== undefined) user.jobTitle = input.jobTitle.trim() || null;
+    const setOrNull = (v: string | undefined) =>
+      v === undefined ? undefined : v.trim() || null;
+    const p = setOrNull(input.phoneNumber); if (p !== undefined) user.phoneNumber = p;
+    const jt = setOrNull(input.jobTitle); if (jt !== undefined) user.jobTitle = jt;
+    const dp = setOrNull(input.department); if (dp !== undefined) user.department = dp;
+    const bio = setOrNull(input.bio); if (bio !== undefined) user.bio = bio;
+    const loc = setOrNull(input.location); if (loc !== undefined) user.location = loc;
+    const tz = setOrNull(input.timezone); if (tz !== undefined) user.timezone = tz;
+    const li = setOrNull(input.linkedIn); if (li !== undefined) user.linkedIn = li;
+    const gh = setOrNull(input.github); if (gh !== undefined) user.github = gh;
+    if (input.avatar !== undefined) user.avatar = input.avatar.trim() || null;
     return this.userRepo.save(user);
   }
 
@@ -1004,6 +1081,15 @@ export class AuthService {
       firstName: user.firstName,
       lastName: user.lastName,
       avatar: user.avatar,
+      // Profile fields (settings → profile).
+      phoneNumber: user.phoneNumber,
+      jobTitle: user.jobTitle,
+      department: user.department,
+      bio: user.bio,
+      location: user.location,
+      timezone: user.timezone,
+      linkedIn: user.linkedIn,
+      github: user.github,
       roles: user.roles,
       isPlatformAdmin: user.isPlatformAdmin,
       setupStage: user.setupStage,

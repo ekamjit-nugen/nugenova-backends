@@ -23,16 +23,8 @@ Feature: Attendance is governed by the org's policy
     When the Engineering employee clocks in at "10:30" local time
     Then the record is marked present
 
-  Scenario: WFH is rejected on a day the policy does not allow
-    Given a WFH policy allowing only "monday" applies to the employee
-    When the employee declares WFH and clocks in on a "tuesday"
-    Then the clock-in is rejected
-
-  Scenario: WFH is rejected once the monthly cap is reached
-    Given a WFH policy with a monthly cap of 1 applies to the employee
-    And the employee has already worked from home once this month
-    When the employee declares WFH and clocks in again this month
-    Then the clock-in is rejected
+  # WFH is no longer self-declared at clock-in — it is a request → approval flow.
+  # See wfh-request.feature for the full lifecycle and its effect on clock-in.
 
   Scenario: an office geo-fence blocks a clock-in outside the radius
     Given an office policy with a geo-fence around the office applies to the employee
@@ -42,10 +34,4 @@ Feature: Attendance is governed by the org's policy
   Scenario: an office geo-fence allows a clock-in inside the radius
     Given an office policy with a geo-fence around the office applies to the employee
     When the employee clocks in from inside the radius
-    Then the clock-in succeeds
-
-  Scenario: a WFH-declared clock-in is not geo-fenced
-    Given an office policy with a geo-fence around the office applies to the employee
-    And WFH is allowed for the employee today
-    When the employee declares WFH and clocks in from anywhere
     Then the clock-in succeeds
