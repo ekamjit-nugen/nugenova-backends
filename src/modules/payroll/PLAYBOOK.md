@@ -30,6 +30,8 @@ Payslips itemise **earnings**, **deductions**, and **employer contributions**.
     GJ/MP + `none`); MH's February bump handled.
   - **LWF** (Labour Welfare Fund) — state amounts applied only in the applicable
     months (`LWF_STATES`, e.g. MH ₹25/₹75 in Jun & Dec); off by default.
+  - The PT/LWF **state pickers offer every Indian state + UT** (`INDIAN_STATES`, 36);
+    a state with no encoded slab resolves to ₹0. Static list — no runtime API / npm dep.
   - Statutory runs on the **LOP-adjusted (earned)** wage: earned gross drives
     ESI/PT/LWF, the correspondingly-prorated Basic drives PF.
 - **Custom deductions / contributions** (owner-defined, org-wide) — a list on the

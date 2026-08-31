@@ -3,6 +3,7 @@ import {
   resolvePayrollConfig,
   sanitizePayrollConfig,
   ptStateOptions,
+  lwfStateOptions,
 } from './payroll-config';
 
 describe('resolvePayrollConfig', () => {
@@ -94,5 +95,22 @@ describe('ptStateOptions', () => {
     const opts = ptStateOptions();
     expect(opts.find((o) => o.value === 'none')).toBeTruthy();
     expect(opts.find((o) => o.value === 'MH')?.label).toBe('Maharashtra');
+  });
+  it('offers every Indian state/UT (36) plus the none option', () => {
+    const opts = ptStateOptions();
+    expect(opts).toHaveLength(37); // 28 states + 8 UTs + none
+    // A state with no encoded PT slab is still selectable.
+    expect(opts.find((o) => o.value === 'RJ')?.label).toBe('Rajasthan');
+    expect(opts.find((o) => o.value === 'UP')?.label).toBe('Uttar Pradesh');
+  });
+});
+
+describe('all-states validation', () => {
+  it('accepts any Indian state for PT/LWF, even without a slab', () => {
+    expect(resolvePayrollConfig({ ptState: 'RJ' }).ptState).toBe('RJ');
+    expect(resolvePayrollConfig({ lwf: { enabled: true, state: 'UP' } }).lwf.state).toBe('UP');
+  });
+  it('LWF options also cover every state', () => {
+    expect(lwfStateOptions()).toHaveLength(37);
   });
 });

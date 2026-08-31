@@ -20,6 +20,8 @@ import {
   DEDUCTION_BASES,
   PT_STATES,
   LWF_STATES,
+  INDIAN_STATES,
+  isIndianState,
 } from '../payroll/statutory';
 
 /** A submitted custom line — `basis` is a loose string until sanitized/validated. */
@@ -53,14 +55,16 @@ export function defaultPayrollConfig(): PayrollStatutoryConfig {
   };
 }
 
-/** The PT-state options for the Settings → Payroll dropdown. */
+const ALL_STATE_OPTIONS = INDIAN_STATES.map((s) => ({ value: s.code, label: s.name }));
+
+/** PT-state options: "no PT" + every Indian state / UT. */
 export function ptStateOptions(): { value: string; label: string }[] {
-  return Object.entries(PT_STATES).map(([value, def]) => ({ value, label: def.label }));
+  return [{ value: 'none', label: PT_STATES.none.label }, ...ALL_STATE_OPTIONS];
 }
 
-/** The LWF-state options for the Settings → Payroll dropdown. */
+/** LWF-state options: "no LWF" + every Indian state / UT. */
 export function lwfStateOptions(): { value: string; label: string }[] {
-  return Object.entries(LWF_STATES).map(([value, def]) => ({ value, label: def.label }));
+  return [{ value: 'none', label: LWF_STATES.none.label }, ...ALL_STATE_OPTIONS];
 }
 
 /** The custom-deduction basis options for the editor. */
@@ -125,8 +129,10 @@ export function resolvePayrollConfig(
   const pf: Partial<PfConfig> = s.pf || {};
   const esi: Partial<EsiConfig> = s.esi || {};
   const lwf: Partial<LwfConfig> = s.lwf || {};
-  const ptState = typeof s.ptState === 'string' && PT_STATES[s.ptState] ? s.ptState : d.ptState;
-  const lwfState = typeof lwf.state === 'string' && LWF_STATES[lwf.state] ? lwf.state : d.lwf.state;
+  const validState = (v: unknown): v is string =>
+    typeof v === 'string' && (v === 'none' || isIndianState(v));
+  const ptState = validState(s.ptState) ? s.ptState : d.ptState;
+  const lwfState = validState(lwf.state) ? lwf.state : d.lwf.state;
   return {
     pf: {
       enabled: bool(pf.enabled, d.pf.enabled),

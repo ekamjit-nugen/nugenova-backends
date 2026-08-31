@@ -66,6 +66,69 @@ export function computeESI(grossMonthly: number, cfg: EsiConfig): { employee: nu
   };
 }
 
+// ── Indian states + union territories (canonical list) ────────────────────────
+
+/**
+ * The full set of Indian states (28) + union territories (8). This is the option
+ * source for the PT/LWF state pickers so an org can select ANY state; the slab
+ * tables below only carry the states we've encoded rates for, and any state absent
+ * from them resolves to zero (i.e. that state levies no PT/LWF, or we don't apply
+ * it). Codes are stable — existing saved configs (MH/KA/WB/…) keep resolving.
+ * Kept as a static constant on purpose (no runtime API / npm dependency for a
+ * fixed list).
+ */
+export const INDIAN_STATES: { code: string; name: string }[] = [
+  { code: 'AP', name: 'Andhra Pradesh' },
+  { code: 'AR', name: 'Arunachal Pradesh' },
+  { code: 'AS', name: 'Assam' },
+  { code: 'BR', name: 'Bihar' },
+  { code: 'CG', name: 'Chhattisgarh' },
+  { code: 'GA', name: 'Goa' },
+  { code: 'GJ', name: 'Gujarat' },
+  { code: 'HR', name: 'Haryana' },
+  { code: 'HP', name: 'Himachal Pradesh' },
+  { code: 'JH', name: 'Jharkhand' },
+  { code: 'KA', name: 'Karnataka' },
+  { code: 'KL', name: 'Kerala' },
+  { code: 'MP', name: 'Madhya Pradesh' },
+  { code: 'MH', name: 'Maharashtra' },
+  { code: 'MN', name: 'Manipur' },
+  { code: 'ML', name: 'Meghalaya' },
+  { code: 'MZ', name: 'Mizoram' },
+  { code: 'NL', name: 'Nagaland' },
+  { code: 'OD', name: 'Odisha' },
+  { code: 'PB', name: 'Punjab' },
+  { code: 'RJ', name: 'Rajasthan' },
+  { code: 'SK', name: 'Sikkim' },
+  { code: 'TN', name: 'Tamil Nadu' },
+  { code: 'TS', name: 'Telangana' },
+  { code: 'TR', name: 'Tripura' },
+  { code: 'UP', name: 'Uttar Pradesh' },
+  { code: 'UK', name: 'Uttarakhand' },
+  { code: 'WB', name: 'West Bengal' },
+  // Union territories
+  { code: 'AN', name: 'Andaman & Nicobar Islands' },
+  { code: 'CH', name: 'Chandigarh' },
+  { code: 'DN', name: 'Dadra & Nagar Haveli and Daman & Diu' },
+  { code: 'DL', name: 'Delhi' },
+  { code: 'JK', name: 'Jammu & Kashmir' },
+  { code: 'LA', name: 'Ladakh' },
+  { code: 'LD', name: 'Lakshadweep' },
+  { code: 'PY', name: 'Puducherry' },
+];
+
+const STATE_NAME = new Map(INDIAN_STATES.map((s) => [s.code, s.name]));
+
+/** Is `code` one of the canonical Indian state / UT codes? */
+export function isIndianState(code: string): boolean {
+  return STATE_NAME.has(code);
+}
+
+/** Display name for a state code (falls back to the code itself). */
+export function stateName(code: string): string {
+  return STATE_NAME.get(code) ?? code;
+}
+
 // ── Professional Tax (state slabs) ────────────────────────────────────────────
 
 /** A PT slab: monthly gross in [upTo(prev), upTo] pays `amount` (₹/month). */
@@ -146,7 +209,8 @@ export const PT_STATES: Record<string, { label: string; slabs: PtSlab[]; febBump
 };
 
 export function ptStateLabel(state: string): string {
-  return PT_STATES[state]?.label ?? state;
+  if (state === 'none') return PT_STATES.none.label;
+  return PT_STATES[state]?.label ?? stateName(state);
 }
 
 /** Professional tax for a monthly gross in a state. `month` (1-12) applies MH's Feb bump. */
@@ -193,7 +257,8 @@ export const LWF_STATES: Record<
 };
 
 export function lwfStateLabel(state: string): string {
-  return LWF_STATES[state]?.label ?? state;
+  if (state === 'none') return LWF_STATES.none.label;
+  return LWF_STATES[state]?.label ?? stateName(state);
 }
 
 /** LWF employee/employer amounts for a month (0 outside the applicable months). */
