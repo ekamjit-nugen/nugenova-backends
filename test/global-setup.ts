@@ -36,6 +36,7 @@ import { MemberOnboarding1787840000000 } from '../src/bootstrap/database/migrati
 import { WfhRequests1787850000000 } from '../src/bootstrap/database/migrations/1787850000000-WfhRequests';
 import { Notifications1787860000000 } from '../src/bootstrap/database/migrations/1787860000000-Notifications';
 import { NotificationPreferences1787870000000 } from '../src/bootstrap/database/migrations/1787870000000-NotificationPreferences';
+import { Leave1787880000000 } from '../src/bootstrap/database/migrations/1787880000000-Leave';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -45,6 +46,8 @@ import { PolicyAcknowledgementEntity } from '../src/modules/policy/entities/poli
 import { PolicyVersionEntity } from '../src/modules/policy/entities/policy-version.entity';
 import { NotificationEntity } from '../src/modules/notification/entities/notification.entity';
 import { NotificationPreferenceEntity } from '../src/modules/notification/entities/notification-preference.entity';
+import { LeaveRequestEntity } from '../src/modules/leave/entities/leave-request.entity';
+import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -97,6 +100,8 @@ module.exports = async function globalSetup(): Promise<void> {
       PolicyVersionEntity,
       NotificationEntity,
       NotificationPreferenceEntity,
+      LeaveRequestEntity,
+      LeaveBalanceEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -121,6 +126,7 @@ module.exports = async function globalSetup(): Promise<void> {
       WfhRequests1787850000000,
       Notifications1787860000000,
       NotificationPreferences1787870000000,
+      Leave1787880000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
