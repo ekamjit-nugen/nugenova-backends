@@ -53,6 +53,7 @@ import {
   ptStateOptions,
   lwfStateOptions,
   deductionBasisOptions,
+  deductionTemplates,
   PayrollConfigInput,
 } from './payroll-config';
 import { PayrollStatutoryConfig } from '../payroll/statutory';
@@ -527,6 +528,7 @@ export class PolicyService {
       ptStates: ptStateOptions(),
       lwfStates: lwfStateOptions(),
       deductionBases: deductionBasisOptions(),
+      templates: deductionTemplates(),
     };
   }
 
@@ -550,13 +552,27 @@ export class PolicyService {
     return resolvePayrollConfig(stored);
   }
 
-  /** Create-or-update the org's statutory (PF/ESI/PT) config. */
+  /**
+   * Create-or-update the org's statutory config. This is a PARTIAL merge onto the
+   * current config: only the fields present in `input` change (so, e.g., a PUT that
+   * sends just `customDeductions` leaves PF/ESI/PT untouched). Since defaults are
+   * opt-in (everything off), a full-replace here would silently disable deductions.
+   */
   async upsertPayrollConfig(
     orgId: string,
     input: PayrollConfigInput,
     userId: string,
   ): Promise<PayrollStatutoryConfig> {
-    const clean = sanitizePayrollConfig(input);
+    const current = await this.getPayrollConfig(orgId);
+    const merged: PayrollConfigInput = {
+      pf: { ...current.pf, ...(input.pf || {}) },
+      esi: { ...current.esi, ...(input.esi || {}) },
+      ptState: input.ptState ?? current.ptState,
+      lwf: { ...current.lwf, ...(input.lwf || {}) },
+      customDeductions:
+        input.customDeductions !== undefined ? input.customDeductions : current.customDeductions,
+    };
+    const clean = sanitizePayrollConfig(merged);
     let policy = await this.findPayrollPolicy(orgId);
     if (!policy) {
       policy = this.repo.create({

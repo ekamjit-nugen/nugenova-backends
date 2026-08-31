@@ -86,10 +86,16 @@ defineFeature(feature, (test) => {
    * (so the payslip has zero LOP and full gross — the clean base for the statutory
    * assertions). Pass `components` for a component-based structure.
    */
+  // Deductions are opt-in now, so tests that assert statutory figures enable the
+  // standard PF/ESI/PT(MH) set explicitly (pass `statutory: false` to keep an org
+  // in its default, fully opt-out state).
+  const STD_STATUTORY = { pf: { enabled: true }, esi: { enabled: true }, ptState: 'MH' };
+
   const setupFullPaidMonth = async (
     salaryAmount: number,
     components?: { code: string; name: string; amount: number }[],
     recurringDeductions?: { code: string; name: string; amount: number }[],
+    statutory: Record<string, unknown> | false = STD_STATUTORY,
   ): Promise<{ o: CreatedOrg; member: Member }> => {
     const { o, member } = await orgWithMember();
     await h
@@ -103,6 +109,14 @@ defineFeature(feature, (test) => {
         ...(recurringDeductions ? { recurringDeductions } : {}),
       })
       .expect(200);
+    if (statutory) {
+      await h
+        .api()
+        .put(`${API}/policies/payroll-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send(statutory)
+        .expect(200);
+    }
     await h
       .api()
       .put(`${API}/policies/leave-config`)
@@ -216,6 +230,27 @@ defineFeature(feature, (test) => {
       expect(slip.lopDeduction).toBe(0);
       expect(slip.grossEarnings).toBe(44000);
       expect(slip.lopDetails.paidLeaveDays).toBeGreaterThan(0);
+    });
+  });
+
+  test('deductions are opt-in — a new organization deducts nothing by default', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given(
+      'an organization with an employee member on a salary and paid leave all month with no deductions configured',
+      async () => {
+        ({ o, member } = await setupFullPaidMonth(44000, undefined, undefined, false));
+      },
+    );
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then("the member's payslip has no statutory deductions and net equals gross", async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
+      expect(slip).toBeDefined();
+      expect(slip.totalDeductions).toBe(0);
+      expect(slip.netPay).toBe(44000);
+      expect(slip.deductions).toHaveLength(0);
     });
   });
 

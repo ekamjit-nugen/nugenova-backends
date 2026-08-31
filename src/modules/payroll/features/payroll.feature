@@ -30,6 +30,11 @@ Feature: Payroll (simple monthly payslips)
     When the owner generates payslips for that month
     Then the member's payslip has no loss-of-pay and full gross earnings
 
+  Scenario: deductions are opt-in — a new organization deducts nothing by default
+    Given an organization with an employee member on a salary and paid leave all month with no deductions configured
+    When the owner generates payslips for that month
+    Then the member's payslip has no statutory deductions and net equals gross
+
   Scenario: statutory deductions reduce net pay
     Given an organization with an employee member on a salary and paid leave all month
     When the owner generates payslips for that month

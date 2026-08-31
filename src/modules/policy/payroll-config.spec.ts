@@ -13,12 +13,12 @@ describe('resolvePayrollConfig', () => {
     expect(resolvePayrollConfig({})).toEqual(d);
   });
 
-  it('fills missing fields from the defaults', () => {
-    const r = resolvePayrollConfig({ pf: { enabled: false } });
-    expect(r.pf.enabled).toBe(false);
-    expect(r.pf.employeeRate).toBe(12); // default preserved
-    expect(r.esi.enabled).toBe(true);
-    expect(r.ptState).toBe('MH');
+  it('fills missing fields from the defaults (opt-in: flags off, rates present)', () => {
+    const r = resolvePayrollConfig({ pf: { enabled: true } });
+    expect(r.pf.enabled).toBe(true);
+    expect(r.pf.employeeRate).toBe(12); // canonical rate still filled in
+    expect(r.esi.enabled).toBe(false); // opt-in default: off until added
+    expect(r.ptState).toBe('none');
   });
 
   it('clamps out-of-range rates and rounds ceilings', () => {
@@ -31,8 +31,8 @@ describe('resolvePayrollConfig', () => {
     expect(r.esi.employeeRate).toBe(0); // clamped to min
   });
 
-  it('rejects an unknown PT state, falling back to the default', () => {
-    expect(resolvePayrollConfig({ ptState: 'ZZ' }).ptState).toBe('MH');
+  it('rejects an unknown PT state, falling back to the default (none)', () => {
+    expect(resolvePayrollConfig({ ptState: 'ZZ' }).ptState).toBe('none');
     expect(resolvePayrollConfig({ ptState: 'KA' }).ptState).toBe('KA');
     expect(resolvePayrollConfig({ ptState: 'none' }).ptState).toBe('none');
   });

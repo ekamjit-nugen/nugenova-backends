@@ -15,7 +15,17 @@ monthly **payslips** (gross minus **loss-of-pay** and **statutory deductions**) 
 employee self-service payslips. Ported from the legacy Nugenova payslip + statutory
 paths. Amounts are in **RUPEES**. Person = `User` + `OrgMembership` (`userId` = auth id).
 
-## Phase 2 — statutory + custom deductions
+## Phase 2 — statutory + custom deductions (opt-in template library)
+
+Deductions are **opt-in**: a fresh org enables nothing — take-home = gross until the
+owner adds deductions from a **template library**. `deduction-templates.ts` describes
+every deduction (PF/ESI/PT/LWF + VPF/NPS/Gratuity/Group Health·Life·Accident/TDS/Meal)
+with what it does, how much (rate/amount summary), who pays, and a statutory flag; it's
+served via the catalog (`/policies/payroll-catalog`). Adding a statutory template flips
+its flag; adding a custom template seeds a `customDeductions` row from its defaults.
+`defaultPayrollConfig()` is opt-in (flags off, states `none`) but still carries the
+canonical rates so an added statutory line starts correct. `PUT /policies/payroll-config`
+is a **partial merge** onto the current config (a partial PUT never silently disables).
 
 Payslips itemise **earnings**, **deductions**, and **employer contributions**.
 
@@ -98,7 +108,7 @@ Statutory config is owner-managed on the **policy** module (gated `policies:view
 
 | Method | Path | What |
 |---|---|---|
-| GET | `/policies/payroll-catalog` | Default config + PT-state options for the editor. |
+| GET | `/policies/payroll-catalog` | Opt-in defaults + PT/LWF-state options + deduction bases + the **template library**. |
 | GET | `/policies/payroll-config` | The org's live PF/ESI/PT config (resolved). |
 | PUT | `/policies/payroll-config` | Create/update the statutory config. |
 

@@ -23,6 +23,7 @@ import {
   INDIAN_STATES,
   isIndianState,
 } from '../payroll/statutory';
+import { DEDUCTION_TEMPLATES, DeductionTemplate } from '../payroll/deduction-templates';
 
 /** A submitted custom line — `basis` is a loose string until sanitized/validated. */
 export interface CustomDeductionInput {
@@ -43,14 +44,19 @@ export interface PayrollConfigInput {
   customDeductions?: CustomDeductionInput[];
 }
 
-/** The default statutory config — the editor's starting point. */
+/**
+ * A fresh org's config — OPT-IN: every deduction starts off. The canonical rates
+ * are still filled in (from `DEFAULT_STATUTORY_CONFIG`) so that when the owner adds
+ * a statutory deduction it already carries the standard rate/ceiling; only the
+ * `enabled` flags (and PT/LWF state) start "off". Owners add what they need from
+ * the template library.
+ */
 export function defaultPayrollConfig(): PayrollStatutoryConfig {
-  // Deep clone so callers can't mutate the shared default.
   return {
-    pf: { ...DEFAULT_STATUTORY_CONFIG.pf },
-    esi: { ...DEFAULT_STATUTORY_CONFIG.esi },
-    ptState: DEFAULT_STATUTORY_CONFIG.ptState,
-    lwf: { ...DEFAULT_STATUTORY_CONFIG.lwf },
+    pf: { ...DEFAULT_STATUTORY_CONFIG.pf, enabled: false },
+    esi: { ...DEFAULT_STATUTORY_CONFIG.esi, enabled: false },
+    ptState: 'none',
+    lwf: { enabled: false, state: 'none' },
     customDeductions: [],
   };
 }
@@ -70,6 +76,11 @@ export function lwfStateOptions(): { value: string; label: string }[] {
 /** The custom-deduction basis options for the editor. */
 export function deductionBasisOptions(): { value: DeductionBasis; label: string }[] {
   return DEDUCTION_BASES;
+}
+
+/** The deduction template library (opt-in catalog with full info). */
+export function deductionTemplates(): DeductionTemplate[] {
+  return DEDUCTION_TEMPLATES;
 }
 
 const num = (v: unknown, fallback: number, min: number, max: number): number => {
