@@ -24,6 +24,7 @@ import {
   PolicyQueryDto,
   UpdatePolicyDto,
   UpdateOnboardingConfigDto,
+  UpdateLeaveConfigDto,
 } from './dto';
 
 class SetActiveDto {
@@ -173,6 +174,33 @@ export class PolicyController {
       req.user.userId,
     );
     return { success: true, message: 'Onboarding requirements updated', data };
+  }
+
+  /** The default leave-type list for the Settings → Leave editor. */
+  @Get('leave-catalog')
+  @RequirePermission('policies', 'view')
+  async leaveCatalog() {
+    return { success: true, data: this.policies.leaveCatalog() };
+  }
+
+  /** The org's live leave configuration (types + allocations). */
+  @Get('leave-config')
+  @RequirePermission('policies', 'view')
+  async getLeaveConfig(@Req() req: any) {
+    const data = await this.policies.getLeaveConfig(this.orgId(req));
+    return { success: true, data };
+  }
+
+  /** Create-or-update the org's leave types and allocations. */
+  @Put('leave-config')
+  @RequirePermission('policies', 'edit')
+  async updateLeaveConfig(@Body() dto: UpdateLeaveConfigDto, @Req() req: any) {
+    const data = await this.policies.upsertLeaveConfig(
+      this.orgId(req),
+      dto.leaveTypes ?? [],
+      req.user.userId,
+    );
+    return { success: true, message: 'Leave configuration updated', data };
   }
 
   @Get()

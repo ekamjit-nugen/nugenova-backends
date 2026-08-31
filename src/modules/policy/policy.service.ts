@@ -39,6 +39,13 @@ import {
   sanitizeProfileFields,
   sanitizeChecklist,
 } from './onboarding-catalog';
+import {
+  LeaveConfig,
+  StoredLeaveType,
+  defaultLeaveConfig,
+  resolveLeaveConfig,
+  sanitizeLeaveConfig,
+} from './leave-config';
 
 /** What attendance needs to govern a clock-in for one employee. */
 export interface ResolvedWorkContext {
@@ -443,6 +450,62 @@ export class PolicyService {
       profileFields: PROFILE_FIELD_CATALOG,
       defaults: defaultOnboardingConfig(),
     };
+  }
+
+  // ── leave configuration (owner-configurable, stored on a policy row) ────────
+
+  /** The default leave-type list — the editor's starting point. */
+  leaveCatalog() {
+    return { defaults: defaultLeaveConfig().leaveTypes };
+  }
+
+  /** The org's leave policy row (category `leave`, applicableTo `all`) — a singleton. */
+  private async findLeavePolicy(orgId: string): Promise<PolicyEntity | null> {
+    return this.repo.findOne({
+      where: {
+        organizationId: orgId,
+        category: 'leave',
+        applicableTo: 'all',
+        isDeleted: false,
+      },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  /** Resolve the org's leave types + allocations (saved config, else defaults). */
+  async getLeaveConfig(orgId: string): Promise<LeaveConfig> {
+    const policy = await this.findLeavePolicy(orgId);
+    const stored = (policy?.extraConfig?.leave as { leaveTypes?: StoredLeaveType[] }) || null;
+    return resolveLeaveConfig(stored?.leaveTypes);
+  }
+
+  /** Create-or-update the org's leave configuration. */
+  async upsertLeaveConfig(
+    orgId: string,
+    leaveTypes: { key?: string; label?: string; annualAllocation?: number; enabled?: boolean }[],
+    userId: string,
+  ): Promise<LeaveConfig> {
+    const stored = sanitizeLeaveConfig(leaveTypes);
+    let policy = await this.findLeavePolicy(orgId);
+    if (!policy) {
+      policy = this.repo.create({
+        organizationId: orgId,
+        policyName: 'Leave Configuration',
+        description: 'Which leave types the organization offers and their annual allocations.',
+        category: 'leave',
+        applicableTo: 'all',
+        applicableIds: [],
+        excludedEmployeeIds: [],
+        isActive: true,
+        acknowledgementRequired: false,
+        createdBy: userId,
+        updatedBy: userId,
+      });
+    }
+    policy.extraConfig = { ...(policy.extraConfig || {}), leave: { leaveTypes: stored } };
+    policy.updatedBy = userId;
+    await this.repo.save(policy);
+    return resolveLeaveConfig(stored);
   }
 
   /**

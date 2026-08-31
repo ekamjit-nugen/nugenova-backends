@@ -10,6 +10,7 @@
     "start": "node dist/main",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
+    "scan:malware": "node scripts/scan-malware.mjs",
     "test": "jest",
     "test:e2e": "jest --config jest.e2e.config.js",
     "typeorm": "typeorm-ts-node-commonjs -d src/bootstrap/database/data-source.ts",

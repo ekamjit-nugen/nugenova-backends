@@ -176,3 +176,18 @@ export class UpdateOnboardingConfigDto {
   @IsString({ each: true })
   profileFields?: string[];
 }
+
+export class LeaveConfigTypeDto {
+  @IsString() @MaxLength(40) key: string;
+  @IsOptional() @IsString() @MaxLength(60) label?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(366) annualAllocation?: number;
+  @IsOptional() @IsBoolean() enabled?: boolean;
+}
+
+export class UpdateLeaveConfigDto {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LeaveConfigTypeDto)
+  leaveTypes?: LeaveConfigTypeDto[];
+}
