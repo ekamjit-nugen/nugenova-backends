@@ -505,4 +505,30 @@ export class LeaveService {
       totalDaysUsed,
     };
   }
+
+  /**
+   * Approved leave days overlapping a pay period, split into PAID vs LOP by leave
+   * type (the `lop` / any isLop type is unpaid). What PAYROLL consumes to dock pay.
+   * Phase 1 counts a leave's full `totalDays` when it overlaps the period.
+   */
+  async leaveSummaryForPeriod(
+    orgId: string,
+    userId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ paidLeaveDays: number; lopLeaveDays: number }> {
+    const rows = await this.leaves.find({
+      where: { organizationId: orgId, userId, status: 'approved', isDeleted: false },
+    });
+    const types = await this.resolvedTypes(orgId);
+    let paidLeaveDays = 0;
+    let lopLeaveDays = 0;
+    for (const r of rows) {
+      if (!rangesOverlap(start, end, r.startDate, r.endDate)) continue;
+      const days = Number(r.totalDays);
+      if (types.get(r.leaveType)?.isLop) lopLeaveDays += days;
+      else paidLeaveDays += days;
+    }
+    return { paidLeaveDays, lopLeaveDays };
+  }
 }

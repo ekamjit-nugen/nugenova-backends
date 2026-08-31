@@ -13,6 +13,7 @@ import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { PolicyModule } from './modules/policy/policy.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LeaveModule } from './modules/leave/leave.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 
@@ -40,6 +41,7 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
     PolicyModule,
     AttendanceModule,
     LeaveModule,
+    PayrollModule,
     NotificationModule,
     AdminPlatformModule,
   ],

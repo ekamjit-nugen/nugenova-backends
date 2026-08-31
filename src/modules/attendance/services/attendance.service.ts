@@ -719,6 +719,46 @@ export class AttendanceService {
     };
   }
 
+  /**
+   * Per-employee day summary for a date range — what PAYROLL consumes for LOP.
+   * `workingDays` = weekdays minus org holidays in the range; `presentDays` counts
+   * present/late/wfh (worked), `halfDays` the half-day records. Leave days are NOT
+   * here (payroll gets those from the leave module — no double counting).
+   */
+  async getDaysSummary(
+    orgId: string,
+    userId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ workingDays: number; presentDays: number; halfDays: number }> {
+    if (end.getTime() < start.getTime()) {
+      return { workingDays: 0, presentDays: 0, halfDays: 0 };
+    }
+    const rows = await this.repo.find({
+      where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
+    });
+    let presentDays = 0;
+    let halfDays = 0;
+    for (const r of rows) {
+      if (r.status === 'half_day') halfDays += 1;
+      else if (r.status === 'present' || r.status === 'late' || r.status === 'wfh') presentDays += 1;
+    }
+    const hols = await this.holidays.find({
+      where: { organizationId: orgId, isDeleted: false, date: Between(start, end) },
+    });
+    const holKeys = new Set(hols.map((h) => h.date.toISOString().slice(0, 10)));
+    const s = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+    let workingDays = 0;
+    for (let t = s.getTime(); t <= end.getTime(); t += 24 * 60 * 60 * 1000) {
+      const d = new Date(t);
+      const dow = d.getUTCDay();
+      if (dow === 0 || dow === 6) continue;
+      if (holKeys.has(d.toISOString().slice(0, 10))) continue;
+      workingDays += 1;
+    }
+    return { workingDays, presentDays, halfDays };
+  }
+
   // ── manual entry + approval ─────────────────────────────────────────────────
 
   async createManualEntry(c: Caller, dto: ManualEntryDto): Promise<AttendanceEntity> {
