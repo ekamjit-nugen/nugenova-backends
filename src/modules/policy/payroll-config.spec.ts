@@ -44,6 +44,43 @@ describe('resolvePayrollConfig', () => {
   });
 });
 
+describe('LWF config', () => {
+  it('defaults LWF off with state none', () => {
+    const r = resolvePayrollConfig({});
+    expect(r.lwf).toEqual({ enabled: false, state: 'none' });
+  });
+  it('keeps a valid LWF state and rejects an invalid one', () => {
+    expect(resolvePayrollConfig({ lwf: { enabled: true, state: 'MH' } }).lwf).toEqual({ enabled: true, state: 'MH' });
+    expect(resolvePayrollConfig({ lwf: { enabled: true, state: 'ZZ' } }).lwf.state).toBe('none');
+  });
+});
+
+describe('custom deductions', () => {
+  it('normalises code, drops nameless/zero-value/dup/bad-code rows', () => {
+    const r = resolvePayrollConfig({
+      customDeductions: [
+        { code: 'nps', name: 'NPS', basis: 'percent_basic', employeeValue: 10 },
+        { code: 'INS', name: '', employeeValue: 200 }, // no name → dropped
+        { code: 'ZERO', name: 'Zero', employeeValue: 0, employerValue: 0 }, // no value → dropped
+        { code: 'NPS', name: 'Dup', employeeValue: 5 }, // dup code → dropped
+        { code: 'bad code!', name: 'Bad', employeeValue: 5 }, // bad code → dropped
+      ],
+    });
+    expect(r.customDeductions).toHaveLength(1);
+    expect(r.customDeductions[0]).toMatchObject({ code: 'NPS', name: 'NPS', basis: 'percent_basic', employeeValue: 10, enabled: true });
+  });
+  it('clamps percent values to 100 and defaults an unknown basis to fixed', () => {
+    const r = resolvePayrollConfig({
+      customDeductions: [{ code: 'X', name: 'X', basis: 'percent_gross', employeeValue: 999 }],
+    });
+    expect(r.customDeductions[0].employeeValue).toBe(100);
+    const r2 = resolvePayrollConfig({
+      customDeductions: [{ code: 'Y', name: 'Y', basis: 'weird', employeeValue: 50 }],
+    });
+    expect(r2.customDeductions[0].basis).toBe('fixed');
+  });
+});
+
 describe('sanitizePayrollConfig', () => {
   it('produces a fully-resolved config (same as resolve)', () => {
     expect(sanitizePayrollConfig({ ptState: 'none' })).toEqual(

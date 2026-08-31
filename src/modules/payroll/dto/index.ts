@@ -17,6 +17,12 @@ export class SalaryComponentDto {
   @IsNumber() @Min(0) @Max(100000000) amount: number;
 }
 
+export class RecurringDeductionDto {
+  @IsString() @MaxLength(20) code: string;
+  @IsString() @MaxLength(60) name: string;
+  @IsNumber() @Min(0) @Max(100000000) amount: number;
+}
+
 export class SetSalaryDto {
   /** Monthly gross salary in rupees. */
   @IsNumber()
@@ -30,6 +36,13 @@ export class SetSalaryDto {
   @ValidateNested({ each: true })
   @Type(() => SalaryComponentDto)
   components?: SalaryComponentDto[];
+
+  /** Employee-specific recurring recoveries (loan EMI, advance). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecurringDeductionDto)
+  recurringDeductions?: RecurringDeductionDto[];
 
   @IsOptional()
   @IsString()

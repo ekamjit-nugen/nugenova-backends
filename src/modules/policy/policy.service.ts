@@ -51,6 +51,8 @@ import {
   resolvePayrollConfig,
   sanitizePayrollConfig,
   ptStateOptions,
+  lwfStateOptions,
+  deductionBasisOptions,
   PayrollConfigInput,
 } from './payroll-config';
 import { PayrollStatutoryConfig } from '../payroll/statutory';
@@ -518,9 +520,14 @@ export class PolicyService {
 
   // ── payroll statutory configuration (owner-configurable, on a policy row) ────
 
-  /** The default statutory config + PT-state options — the Settings editor's start. */
+  /** The default statutory config + option lists — the Settings editor's start. */
   payrollConfigCatalog() {
-    return { defaults: defaultPayrollConfig(), ptStates: ptStateOptions() };
+    return {
+      defaults: defaultPayrollConfig(),
+      ptStates: ptStateOptions(),
+      lwfStates: lwfStateOptions(),
+      deductionBases: deductionBasisOptions(),
+    };
   }
 
   /** The org's payroll policy row (category `payroll`, applicableTo `all`) — singleton. */

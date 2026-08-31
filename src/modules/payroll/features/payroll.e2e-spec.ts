@@ -89,13 +89,19 @@ defineFeature(feature, (test) => {
   const setupFullPaidMonth = async (
     salaryAmount: number,
     components?: { code: string; name: string; amount: number }[],
+    recurringDeductions?: { code: string; name: string; amount: number }[],
   ): Promise<{ o: CreatedOrg; member: Member }> => {
     const { o, member } = await orgWithMember();
     await h
       .api()
       .put(`${API}/payroll/salary/${member.userId}`)
       .set('Authorization', `Bearer ${o.ownerToken}`)
-      .send({ monthlySalary: salaryAmount, effectiveFrom: '2026-01-01', ...(components ? { components } : {}) })
+      .send({
+        monthlySalary: salaryAmount,
+        effectiveFrom: '2026-01-01',
+        ...(components ? { components } : {}),
+        ...(recurringDeductions ? { recurringDeductions } : {}),
+      })
       .expect(200);
     await h
       .api()
@@ -299,6 +305,63 @@ defineFeature(feature, (test) => {
       expect(slip.statutory.pfEmployee).toBe(1440);
       // ESI applies (gross 20000 ≤ 21000): 0.75% of 20000 = 150.
       expect(slip.statutory.esiEmployee).toBe(150);
+    });
+  });
+
+  test('an owner-defined custom deduction is applied to everyone', ({ given, and, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an employee member on a salary and paid leave all month', async () => {
+      ({ o, member } = await setupFullPaidMonth(44000));
+    });
+    and('the owner adds a custom insurance deduction of 500', async () => {
+      await h
+        .api()
+        .put(`${API}/policies/payroll-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({
+          customDeductions: [
+            { code: 'INS', name: 'Group Insurance', basis: 'fixed', employeeValue: 500, employerValue: 0 },
+          ],
+        })
+        .expect(200);
+    });
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then("the member's payslip includes the custom deduction and it reduces net pay", async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
+      expect(slip).toBeDefined();
+      const ins = (slip.deductions as any[]).find((d) => d.code === 'INS');
+      expect(ins).toBeDefined();
+      expect(ins.amount).toBe(500);
+      // Default statutory (PF 1800 + PT 200) + custom 500 = 2500 off 44000.
+      expect(slip.netPay).toBe(44000 - 1800 - 200 - 500);
+    });
+  });
+
+  test('a per-employee recurring deduction is recovered from that employee only', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given(
+      'an organization with an employee member on a salary with a 2000 loan recovery and paid leave all month',
+      async () => {
+        ({ o, member } = await setupFullPaidMonth(44000, undefined, [
+          { code: 'LOAN', name: 'Loan Recovery', amount: 2000 },
+        ]));
+      },
+    );
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then("the member's payslip deducts the 2000 loan recovery", async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
+      expect(slip).toBeDefined();
+      const loan = (slip.deductions as any[]).find((d) => d.code === 'LOAN');
+      expect(loan).toBeDefined();
+      expect(loan.amount).toBe(2000);
+      // PF 1800 + PT 200 + loan 2000 = 4000 off 44000.
+      expect(slip.netPay).toBe(44000 - 1800 - 200 - 2000);
     });
   });
 

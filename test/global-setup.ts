@@ -39,6 +39,7 @@ import { NotificationPreferences1787870000000 } from '../src/bootstrap/database/
 import { Leave1787880000000 } from '../src/bootstrap/database/migrations/1787880000000-Leave';
 import { Payroll1787890000000 } from '../src/bootstrap/database/migrations/1787890000000-Payroll';
 import { PayrollStatutory1787900000000 } from '../src/bootstrap/database/migrations/1787900000000-PayrollStatutory';
+import { PayrollRecurringDeductions1787910000000 } from '../src/bootstrap/database/migrations/1787910000000-PayrollRecurringDeductions';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -135,6 +136,7 @@ module.exports = async function globalSetup(): Promise<void> {
       Leave1787880000000,
       Payroll1787890000000,
       PayrollStatutory1787900000000,
+      PayrollRecurringDeductions1787910000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

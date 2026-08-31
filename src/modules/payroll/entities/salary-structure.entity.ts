@@ -8,6 +8,13 @@ export interface SalaryComponent {
   amount: number;
 }
 
+/** A fixed monthly employee-side recovery specific to one employee (loan, advance). */
+export interface RecurringDeduction {
+  code: string;
+  name: string;
+  amount: number; // rupees/month
+}
+
 /**
  * SalaryStructure — an employee's monthly salary (Phase 1: the "simple" path — a
  * single fixed monthly figure in RUPEES, no CTC breakdown). Effective-dated with
@@ -39,6 +46,10 @@ export class SalaryStructureEntity extends PgBaseEntity {
   /** Earning breakdown; empty ⇒ treat the whole `monthlySalary` as Basic. */
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   components: SalaryComponent[];
+
+  /** Employee-specific fixed monthly recoveries (loan EMI, advance, fines). */
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  recurringDeductions: RecurringDeduction[];
 
   @Column({ type: 'timestamptz' })
   effectiveFrom: Date;

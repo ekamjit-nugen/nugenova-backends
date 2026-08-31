@@ -46,6 +46,17 @@ Feature: Payroll (simple monthly payslips)
     When the owner generates payslips for that month
     Then the payslip earnings list the components and PF is computed on the Basic
 
+  Scenario: an owner-defined custom deduction is applied to everyone
+    Given an organization with an employee member on a salary and paid leave all month
+    And the owner adds a custom insurance deduction of 500
+    When the owner generates payslips for that month
+    Then the member's payslip includes the custom deduction and it reduces net pay
+
+  Scenario: a per-employee recurring deduction is recovered from that employee only
+    Given an organization with an employee member on a salary with a 2000 loan recovery and paid leave all month
+    When the owner generates payslips for that month
+    Then the member's payslip deducts the 2000 loan recovery
+
   @security
   Scenario: a member cannot read another member's payslip
     Given an organization with two members who both have payslips

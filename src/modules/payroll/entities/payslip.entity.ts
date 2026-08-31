@@ -29,6 +29,8 @@ export interface PayslipStatutory {
   esiEmployee: number;
   esiEmployer: number;
   professionalTax: number;
+  lwfEmployee: number;
+  lwfEmployer: number;
 }
 
 /** A snapshot of who/what the payslip was generated for (immutable). */

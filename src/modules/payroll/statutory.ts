@@ -30,12 +30,18 @@ export interface PayrollStatutoryConfig {
   esi: EsiConfig;
   /** State code driving the PT slab; 'none' disables PT. */
   ptState: string;
+  /** Labour Welfare Fund (state, periodic). */
+  lwf: LwfConfig;
+  /** Owner-defined org-wide deductions / contributions. */
+  customDeductions: CustomStatutoryItem[];
 }
 
 export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
   pf: { enabled: true, employeeRate: 12, employerRate: 12, wageCeiling: 15000 },
   esi: { enabled: true, employeeRate: 0.75, employerRate: 3.25, wageCeiling: 21000 },
   ptState: 'MH',
+  lwf: { enabled: false, state: 'none' },
+  customDeductions: [],
 };
 
 // ── PF ─────────────────────────────────────────────────────────────────────────
@@ -154,6 +160,120 @@ export function computePT(grossMonthly: number, state: string, month: number): n
   return slab.amount;
 }
 
+// ── Labour Welfare Fund (state, periodic) ─────────────────────────────────────
+
+export interface LwfConfig {
+  enabled: boolean;
+  /** State code driving the LWF amounts; 'none' disables. */
+  state: string;
+}
+
+/**
+ * LWF is a small, state-set contribution usually collected in specific months
+ * (most states: half-yearly in June & December). Representative monthly amounts +
+ * the months they apply; `none` and unlisted states resolve to zero. (The exact
+ * per-state figures/frequencies can be tuned in config or via a custom item.)
+ */
+export const LWF_STATES: Record<
+  string,
+  { label: string; employee: number; employer: number; months: number[] }
+> = {
+  none: { label: 'No Labour Welfare Fund', employee: 0, employer: 0, months: [] },
+  MH: { label: 'Maharashtra', employee: 25, employer: 75, months: [6, 12] },
+  KA: { label: 'Karnataka', employee: 20, employer: 40, months: [12] },
+  TN: { label: 'Tamil Nadu', employee: 20, employer: 40, months: [12] },
+  GJ: { label: 'Gujarat', employee: 6, employer: 12, months: [6, 12] },
+  WB: { label: 'West Bengal', employee: 3, employer: 15, months: [6, 12] },
+  MP: { label: 'Madhya Pradesh', employee: 10, employer: 30, months: [6, 12] },
+  AP: { label: 'Andhra Pradesh', employee: 30, employer: 70, months: [12] },
+  TS: { label: 'Telangana', employee: 2, employer: 5, months: [12] },
+  HR: { label: 'Haryana', employee: 31, employer: 62, months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] },
+  PB: { label: 'Punjab', employee: 5, employer: 20, months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] },
+  DL: { label: 'Delhi', employee: 3, employer: 6, months: [6, 12] },
+};
+
+export function lwfStateLabel(state: string): string {
+  return LWF_STATES[state]?.label ?? state;
+}
+
+/** LWF employee/employer amounts for a month (0 outside the applicable months). */
+export function computeLWF(cfg: LwfConfig, month: number): { employee: number; employer: number } {
+  if (!cfg.enabled) return { employee: 0, employer: 0 };
+  const def = LWF_STATES[cfg.state];
+  if (!def || !def.months.includes(month)) return { employee: 0, employer: 0 };
+  return { employee: round0(def.employee), employer: round0(def.employer) };
+}
+
+// ── custom deductions / contributions (owner-defined, org-wide) ────────────────
+
+export type DeductionBasis =
+  | 'fixed' // employeeValue / employerValue are rupee amounts
+  | 'percent_gross' // % of full monthly gross (pre-LOP)
+  | 'percent_earned_gross' // % of LOP-adjusted gross
+  | 'percent_basic'; // % of (LOP-adjusted) Basic
+
+export const DEDUCTION_BASES: { value: DeductionBasis; label: string }[] = [
+  { value: 'fixed', label: 'Fixed amount (₹)' },
+  { value: 'percent_gross', label: '% of gross' },
+  { value: 'percent_earned_gross', label: '% of earned gross (after LOP)' },
+  { value: 'percent_basic', label: '% of Basic' },
+];
+
+/**
+ * An owner-defined line that applies to everyone: a deduction (employeeValue > 0),
+ * an employer contribution (employerValue > 0), or both. Covers VPF, NPS, group
+ * insurance, gratuity provision, a flat/percent TDS, etc.
+ */
+export interface CustomStatutoryItem {
+  code: string;
+  name: string;
+  enabled: boolean;
+  basis: DeductionBasis;
+  employeeValue: number;
+  employerValue: number;
+}
+
+export interface CustomLine {
+  code: string;
+  name: string;
+  employee: number;
+  employer: number;
+}
+
+const applyBasis = (
+  basis: DeductionBasis,
+  value: number,
+  ctx: { gross: number; earnedGross: number; basic: number },
+): number => {
+  if (value <= 0) return 0;
+  switch (basis) {
+    case 'fixed':
+      return round0(value);
+    case 'percent_gross':
+      return round0(ctx.gross * (value / 100));
+    case 'percent_earned_gross':
+      return round0(ctx.earnedGross * (value / 100));
+    case 'percent_basic':
+      return round0(ctx.basic * (value / 100));
+    default:
+      return 0;
+  }
+};
+
+/** Evaluate one custom item into concrete employee/employer rupee amounts. */
+export function evalCustomItem(
+  item: CustomStatutoryItem,
+  ctx: { gross: number; earnedGross: number; basic: number },
+): CustomLine {
+  if (!item.enabled) return { code: item.code, name: item.name, employee: 0, employer: 0 };
+  return {
+    code: item.code,
+    name: item.name,
+    employee: applyBasis(item.basis, item.employeeValue, ctx),
+    employer: applyBasis(item.basis, item.employerValue, ctx),
+  };
+}
+
 // ── aggregate ─────────────────────────────────────────────────────────────────
 
 export interface StatutoryResult {
@@ -163,25 +283,41 @@ export interface StatutoryResult {
   esiEmployee: number;
   esiEmployer: number;
   professionalTax: number;
-  /** Total deducted from the employee's pay. */
+  lwfEmployee: number;
+  lwfEmployer: number;
+  /** Owner-defined org-wide lines (resolved to amounts). */
+  custom: CustomLine[];
+  /** Total deducted from the employee's pay (statutory + custom employee side). */
   employeeDeductions: number;
   /** Total employer-side contributions (NOT deducted from net). */
   employerContributions: number;
 }
 
 /**
- * Compute all statutory figures for a month. `basic` drives PF; `gross` (the
- * proration-adjusted monthly gross) drives ESI + PT.
+ * Compute all statutory + custom figures for a month. `basic` drives PF/`percent_basic`;
+ * `gross` (the LOP-adjusted monthly gross) drives ESI/PT/LWF/`percent_*`. `fullGross`
+ * is the pre-LOP gross used only by the `percent_gross` basis.
  */
 export function computeStatutory(
   basic: number,
   gross: number,
   month: number,
   cfg: PayrollStatutoryConfig,
+  fullGross: number = gross,
 ): StatutoryResult {
   const pf = computePF(basic, cfg.pf);
   const esi = computeESI(gross, cfg.esi);
   const pt = computePT(gross, cfg.ptState, month);
+  const lwf = computeLWF(cfg.lwf ?? { enabled: false, state: 'none' }, month);
+
+  const ctx = { gross: fullGross, earnedGross: gross, basic };
+  const custom = (cfg.customDeductions ?? [])
+    .map((it) => evalCustomItem(it, ctx))
+    .filter((l) => l.employee > 0 || l.employer > 0);
+
+  const customEmployee = custom.reduce((t, l) => t + l.employee, 0);
+  const customEmployer = custom.reduce((t, l) => t + l.employer, 0);
+
   return {
     pfEmployee: pf.employee,
     pfEmployer: pf.employer,
@@ -189,7 +325,10 @@ export function computeStatutory(
     esiEmployee: esi.employee,
     esiEmployer: esi.employer,
     professionalTax: pt,
-    employeeDeductions: pf.employee + esi.employee + pt,
-    employerContributions: pf.employer + esi.employer,
+    lwfEmployee: lwf.employee,
+    lwfEmployer: lwf.employer,
+    custom,
+    employeeDeductions: pf.employee + esi.employee + pt + lwf.employee + customEmployee,
+    employerContributions: pf.employer + esi.employer + lwf.employer + customEmployer,
   };
 }

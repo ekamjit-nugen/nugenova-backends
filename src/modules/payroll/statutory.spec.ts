@@ -2,6 +2,8 @@ import {
   computePF,
   computeESI,
   computePT,
+  computeLWF,
+  evalCustomItem,
   computeStatutory,
   DEFAULT_STATUTORY_CONFIG,
 } from './statutory';
@@ -54,15 +56,69 @@ describe('computePT', () => {
   });
 });
 
+describe('computeLWF', () => {
+  it('applies the state amounts only in the applicable months', () => {
+    const cfg = { enabled: true, state: 'MH' }; // MH: 25/75 in June & December
+    expect(computeLWF(cfg, 6)).toEqual({ employee: 25, employer: 75 });
+    expect(computeLWF(cfg, 12)).toEqual({ employee: 25, employer: 75 });
+    expect(computeLWF(cfg, 7)).toEqual({ employee: 0, employer: 0 });
+  });
+  it('is zero when disabled or state is none', () => {
+    expect(computeLWF({ enabled: false, state: 'MH' }, 6).employee).toBe(0);
+    expect(computeLWF({ enabled: true, state: 'none' }, 6).employee).toBe(0);
+  });
+});
+
+describe('evalCustomItem', () => {
+  const ctx = { gross: 50000, earnedGross: 40000, basic: 20000 };
+  it('fixed amounts pass through on both sides', () => {
+    const l = evalCustomItem(
+      { code: 'INS', name: 'Insurance', enabled: true, basis: 'fixed', employeeValue: 200, employerValue: 300 },
+      ctx,
+    );
+    expect(l).toEqual({ code: 'INS', name: 'Insurance', employee: 200, employer: 300 });
+  });
+  it('percent bases compute off the right figure', () => {
+    expect(evalCustomItem({ code: 'A', name: 'A', enabled: true, basis: 'percent_gross', employeeValue: 10, employerValue: 0 }, ctx).employee).toBe(5000);
+    expect(evalCustomItem({ code: 'B', name: 'B', enabled: true, basis: 'percent_earned_gross', employeeValue: 10, employerValue: 0 }, ctx).employee).toBe(4000);
+    expect(evalCustomItem({ code: 'C', name: 'C', enabled: true, basis: 'percent_basic', employeeValue: 10, employerValue: 0 }, ctx).employee).toBe(2000);
+  });
+  it('a disabled item is zero', () => {
+    expect(evalCustomItem({ code: 'X', name: 'X', enabled: false, basis: 'fixed', employeeValue: 500, employerValue: 0 }, ctx).employee).toBe(0);
+  });
+});
+
 describe('computeStatutory', () => {
   it('aggregates PF + ESI + PT into employee deductions + employer contributions', () => {
-    // basic 20000 (PF capped at 15000), gross 20000 (ESI applies), MH, June
+    // basic 20000 (PF capped at 15000), gross 20000 (ESI applies), MH, June.
+    // Default config has LWF disabled + no custom deductions.
     const r = computeStatutory(20000, 20000, 6, DEFAULT_STATUTORY_CONFIG);
     expect(r.pfEmployee).toBe(1800);
     expect(r.pfEmployer).toBe(1800);
     expect(r.esiEmployee).toBe(150);
     expect(r.professionalTax).toBe(200);
+    expect(r.lwfEmployee).toBe(0);
     expect(r.employeeDeductions).toBe(1800 + 150 + 200);
     expect(r.employerContributions).toBe(1800 + 650);
+  });
+
+  it('folds LWF + custom deductions into the totals', () => {
+    const cfg = {
+      ...DEFAULT_STATUTORY_CONFIG,
+      lwf: { enabled: true, state: 'MH' },
+      customDeductions: [
+        { code: 'NPS', name: 'NPS', enabled: true, basis: 'percent_basic' as const, employeeValue: 10, employerValue: 10 },
+        { code: 'INS', name: 'Insurance', enabled: true, basis: 'fixed' as const, employeeValue: 200, employerValue: 0 },
+      ],
+    };
+    // basic 15000, gross 30000 (ESI off, > ceiling), MH, June.
+    const r = computeStatutory(15000, 30000, 6, cfg);
+    expect(r.lwfEmployee).toBe(25);
+    expect(r.lwfEmployer).toBe(75);
+    expect(r.custom).toHaveLength(2);
+    // employee: PF 1800 + ESI 0 + PT 200 + LWF 25 + NPS(10% of 15000=1500) + INS 200
+    expect(r.employeeDeductions).toBe(1800 + 200 + 25 + 1500 + 200);
+    // employer: PF 1800 + LWF 75 + NPS 1500
+    expect(r.employerContributions).toBe(1800 + 75 + 1500);
   });
 });

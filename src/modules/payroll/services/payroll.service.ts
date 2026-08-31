@@ -8,7 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
-import { SalaryStructureEntity, SalaryComponent } from '../entities/salary-structure.entity';
+import { SalaryStructureEntity, SalaryComponent, RecurringDeduction } from '../entities/salary-structure.entity';
 import { PayslipEntity, PayslipLine } from '../entities/payslip.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
@@ -77,6 +77,7 @@ export class PayrollService {
       dto.components,
       dto.monthlySalary,
     );
+    const recurringDeductions = this.normalizeRecurring(dto.recurringDeductions);
     const saved = await this.salaries.save(
       this.salaries.create({
         organizationId: orgId,
@@ -85,6 +86,7 @@ export class PayrollService {
         employeeEmail: email,
         monthlySalary,
         components,
+        recurringDeductions,
         effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
         supersedes: prior?.id ?? null,
         createdBy: actorId,
@@ -92,6 +94,21 @@ export class PayrollService {
       }),
     );
     return this.salaryView(saved);
+  }
+
+  /** Clean per-employee recurring recoveries (fixed positive rupee amounts). */
+  private normalizeRecurring(input: RecurringDeduction[] | undefined): RecurringDeduction[] {
+    const seen = new Set<string>();
+    const out: RecurringDeduction[] = [];
+    for (const r of input || []) {
+      const code = (r.code || '').trim().toUpperCase().slice(0, 20);
+      const name = (r.name || '').trim().slice(0, 60);
+      const amount = Math.max(0, Math.round(Number(r.amount) || 0));
+      if (!code || !name || amount <= 0 || seen.has(code)) continue;
+      seen.add(code);
+      out.push({ code, name, amount });
+    }
+    return out;
   }
 
   /**
@@ -160,6 +177,11 @@ export class PayrollService {
         name: c.name,
         amount: Number(c.amount),
       })),
+      recurringDeductions: (s.recurringDeductions || []).map((r) => ({
+        code: r.code,
+        name: r.name,
+        amount: Number(r.amount),
+      })),
       effectiveFrom: s.effectiveFrom,
     };
   }
@@ -197,15 +219,16 @@ export class PayrollService {
     const comp = computeSimplePayslip(Number(salary.monthlySalary), lop);
 
     // Statutory runs on the LOP-adjusted (earned) wage: gross earned this month,
-    // and the correspondingly-prorated Basic (PF's wage base).
-    const gross = comp.grossEarnings;
+    // and the correspondingly-prorated Basic (PF's wage base). `percent_gross`
+    // custom lines use the full (pre-LOP) gross; everything else uses earned.
+    const fullGross = comp.grossEarnings;
     const earnedGross = Math.max(0, comp.grossEarnings - comp.lopDeduction);
-    const paidRatio = gross > 0 ? earnedGross / gross : 0;
+    const paidRatio = fullGross > 0 ? earnedGross / fullGross : 0;
     const earnedBasic = Math.round(this.basicOf(salary) * paidRatio);
-    const statutory = computeStatutory(earnedBasic, earnedGross, month, cfg);
+    const statutory = computeStatutory(earnedBasic, earnedGross, month, cfg, fullGross);
 
     // Line items. Earnings are full-value (pre-LOP), summing to grossEarnings; LOP
-    // + statutory sit on the deduction side so net = gross − LOP − employee stat.
+    // + statutory + custom + recurring sit on the deduction side.
     const earnings: PayslipLine[] = this.earningLines(salary);
     const deductions: PayslipLine[] = [];
     if (comp.lopDeduction > 0) {
@@ -220,6 +243,22 @@ export class PayrollService {
     if (statutory.professionalTax > 0) {
       deductions.push({ code: 'PT', name: 'Professional Tax', amount: statutory.professionalTax });
     }
+    if (statutory.lwfEmployee > 0) {
+      deductions.push({ code: 'LWF', name: 'Labour Welfare Fund', amount: statutory.lwfEmployee });
+    }
+    // Owner-defined org-wide custom deductions (employee side).
+    for (const c of statutory.custom) {
+      if (c.employee > 0) deductions.push({ code: c.code, name: c.name, amount: c.employee });
+    }
+    // Per-employee recurring recoveries (loan EMI, advance) — fixed, not prorated.
+    let recurringTotal = 0;
+    for (const r of salary.recurringDeductions || []) {
+      const amt = Math.max(0, Math.round(Number(r.amount) || 0));
+      if (amt <= 0) continue;
+      recurringTotal += amt;
+      deductions.push({ code: r.code, name: r.name, amount: amt });
+    }
+
     const employerContributions: PayslipLine[] = [];
     if (statutory.pfEmployer > 0) {
       employerContributions.push({ code: 'PF_ER', name: 'PF (Employer)', amount: statutory.pfEmployer });
@@ -227,8 +266,14 @@ export class PayrollService {
     if (statutory.esiEmployer > 0) {
       employerContributions.push({ code: 'ESI_ER', name: 'ESI (Employer)', amount: statutory.esiEmployer });
     }
+    if (statutory.lwfEmployer > 0) {
+      employerContributions.push({ code: 'LWF_ER', name: 'LWF (Employer)', amount: statutory.lwfEmployer });
+    }
+    for (const c of statutory.custom) {
+      if (c.employer > 0) employerContributions.push({ code: `${c.code}_ER`, name: `${c.name} (Employer)`, amount: c.employer });
+    }
 
-    const totalDeductions = comp.lopDeduction + statutory.employeeDeductions;
+    const totalDeductions = comp.lopDeduction + statutory.employeeDeductions + recurringTotal;
     const netPay = Math.max(0, comp.grossEarnings - totalDeductions);
 
     return { comp, lop, statutory, earnings, deductions, employerContributions, totalDeductions, netPay };
@@ -290,6 +335,8 @@ export class PayrollService {
           esiEmployee: statutory.esiEmployee,
           esiEmployer: statutory.esiEmployer,
           professionalTax: statutory.professionalTax,
+          lwfEmployee: statutory.lwfEmployee,
+          lwfEmployer: statutory.lwfEmployer,
         };
         row.lopDetails = {
           workingDays: lop.workingDays,
