@@ -145,10 +145,12 @@ export class OnboardingConfigDocumentDto {
 }
 
 export class OnboardingConfigChecklistItemDto {
+  // Only `key` is required — the client may send just the selected keys and the
+  // server canonicalises standard tasks + defaults custom ones (sanitizeChecklist).
   @IsString() @MaxLength(64) key: string;
-  @IsString() @MaxLength(200) title: string;
-  @IsIn(CHECKLIST_CATEGORIES) category: string;
-  @IsIn(ASSIGNED_TO) assignedTo: string;
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
+  @IsOptional() @IsIn(CHECKLIST_CATEGORIES) category?: string;
+  @IsOptional() @IsIn(ASSIGNED_TO) assignedTo?: string;
 }
 
 export class UpdateOnboardingConfigDto {

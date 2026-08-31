@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,7 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OnboardingAccessGuard } from './guards/onboarding-access.guard';
 import { RequirePermission } from '../organization/guards/require-permission.decorator';
 import { OnboardingLifecycleService } from './services/member-onboarding.service';
-import { InitiateOnboardingDto, RejectionDto } from './dto';
+import { InitiateOnboardingDto, RejectionDto, SetChecklistItemDto } from './dto';
 
 /**
  * HR-facing employee onboarding lifecycle. Effective paths (global prefix
@@ -101,6 +102,29 @@ export class MemberOnboardingController {
       req.user.userId,
     );
     return { success: true, message: 'Document rejected', data };
+  }
+
+  /** HR/manager ticks (or re-opens) any checklist item — incl. the IT/HR tasks. */
+  @Put(':id/checklist/:key')
+  @HttpCode(HttpStatus.OK)
+  async setChecklistItem(
+    @Param('id') id: string,
+    @Param('key') key: string,
+    @Body() dto: SetChecklistItemDto,
+    @Req() req: any,
+  ) {
+    const data = await this.lifecycle.setChecklistItemStatus(
+      this.orgId(req),
+      id,
+      key,
+      dto.done,
+      req.user.userId,
+    );
+    return {
+      success: true,
+      message: dto.done ? 'Task marked done' : 'Task re-opened',
+      data,
+    };
   }
 
   @Post(':id/complete')

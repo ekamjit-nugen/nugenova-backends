@@ -77,7 +77,10 @@ All routes under `/api/v1`.
 | GET | `/policies/summary` | policies:view | Owner dashboard: counts + outstanding acknowledgements. |
 | GET | `/policies/:id` | any member | One policy. |
 | GET | `/policies/:id/versions` | any member | Version-history snapshots (audit trail). |
-| GET | `/policies/:id/acknowledgements` | policies:view | Compliance: who has vs must acknowledge. |
+| GET | `/policies/:id/acknowledgements` | policies:view | Compliance: who has vs must acknowledge (one policy). |
+| GET | `/policies/compliance` | policies:view | Org-wide compliance: coverage %, per-policy breakdown, outstanding people. |
+| POST | `/policies/:id/remind` | policies:edit | Nudge everyone pending on this policy (in-app `policy_ack_reminder`). |
+| POST | `/policies/compliance/remind-all` | policies:edit | Nudge every outstanding person (one reminder each). |
 | POST | `/policies/:id/acknowledge` | any member | Acknowledge (records userId + version). |
 | GET | `/policies/my-acknowledgements` | any member | The caller's acknowledgements. |
 | PUT | `/policies/:id` | policies:edit | Update — snapshots the prior version + bumps `version` (re-arms ack). |

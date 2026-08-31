@@ -412,6 +412,128 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the owner sees org-wide acknowledgement compliance', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let acked: { userId: string; token: string };
+    let pendingEmp: { userId: string };
+    let id: string;
+    let res: request.Response;
+    given(
+      'an organization with an active required policy and two employees, one of whom has acknowledged',
+      async () => {
+        o = await org();
+        const c = await create(o, {
+          ...wt(),
+          acknowledgementRequired: true,
+          isActive: true,
+          applicableTo: 'all',
+        }).expect(201);
+        id = c.body.data.id;
+        acked = await h.createEmployeeMember(o);
+        pendingEmp = await h.createEmployeeMember(o);
+        await h
+          .api()
+          .post(`${API}/policies/${id}/acknowledge`)
+          .set('Authorization', `Bearer ${acked.token}`)
+          .send({})
+          .expect(200);
+      },
+    );
+    when('the owner views the compliance overview', async () => {
+      res = await h
+        .api()
+        .get(`${API}/policies/compliance`)
+        .set('Authorization', `Bearer ${o.ownerToken}`);
+    });
+    then('the overview shows that policy with one acknowledged and one pending', () => {
+      expect(res.status).toBe(200);
+      const d = res.body.data;
+      const policy = (d.perPolicy as any[]).find((p) => p.policyId === id);
+      expect(policy).toBeDefined();
+      expect(policy.pendingCount).toBe(1);
+      expect(policy.ackedCount).toBe(1);
+      expect(policy.coveragePct).toBe(50);
+    });
+    and('the outstanding person lists the unacknowledged policy', () => {
+      const person = (res.body.data.people as any[]).find((p) => p.userId === pendingEmp.userId);
+      expect(person).toBeDefined();
+      expect((person.pending as any[]).map((x) => x.policyId)).toContain(id);
+    });
+  });
+
+  test('reminding pending members notifies them', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let emp: { userId: string; token: string };
+    let id: string;
+    let res: request.Response;
+    given(
+      'an organization with an active required policy and an employee who has not acknowledged',
+      async () => {
+        o = await org();
+        emp = await h.createEmployeeMember(o);
+        const c = await create(o, {
+          ...wt(),
+          acknowledgementRequired: true,
+          isActive: true,
+          applicableTo: 'all',
+        }).expect(201);
+        id = c.body.data.id;
+      },
+    );
+    when('the owner reminds members pending on that policy', async () => {
+      res = await h
+        .api()
+        .post(`${API}/policies/${id}/remind`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({});
+    });
+    then('one member is reminded', () => {
+      expect(res.status).toBe(200);
+      expect(res.body.data.reminded).toBe(1);
+    });
+    and('that employee has an in-app policy acknowledgement reminder', async () => {
+      const inbox = await h
+        .api()
+        .get(`${API}/notifications`)
+        .set('Authorization', `Bearer ${emp.token}`)
+        .expect(200);
+      const reminder = (inbox.body.items as any[]).find((n) => n.type === 'policy_ack_reminder');
+      expect(reminder).toBeDefined();
+      expect(reminder.data.actionUrl).toBe('/policies');
+    });
+  });
+
+  test('an employee cannot remind members', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let emp: { userId: string; token: string };
+    let id: string;
+    let res: request.Response;
+    given(
+      'an organization with an active required policy and an employee who has not acknowledged',
+      async () => {
+        o = await org();
+        emp = await h.createEmployeeMember(o);
+        const c = await create(o, {
+          ...wt(),
+          acknowledgementRequired: true,
+          isActive: true,
+          applicableTo: 'all',
+        }).expect(201);
+        id = c.body.data.id;
+      },
+    );
+    when('the employee tries to remind members pending on that policy', async () => {
+      res = await h
+        .api()
+        .post(`${API}/policies/${id}/remind`)
+        .set('Authorization', `Bearer ${emp.token}`)
+        .send({});
+    });
+    then('the reminder request is rejected as forbidden', () => {
+      expect(res.status).toBe(403);
+    });
+  });
+
   test("the org owner is exempt from the org's own required policies", ({ given, when, then, and }) => {
     let o: CreatedOrg;
     let id: string;

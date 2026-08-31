@@ -61,3 +61,25 @@ Feature: Employee onboarding lifecycle (HR)
     And an onboarding for a member of that org
     When the member fills in only their department
     Then their "Complete your profile" task is done on the next read
+
+  Scenario: the daily reminder posts an in-app notification for pending items
+    Given an organization with an onboarding for a member
+    When the daily onboarding reminder runs
+    Then the member has an in-app onboarding reminder routing to My Onboarding
+
+  Scenario: acknowledging your policies auto-completes the policies checklist task
+    Given an organization with an onboarding for a member
+    When the member acknowledges every policy that applies to them
+    Then their "Acknowledge company policies" task is done on the next read
+
+  Scenario: HR marks an IT-owned checklist task done and can re-open it
+    Given an organization with an onboarding for a member
+    When the owner marks the IT accounts task done
+    Then the IT accounts task is done on the record
+    And the owner can re-open the IT accounts task
+
+  @security
+  Scenario: an employee cannot tick their own IT-owned checklist task
+    Given an organization with an onboarding for a member
+    When the member tries to mark the IT accounts task done via the HR endpoint
+    Then the task update is rejected as forbidden

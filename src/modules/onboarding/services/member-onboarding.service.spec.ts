@@ -50,7 +50,13 @@ describe('OnboardingLifecycleService (unit, no DB)', () => {
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: {} },
         { provide: getRepositoryToken(UserEntity), useValue: {} },
         { provide: getRepositoryToken(OrganizationEntity), useValue: { findOne: jest.fn() } },
-        { provide: PolicyService, useValue: { getOnboardingConfig: jest.fn().mockResolvedValue(cfg) } },
+        {
+          provide: PolicyService,
+          useValue: {
+            getOnboardingConfig: jest.fn().mockResolvedValue(cfg),
+            pendingAcknowledgements: jest.fn().mockResolvedValue([]),
+          },
+        },
         { provide: MailService, useValue: { send: jest.fn().mockResolvedValue(true) } },
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: NotifierService, useValue: { notify: jest.fn(), notifyManagers: jest.fn() } },
@@ -151,6 +157,35 @@ describe('OnboardingLifecycleService (unit, no DB)', () => {
       const record = { status: 'completed', documents: [] } as any;
       await (service as any).reconcile(record, cfg);
       expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('auto-completes policies_ack when nothing is left to acknowledge', async () => {
+      const policy = service['policy'] as any;
+      policy.pendingAcknowledgements.mockResolvedValue([]); // nothing outstanding
+      const record = {
+        status: 'in_progress',
+        organizationId: 'org1',
+        userId: 'u1',
+        documents: [],
+        checklist: [{ key: 'policies_ack', category: 'compliance', assignedTo: 'self', status: 'pending' }],
+      } as any;
+      await (service as any).reconcile(record, cfg);
+      expect(record.checklist[0].status).toBe('done');
+      expect(repo.save).toHaveBeenCalled();
+    });
+
+    it('leaves policies_ack pending while acknowledgements are outstanding', async () => {
+      const policy = service['policy'] as any;
+      policy.pendingAcknowledgements.mockResolvedValue([{ id: 'p1' }]); // still owes one
+      const record = {
+        status: 'in_progress',
+        organizationId: 'org1',
+        userId: 'u1',
+        documents: [],
+        checklist: [{ key: 'policies_ack', category: 'compliance', assignedTo: 'self', status: 'pending' }],
+      } as any;
+      await (service as any).reconcile(record, cfg);
+      expect(record.checklist[0].status).toBe('pending');
     });
   });
 

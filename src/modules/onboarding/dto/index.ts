@@ -172,6 +172,11 @@ export class RejectionDto {
   note: string;
 }
 
+export class SetChecklistItemDto {
+  @IsBoolean()
+  done: boolean;
+}
+
 export class FieldValueDto {
   @IsString()
   @MaxLength(64)
