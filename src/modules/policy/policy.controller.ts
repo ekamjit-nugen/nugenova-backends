@@ -103,6 +103,23 @@ export class PolicyController {
     return { success: true, data };
   }
 
+  /** Org-wide acknowledgement compliance (owner/manager). Declared before `:id`. */
+  @Get('compliance')
+  @RequirePermission('policies', 'view')
+  async compliance(@Req() req: any) {
+    const data = await this.policies.complianceOverview(this.orgId(req));
+    return { success: true, data };
+  }
+
+  /** Nudge every outstanding person across all tracked policies. */
+  @Post('compliance/remind-all')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('policies', 'edit')
+  async remindAll(@Req() req: any) {
+    const data = await this.policies.remindAllOutstanding(this.orgId(req), req.user.userId);
+    return { success: true, message: `Reminded ${data.reminded} member(s)`, data };
+  }
+
   /**
    * The policies the caller must accept before using the platform (the login
    * acceptance gate reads this). Empty ⇒ nothing outstanding.
@@ -183,6 +200,15 @@ export class PolicyController {
   async acknowledgements(@Param('id') id: string, @Req() req: any) {
     const data = await this.policies.getAcknowledgementStatus(this.orgId(req), id);
     return { success: true, data };
+  }
+
+  /** Nudge everyone still pending on this one policy. */
+  @Post(':id/remind')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('policies', 'edit')
+  async remind(@Param('id') id: string, @Req() req: any) {
+    const data = await this.policies.remindPendingAck(this.orgId(req), id, req.user.userId);
+    return { success: true, message: `Reminded ${data.reminded} member(s)`, data };
   }
 
   @Post(':id/acknowledge')

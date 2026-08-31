@@ -78,6 +78,24 @@ Feature: Policies — org-scoped CRUD, roles, isolation, acknowledgement
     When the owner views the acknowledgement status
     Then the employee appears as pending
 
+  Scenario: the owner sees org-wide acknowledgement compliance
+    Given an organization with an active required policy and two employees, one of whom has acknowledged
+    When the owner views the compliance overview
+    Then the overview shows that policy with one acknowledged and one pending
+    And the outstanding person lists the unacknowledged policy
+
+  Scenario: reminding pending members notifies them
+    Given an organization with an active required policy and an employee who has not acknowledged
+    When the owner reminds members pending on that policy
+    Then one member is reminded
+    And that employee has an in-app policy acknowledgement reminder
+
+  @security
+  Scenario: an employee cannot remind members
+    Given an organization with an active required policy and an employee who has not acknowledged
+    When the employee tries to remind members pending on that policy
+    Then the reminder request is rejected as forbidden
+
   Scenario: an employee must accept an outstanding required policy before using the platform
     Given an organization with an active required policy applicable to everyone
     And an employee who has not acknowledged it

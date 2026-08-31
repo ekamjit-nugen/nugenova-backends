@@ -11,6 +11,7 @@ import {
 import { newObjectId } from '../../../bootstrap/database/object-id';
 import { MemberOnboardingEntity } from '../entities/member-onboarding.entity';
 import { PolicyEntity } from '../../policy/entities/policy.entity';
+import { OnboardingLifecycleService } from '../services/member-onboarding.service';
 
 const feature = loadFeature('./onboarding-lifecycle.feature', {
   loadRelativePath: true,
@@ -27,12 +28,14 @@ defineFeature(feature, (test) => {
   let h: OrgTestHarness;
   let onboardings: Repository<MemberOnboardingEntity>;
   let policies: Repository<PolicyEntity>;
+  let lifecycle: OnboardingLifecycleService;
   const orgIds = new Set<string>();
 
   beforeAll(async () => {
     h = await bootOrgTestApp();
     onboardings = h.app.get(getRepositoryToken(MemberOnboardingEntity));
     policies = h.app.get(getRepositoryToken(PolicyEntity));
+    lifecycle = h.app.get(OnboardingLifecycleService);
   });
   afterAll(async () => {
     const ids = [...orgIds];
@@ -385,6 +388,136 @@ defineFeature(feature, (test) => {
         .expect(200);
       const task = (me.body.data.checklist as any[]).find((c) => c.key === 'profile_complete');
       expect(task?.status).toBe('done');
+    });
+  });
+
+  test('the daily reminder posts an in-app notification for pending items', ({
+    given,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an onboarding for a member', async () => {
+      ({ o, member } = await orgWithMember());
+      // A fresh onboarding seeds required documents + checklist — all pending.
+      await initiate(o, member.userId).expect(201);
+    });
+    when('the daily onboarding reminder runs', async () => {
+      await lifecycle.remindPending();
+    });
+    then(
+      'the member has an in-app onboarding reminder routing to My Onboarding',
+      async () => {
+        const inbox = await h
+          .api()
+          .get(`${API}/notifications`)
+          .set('Authorization', `Bearer ${member.token}`)
+          .expect(200);
+        const reminder = (inbox.body.items as any[]).find(
+          (n) => n.type === 'onboarding_reminder',
+        );
+        expect(reminder).toBeDefined();
+        expect(reminder.data.actionUrl).toBe('/onboarding/me');
+      },
+    );
+  });
+
+  test('acknowledging your policies auto-completes the policies checklist task', ({
+    given,
+    when,
+    then,
+  }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an onboarding for a member', async () => {
+      ({ o, member } = await orgWithMember());
+      await initiate(o, member.userId).expect(201);
+    });
+    when('the member acknowledges every policy that applies to them', async () => {
+      // Accept whatever ack-required policies the org seeded for this member.
+      const pending = await h
+        .api()
+        .get(`${API}/policies/pending-acknowledgements`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .expect(200);
+      for (const p of pending.body.data as any[]) {
+        await h
+          .api()
+          .post(`${API}/policies/${p.id}/acknowledge`)
+          .set('Authorization', `Bearer ${member.token}`)
+          .send({})
+          .expect(200);
+      }
+    });
+    then('their "Acknowledge company policies" task is done on the next read', async () => {
+      const me = await h
+        .api()
+        .get(`${API}/onboarding/me`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .expect(200);
+      const task = (me.body.data.checklist as any[]).find((c) => c.key === 'policies_ack');
+      expect(task?.status).toBe('done');
+    });
+  });
+
+  test('HR marks an IT-owned checklist task done and can re-open it', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let recordId: string;
+    given('an organization with an onboarding for a member', async () => {
+      ({ o, member } = await orgWithMember());
+      const res = await initiate(o, member.userId).expect(201);
+      recordId = res.body.data.id;
+    });
+    when('the owner marks the IT accounts task done', async () => {
+      await h
+        .api()
+        .put(`${API}/onboarding/lifecycle/${recordId}/checklist/it_accounts`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ done: true })
+        .expect(200);
+    });
+    then('the IT accounts task is done on the record', async () => {
+      const rec = await h
+        .api()
+        .get(`${API}/onboarding/lifecycle/${recordId}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .expect(200);
+      const task = (rec.body.data.checklist as any[]).find((c) => c.key === 'it_accounts');
+      expect(task?.status).toBe('done');
+    });
+    and('the owner can re-open the IT accounts task', async () => {
+      const res = await h
+        .api()
+        .put(`${API}/onboarding/lifecycle/${recordId}/checklist/it_accounts`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ done: false })
+        .expect(200);
+      const task = (res.body.data.checklist as any[]).find((c) => c.key === 'it_accounts');
+      expect(task?.status).toBe('pending');
+    });
+  });
+
+  test('an employee cannot tick their own IT-owned checklist task', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let recordId: string;
+    let res: request.Response;
+    given('an organization with an onboarding for a member', async () => {
+      ({ o, member } = await orgWithMember());
+      const created = await initiate(o, member.userId).expect(201);
+      recordId = created.body.data.id;
+    });
+    when('the member tries to mark the IT accounts task done via the HR endpoint', async () => {
+      res = await h
+        .api()
+        .put(`${API}/onboarding/lifecycle/${recordId}/checklist/it_accounts`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .send({ done: true });
+    });
+    then('the task update is rejected as forbidden', () => {
+      expect(res.status).toBe(403);
     });
   });
 });

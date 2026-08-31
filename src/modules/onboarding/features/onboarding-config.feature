@@ -12,6 +12,13 @@ Feature: Onboarding requirements config
     Given a freshly provisioned organization
     When the owner reads the onboarding catalog
     Then the catalog groups documents and includes the defaults
+    And the catalog lists the selectable standard checklist tasks
+
+  Scenario: the owner selects which standard checklist tasks apply
+    Given a freshly provisioned organization
+    When the owner saves a checklist without the team-introduction task
+    Then reading the config back omits the team-introduction task
+    And the retained standard tasks keep their canonical keys
 
   Scenario: the owner customises the onboarding requirements
     Given a freshly provisioned organization

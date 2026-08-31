@@ -72,7 +72,7 @@ defineFeature(feature, (test) => {
     );
   });
 
-  test('the owner reads the document catalog', ({ given, when, then }) => {
+  test('the owner reads the document catalog', ({ given, when, then, and }) => {
     let o: CreatedOrg;
     let res: request.Response;
     given('a freshly provisioned organization', async () => {
@@ -90,6 +90,55 @@ defineFeature(feature, (test) => {
       const groups = res.body.data.documents.map((g: any) => g.group);
       expect(groups).toContain('Identity');
       expect(res.body.data.defaults.documents.length).toBeGreaterThan(0);
+    });
+    and('the catalog lists the selectable standard checklist tasks', () => {
+      expect(Array.isArray(res.body.data.checklist)).toBe(true);
+      const keys = res.body.data.checklist.map((c: any) => c.key);
+      expect(keys).toEqual(
+        expect.arrayContaining(['welcome_read', 'it_accounts', 'intro_meeting']),
+      );
+      // each carries a human hint on how it completes
+      expect(res.body.data.checklist.every((c: any) => !!c.completedBy)).toBe(true);
+    });
+  });
+
+  test('the owner selects which standard checklist tasks apply', ({
+    given,
+    when,
+    then,
+    and,
+  }) => {
+    let o: CreatedOrg;
+    given('a freshly provisioned organization', async () => {
+      o = await org();
+    });
+    when('the owner saves a checklist without the team-introduction task', async () => {
+      // Read the catalog, drop intro_meeting, save the rest.
+      const cat = await h
+        .api()
+        .get(`${API}/policies/onboarding-catalog`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .expect(200);
+      const selection = (cat.body.data.checklist as any[])
+        .filter((c) => c.key !== 'intro_meeting')
+        .map((c) => ({ key: c.key }));
+      await putConfig(o, { checklist: selection }).expect(200);
+    });
+    then('reading the config back omits the team-introduction task', async () => {
+      const back = await getConfig(o).expect(200);
+      const keys = (back.body.data.checklist as any[]).map((c) => c.key);
+      expect(keys).not.toContain('intro_meeting');
+    });
+    and('the retained standard tasks keep their canonical keys', async () => {
+      const back = await getConfig(o).expect(200);
+      const it = (back.body.data.checklist as any[]).find((c) => c.key === 'it_accounts');
+      // canonicalised from just {key} → full title/category/assignee restored
+      expect(it).toMatchObject({
+        key: 'it_accounts',
+        title: 'Provision IT accounts & email',
+        category: 'it_setup',
+        assignedTo: 'it',
+      });
     });
   });
 

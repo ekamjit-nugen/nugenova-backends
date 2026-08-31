@@ -440,6 +440,41 @@ export class OnboardingLifecycleService {
     return this.toView(r);
   }
 
+  /**
+   * HR/manager marks (or re-opens) ANY checklist item on a hire's onboarding —
+   * including the IT-owned and HR-owned tasks the hire can't self-serve
+   * ("Provision IT accounts", "Set up workstation", "Schedule team introduction").
+   * This is who actually ticks the `assignedTo: 'it' | 'hr'` tasks. Guarded at the
+   * controller (owner/admin/HR with employees:edit).
+   */
+  async setChecklistItemStatus(
+    orgId: string,
+    id: string,
+    key: string,
+    done: boolean,
+    actorUserId: string,
+  ): Promise<OnboardingView> {
+    const r = await this.getRecord(orgId, id);
+    if (r.status === 'completed' || r.status === 'cancelled') {
+      throw new BadRequestException('This onboarding is closed');
+    }
+    const item = r.checklist.find((c) => c.key === key);
+    if (!item) throw new NotFoundException('That task is not part of this onboarding');
+    if (done) {
+      item.status = 'done';
+      item.completedAt = new Date().toISOString();
+      item.completedBy = actorUserId;
+    } else {
+      item.status = 'pending';
+      item.completedAt = null;
+      item.completedBy = null;
+    }
+    r.checklist = [...r.checklist];
+    if (r.status === 'pending') r.status = 'in_progress';
+    await this.repo.save(r);
+    return this.toView(r);
+  }
+
   // ── reconcile-on-read ─────────────────────────────────────────────────────────
 
   /**
@@ -498,6 +533,24 @@ export class OnboardingLifecycleService {
       }
     }
 
+    // Auto-complete the "Acknowledge company policies" self task once the member
+    // has nothing left to acknowledge — i.e. they've accepted every applicable
+    // acknowledgement-required policy, OR none apply to them at all. Mirrors the
+    // profile task: acknowledging in Policies (or the login gate) satisfies the
+    // checklist without a manual "Mark done".
+    const policyTask = (r.checklist || []).find((c) => c.key === 'policies_ack');
+    if (policyTask && policyTask.status !== 'done' && r.userId && r.organizationId) {
+      const pending = await this.policy.pendingAcknowledgements(r.organizationId, r.userId);
+      if (pending.length === 0) {
+        policyTask.status = 'done';
+        policyTask.completedAt = new Date().toISOString();
+        policyTask.completedBy = r.userId;
+        r.checklist = [...r.checklist];
+        if (r.status === 'pending') r.status = 'in_progress';
+        changed = true;
+      }
+    }
+
     if (changed || next.length !== r.documents.length) {
       r.documents = next;
       await this.repo.save(r);
@@ -520,7 +573,13 @@ export class OnboardingLifecycleService {
 
   // ── daily reminder ────────────────────────────────────────────────────────────
 
-  /** Nudge hires with outstanding onboarding items (email-only). 10:00 daily. */
+  /**
+   * Nudge hires with outstanding onboarding items. 10:00 daily. Sends BOTH an
+   * email (when the hire has an address) AND an in-app notification (when the
+   * hire has a linked user) so the reminder also lands in their inbox and can be
+   * tapped through to `/onboarding/me`. Either channel firing stamps
+   * `lastReminderAt`.
+   */
   @Cron('0 10 * * *')
   async remindPending(): Promise<void> {
     const rows = await this.repo.find({
@@ -528,23 +587,46 @@ export class OnboardingLifecycleService {
     });
     const active = rows.filter((r) => ACTIVE_STATUSES.includes(r.status) && r.status !== 'completed');
     for (const r of active) {
-      if (!r.employeeEmail) continue;
       const pending = this.outstandingTitles(r);
       if (!pending.length) continue;
-      const { subject, html } = onboardingReminderEmail({
-        employeeName: r.employeeName,
-        orgName: await this.orgNameFor(r.organizationId),
-        pendingTitles: pending,
-        onboardingUrl: `${this.frontendUrl()}/onboarding/me`,
-      });
-      const ok = await this.mail.send({
-        to: r.employeeEmail,
-        subject,
-        html,
-        category: 'onboarding.reminder',
-        organizationId: r.organizationId,
-      });
-      if (ok) {
+
+      let notified = false;
+
+      if (r.employeeEmail) {
+        const { subject, html } = onboardingReminderEmail({
+          employeeName: r.employeeName,
+          orgName: await this.orgNameFor(r.organizationId),
+          pendingTitles: pending,
+          onboardingUrl: `${this.frontendUrl()}/onboarding/me`,
+        });
+        const ok = await this.mail.send({
+          to: r.employeeEmail,
+          subject,
+          html,
+          category: 'onboarding.reminder',
+          organizationId: r.organizationId,
+        });
+        notified = notified || ok;
+      }
+
+      // In-app reminder — system-generated (no actor), routes to My Onboarding.
+      if (r.userId) {
+        const count = pending.length;
+        await this.notifier.notify({
+          organizationId: r.organizationId,
+          userId: r.userId,
+          type: 'onboarding_reminder',
+          title: 'Onboarding items still pending',
+          body:
+            count === 1
+              ? `You still have 1 item to finish: ${pending[0]}.`
+              : `You still have ${count} onboarding items to finish, starting with "${pending[0]}".`,
+          data: { actionUrl: '/onboarding/me', onboardingId: r.id, pendingCount: count },
+        });
+        notified = true;
+      }
+
+      if (notified) {
         r.lastReminderAt = new Date();
         await this.repo.save(r);
       }

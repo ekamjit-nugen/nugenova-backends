@@ -32,10 +32,12 @@ import {
 import {
   OnboardingConfig,
   ONBOARDING_DOCUMENT_CATALOG,
+  ONBOARDING_CHECKLIST_CATALOG,
   PROFILE_FIELD_CATALOG,
   catalogByGroup,
   defaultOnboardingConfig,
   sanitizeProfileFields,
+  sanitizeChecklist,
 } from './onboarding-catalog';
 
 /** What attendance needs to govern a clock-in for one employee. */
@@ -437,6 +439,7 @@ export class PolicyService {
   onboardingCatalog() {
     return {
       documents: catalogByGroup(),
+      checklist: ONBOARDING_CHECKLIST_CATALOG,
       profileFields: PROFILE_FIELD_CATALOG,
       defaults: defaultOnboardingConfig(),
     };
@@ -474,7 +477,9 @@ export class PolicyService {
         title: titleByKey.get(d.key) || d.title,
         required: !!d.required,
       })),
-      checklist: stored.checklist || fallback.checklist,
+      checklist: stored.checklist
+        ? sanitizeChecklist(stored.checklist)
+        : fallback.checklist,
       defaultProbationMonths:
         typeof stored.defaultProbationMonths === 'number'
           ? stored.defaultProbationMonths
@@ -501,12 +506,7 @@ export class PolicyService {
         title: titleByKey.get(d.key) || d.title,
         required: !!d.required,
       })),
-      checklist: (dto.checklist ?? current.checklist).map((c) => ({
-        key: c.key,
-        title: c.title,
-        category: c.category as OnboardingConfig['checklist'][number]['category'],
-        assignedTo: c.assignedTo as OnboardingConfig['checklist'][number]['assignedTo'],
-      })),
+      checklist: sanitizeChecklist(dto.checklist ?? current.checklist),
       defaultProbationMonths:
         dto.defaultProbationMonths ?? current.defaultProbationMonths,
       targetDays: dto.targetDays ?? current.targetDays,
@@ -576,12 +576,14 @@ export class PolicyService {
     const nameById = new Map(
       users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim() || u.email]),
     );
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
     const rows = applicable.map((m) => {
       const ack = ackByUser.get(m.userId as string);
       const acknowledged = !!ack && ack.version >= policy.version;
       return {
         userId: m.userId,
         name: nameById.get(m.userId as string) || m.email || 'Member',
+        email: emailById.get(m.userId as string) || m.email || null,
         acknowledged,
         acknowledgedAt: ack?.acknowledgedAt ?? null,
         ackedVersion: ack?.version ?? null,
@@ -623,6 +625,142 @@ export class PolicyService {
       hasCustomPolicy: hasCustom,
       pendingAcknowledgements: pendingAcks,
     };
+  }
+
+  // ── acknowledgement compliance (owner/manager) ─────────────────────────────
+
+  /**
+   * Org-wide acknowledgement compliance across every active, acknowledgement-
+   * required policy: overall coverage, a per-policy breakdown, and the list of
+   * people who still owe an acknowledgement (with WHICH policies they owe). An
+   * "assignment" is one (applicable member × policy) pair. The owner is never a
+   * policy subject, so they never appear here.
+   */
+  async complianceOverview(orgId: string) {
+    const all = await this.list(orgId);
+    const tracked = all.filter((p) => p.isActive && p.acknowledgementRequired);
+
+    const perPolicy: {
+      policyId: string;
+      policyName: string;
+      category: string;
+      version: number;
+      total: number;
+      ackedCount: number;
+      pendingCount: number;
+      coveragePct: number;
+    }[] = [];
+
+    // userId → their outstanding policies
+    const outstanding = new Map<
+      string,
+      {
+        userId: string;
+        name: string;
+        email: string | null;
+        pending: { policyId: string; policyName: string; needsReAck: boolean }[];
+      }
+    >();
+
+    let totalAssignments = 0;
+    let ackedAssignments = 0;
+
+    for (const p of tracked) {
+      const s = await this.getAcknowledgementStatus(orgId, p.id);
+      totalAssignments += s.total;
+      ackedAssignments += s.ackedCount;
+      perPolicy.push({
+        policyId: p.id,
+        policyName: p.policyName,
+        category: p.category,
+        version: p.version,
+        total: s.total,
+        ackedCount: s.ackedCount,
+        pendingCount: s.pendingCount,
+        coveragePct: s.total ? Math.round((s.ackedCount / s.total) * 100) : 100,
+      });
+      for (const r of s.pending) {
+        if (!r.userId) continue;
+        const entry =
+          outstanding.get(r.userId) ??
+          { userId: r.userId, name: r.name, email: r.email ?? null, pending: [] };
+        entry.pending.push({ policyId: p.id, policyName: p.policyName, needsReAck: r.needsReAck });
+        outstanding.set(r.userId, entry);
+      }
+    }
+
+    const people = [...outstanding.values()].sort(
+      (a, b) => b.pending.length - a.pending.length || a.name.localeCompare(b.name),
+    );
+
+    return {
+      coveragePct: totalAssignments ? Math.round((ackedAssignments / totalAssignments) * 100) : 100,
+      policiesTracked: tracked.length,
+      totalAssignments,
+      ackedAssignments,
+      outstandingAssignments: totalAssignments - ackedAssignments,
+      outstandingPeople: people.length,
+      perPolicy,
+      people,
+    };
+  }
+
+  /**
+   * Nudge everyone still pending on ONE policy with an in-app reminder that routes
+   * to the policies page. Respects each recipient's notification preferences.
+   */
+  async remindPendingAck(
+    orgId: string,
+    policyId: string,
+    actorId: string,
+  ): Promise<{ reminded: number; policyName: string }> {
+    const s = await this.getAcknowledgementStatus(orgId, policyId);
+    let reminded = 0;
+    for (const r of s.pending) {
+      if (!r.userId) continue;
+      await this.notifier.notify({
+        organizationId: orgId,
+        userId: r.userId,
+        actorId,
+        type: 'policy_ack_reminder',
+        title: 'Policy acknowledgement needed',
+        body: `Please review and acknowledge "${s.policyName}".`,
+        data: { actionUrl: '/policies', policyId },
+        priority: 'high',
+      });
+      reminded++;
+    }
+    return { reminded, policyName: s.policyName };
+  }
+
+  /**
+   * Nudge every outstanding person across all tracked policies — ONE reminder per
+   * person, summarising how many acknowledgements they owe (not one per policy).
+   */
+  async remindAllOutstanding(
+    orgId: string,
+    actorId: string,
+  ): Promise<{ reminded: number }> {
+    const overview = await this.complianceOverview(orgId);
+    let reminded = 0;
+    for (const person of overview.people) {
+      const n = person.pending.length;
+      await this.notifier.notify({
+        organizationId: orgId,
+        userId: person.userId,
+        actorId,
+        type: 'policy_ack_reminder',
+        title: n === 1 ? 'Policy acknowledgement needed' : 'Policy acknowledgements needed',
+        body:
+          n === 1
+            ? `Please review and acknowledge "${person.pending[0].policyName}".`
+            : `You have ${n} policies waiting for your acknowledgement.`,
+        data: { actionUrl: '/policies' },
+        priority: 'high',
+      });
+      reminded++;
+    }
+    return { reminded };
   }
 
   // ── the resolver attendance consumes ───────────────────────────────────────

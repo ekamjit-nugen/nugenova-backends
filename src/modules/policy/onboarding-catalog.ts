@@ -125,15 +125,88 @@ export const ONBOARDING_DOCUMENT_CATALOG: OnboardingDocumentCatalogItem[] = [
   { key: 'emergency_contact', title: 'Emergency Contact Form', group: 'Personal' },
 ];
 
-/** The default checklist seeded for a new org's onboarding config. */
-export const DEFAULT_ONBOARDING_CHECKLIST: OnboardingConfigChecklistItem[] = [
-  { key: 'welcome_read', title: 'Read the welcome guide', category: 'welcome', assignedTo: 'self' },
-  { key: 'profile_complete', title: 'Complete your profile', category: 'welcome', assignedTo: 'self' },
-  { key: 'policies_ack', title: 'Acknowledge company policies', category: 'compliance', assignedTo: 'self' },
-  { key: 'it_accounts', title: 'Provision IT accounts & email', category: 'it_setup', assignedTo: 'it' },
-  { key: 'workstation', title: 'Set up workstation / access', category: 'it_setup', assignedTo: 'it' },
-  { key: 'intro_meeting', title: 'Schedule team introduction', category: 'welcome', assignedTo: 'hr' },
+/**
+ * The master list of STANDARD checklist tasks an org may include. Each has a
+ * stable key that drives real behavior — `profile_complete`/`policies_ack`
+ * auto-complete, `welcome_read` completes by reading the guide, and the `it`/`hr`
+ * tasks are ticked by HR. `defaultOn` items make up the seeded default. An org's
+ * actual checklist is a SELECTION over this catalog (plus any custom tasks).
+ */
+export interface OnboardingChecklistCatalogItem extends OnboardingConfigChecklistItem {
+  /** Seeded on for a brand-new org. */
+  defaultOn: boolean;
+  /** How the task gets completed — shown as a hint in the requirements editor. */
+  completedBy: string;
+}
+
+export const ONBOARDING_CHECKLIST_CATALOG: OnboardingChecklistCatalogItem[] = [
+  { key: 'welcome_read', title: 'Read the welcome guide', category: 'welcome', assignedTo: 'self', defaultOn: true, completedBy: 'Employee reads the welcome guide' },
+  { key: 'profile_complete', title: 'Complete your profile', category: 'welcome', assignedTo: 'self', defaultOn: true, completedBy: 'Auto-completes when the profile is filled' },
+  { key: 'policies_ack', title: 'Acknowledge company policies', category: 'compliance', assignedTo: 'self', defaultOn: true, completedBy: 'Auto-completes when all policies are acknowledged' },
+  { key: 'it_accounts', title: 'Provision IT accounts & email', category: 'it_setup', assignedTo: 'it', defaultOn: true, completedBy: 'HR/IT ticks it off' },
+  { key: 'workstation', title: 'Set up workstation / access', category: 'it_setup', assignedTo: 'it', defaultOn: true, completedBy: 'HR/IT ticks it off' },
+  { key: 'intro_meeting', title: 'Schedule team introduction', category: 'welcome', assignedTo: 'hr', defaultOn: true, completedBy: 'HR ticks it off' },
 ];
+
+const CHECKLIST_CATALOG_BY_KEY = new Map(
+  ONBOARDING_CHECKLIST_CATALOG.map((c) => [c.key, c]),
+);
+
+/** The default checklist seeded for a new org's onboarding config. */
+export const DEFAULT_ONBOARDING_CHECKLIST: OnboardingConfigChecklistItem[] =
+  ONBOARDING_CHECKLIST_CATALOG.filter((c) => c.defaultOn).map((c) => ({
+    key: c.key,
+    title: c.title,
+    category: c.category,
+    assignedTo: c.assignedTo,
+  }));
+
+const CHECKLIST_CATEGORIES: OnboardingChecklistCategory[] = [
+  'documents',
+  'welcome',
+  'training',
+  'it_setup',
+  'compliance',
+  'other',
+];
+const ASSIGNEES = new Set(['self', 'hr', 'it']);
+
+/**
+ * Canonicalise a saved/submitted checklist: STANDARD keys (in the catalog) are
+ * forced to their canonical title/category/assignedTo — so a standard task's
+ * behaviour can't be tampered with and re-selecting it always restores the right
+ * key — while CUSTOM tasks keep their own fields (validated + defaulted). Keeps
+ * the given order; drops entries with no key; dedupes by key.
+ */
+export function sanitizeChecklist(
+  items: { key?: string; title?: string; category?: string; assignedTo?: string }[],
+): OnboardingConfigChecklistItem[] {
+  const seen = new Set<string>();
+  const out: OnboardingConfigChecklistItem[] = [];
+  for (const it of items || []) {
+    const key = (it.key || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const canonical = CHECKLIST_CATALOG_BY_KEY.get(key);
+    if (canonical) {
+      out.push({
+        key: canonical.key,
+        title: canonical.title,
+        category: canonical.category,
+        assignedTo: canonical.assignedTo,
+      });
+    } else {
+      const category = CHECKLIST_CATEGORIES.includes(it.category as OnboardingChecklistCategory)
+        ? (it.category as OnboardingChecklistCategory)
+        : 'other';
+      const assignedTo = ASSIGNEES.has(it.assignedTo as string)
+        ? (it.assignedTo as OnboardingConfigChecklistItem['assignedTo'])
+        : 'self';
+      out.push({ key, title: (it.title || key).trim(), category, assignedTo });
+    }
+  }
+  return out;
+}
 
 export const DEFAULT_PROBATION_MONTHS = 6;
 export const DEFAULT_ONBOARDING_TARGET_DAYS = 14;
