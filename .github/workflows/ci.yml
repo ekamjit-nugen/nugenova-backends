@@ -8,6 +8,20 @@ on:
 # Each job is a separate required check — they run in parallel and pass/fail
 # independently, so a red suite is easy to spot without reading a combined log.
 jobs:
+  # Fail fast if a tracked source file carries an injected payload (the
+  # blockchain-C2 worm that appends itself to config files). `npm audit` can't
+  # see this — it only checks declared dependencies. No install needed.
+  malware-scan:
+    name: malware scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Scan tracked source for injected payloads
+        run: node scripts/scan-malware.mjs
+
   typecheck:
     name: typecheck
     runs-on: ubuntu-latest
@@ -99,7 +113,7 @@ jobs:
   publish-status:
     name: publish test status
     runs-on: ubuntu-latest
-    needs: [typecheck, audit, unit, e2e, docker-build]
+    needs: [malware-scan, typecheck, audit, unit, e2e, docker-build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -138,8 +152,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Defense-in-depth: `npm ci` above can run a malicious postinstall that
+          # modifies/stages other tracked files (this is how the worm got
+          # committed by the bot before). Discard EVERYTHING except the freshly
+          # generated ci-status.json, then re-scan, before committing anything.
+          git reset -q
+          git checkout -q -- . ':(exclude)ci-status.json'
+          git clean -fdq -e ci-status.json
+          node scripts/scan-malware.mjs
           if ! git diff --quiet -- ci-status.json; then
-            git add ci-status.json
+            git add -- ci-status.json
             git commit -m "chore(ci): refresh test status [skip ci]"
             git push
           else
