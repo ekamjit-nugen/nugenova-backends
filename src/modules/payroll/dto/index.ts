@@ -1,4 +1,21 @@
-import { IsArray, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsArray,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class SalaryComponentDto {
+  @IsString() @MaxLength(20) code: string;
+  @IsString() @MaxLength(60) name: string;
+  @IsNumber() @Min(0) @Max(100000000) amount: number;
+}
 
 export class SetSalaryDto {
   /** Monthly gross salary in rupees. */
@@ -6,6 +23,13 @@ export class SetSalaryDto {
   @Min(0)
   @Max(100000000)
   monthlySalary: number;
+
+  /** Earning breakdown (Basic/HRA/…); omit ⇒ whole salary treated as Basic. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SalaryComponentDto)
+  components?: SalaryComponentDto[];
 
   @IsOptional()
   @IsString()

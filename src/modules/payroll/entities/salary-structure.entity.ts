@@ -1,6 +1,13 @@
 import { Column, Entity, Index } from 'typeorm';
 import { PgBaseEntity } from '../../../bootstrap/database/pg-base.entity';
 
+/** A salary earning component (Basic, HRA, allowances). Amounts in rupees/month. */
+export interface SalaryComponent {
+  code: string; // e.g. BASIC, HRA, SPECIAL
+  name: string;
+  amount: number;
+}
+
 /**
  * SalaryStructure — an employee's monthly salary (Phase 1: the "simple" path — a
  * single fixed monthly figure in RUPEES, no CTC breakdown). Effective-dated with
@@ -25,9 +32,13 @@ export class SalaryStructureEntity extends PgBaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   employeeEmail: string | null;
 
-  /** Monthly gross salary in rupees. */
+  /** Monthly gross salary in rupees (= sum of components when a breakdown exists). */
   @Column({ type: 'numeric', precision: 12, scale: 2 })
   monthlySalary: number;
+
+  /** Earning breakdown; empty ⇒ treat the whole `monthlySalary` as Basic. */
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  components: SalaryComponent[];
 
   @Column({ type: 'timestamptz' })
   effectiveFrom: Date;

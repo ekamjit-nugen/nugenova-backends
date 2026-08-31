@@ -25,10 +25,26 @@ Feature: Payroll (simple monthly payslips)
     When the owner generates payslips for that month
     Then the member's payslip is fully loss-of-pay with zero net
 
-  Scenario: a member on approved paid leave for the month is paid in full
+  Scenario: a member on approved paid leave for the month has no loss-of-pay
     Given an organization with an employee member on a salary and paid leave all month
     When the owner generates payslips for that month
-    Then the member's payslip has no loss-of-pay and the full net salary
+    Then the member's payslip has no loss-of-pay and full gross earnings
+
+  Scenario: statutory deductions reduce net pay
+    Given an organization with an employee member on a salary and paid leave all month
+    When the owner generates payslips for that month
+    Then the member's payslip deducts provident fund and professional tax and shows the employer contribution
+
+  Scenario: the owner turns statutory deductions off through payroll policy
+    Given an organization with an employee member on a salary and paid leave all month
+    And the owner disables PF, ESI and professional tax
+    When the owner generates payslips for that month
+    Then the member's payslip has no statutory deductions and net equals gross
+
+  Scenario: salary components drive the payslip earnings and PF wage
+    Given an organization with an employee member on a component-based salary and paid leave all month
+    When the owner generates payslips for that month
+    Then the payslip earnings list the components and PF is computed on the Basic
 
   @security
   Scenario: a member cannot read another member's payslip

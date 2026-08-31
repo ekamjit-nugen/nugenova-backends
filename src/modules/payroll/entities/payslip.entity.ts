@@ -14,6 +14,23 @@ export interface PayslipLopDetails {
   perDayPay: number;
 }
 
+/** A payslip line item (earning / deduction / employer contribution). */
+export interface PayslipLine {
+  code: string;
+  name: string;
+  amount: number;
+}
+
+/** Statutory totals baked onto the payslip. */
+export interface PayslipStatutory {
+  pfEmployee: number;
+  pfEmployer: number;
+  pfWage: number;
+  esiEmployee: number;
+  esiEmployer: number;
+  professionalTax: number;
+}
+
 /** A snapshot of who/what the payslip was generated for (immutable). */
 export interface PayslipEmployeeSnapshot {
   userId: string;
@@ -70,6 +87,18 @@ export class PayslipEntity extends PgBaseEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   lopDetails: PayslipLopDetails;
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  earnings: PayslipLine[];
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  deductions: PayslipLine[];
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  employerContributions: PayslipLine[];
+
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  statutory: PayslipStatutory;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   employeeSnapshot: PayslipEmployeeSnapshot;

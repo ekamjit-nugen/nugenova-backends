@@ -78,6 +78,45 @@ defineFeature(feature, (test) => {
   const myPayslips = (member: Member) =>
     h.api().get(`${API}/payroll/payslips/my`).set('Authorization', `Bearer ${member.token}`);
 
+  const findSlip = (res: request.Response) =>
+    (res.body.data as any[]).find((p) => p.month === MONTH && p.year === YEAR);
+
+  /**
+   * An org + member salaried and on approved paid leave for the whole of Sept 2026
+   * (so the payslip has zero LOP and full gross — the clean base for the statutory
+   * assertions). Pass `components` for a component-based structure.
+   */
+  const setupFullPaidMonth = async (
+    salaryAmount: number,
+    components?: { code: string; name: string; amount: number }[],
+  ): Promise<{ o: CreatedOrg; member: Member }> => {
+    const { o, member } = await orgWithMember();
+    await h
+      .api()
+      .put(`${API}/payroll/salary/${member.userId}`)
+      .set('Authorization', `Bearer ${o.ownerToken}`)
+      .send({ monthlySalary: salaryAmount, effectiveFrom: '2026-01-01', ...(components ? { components } : {}) })
+      .expect(200);
+    await h
+      .api()
+      .put(`${API}/policies/leave-config`)
+      .set('Authorization', `Bearer ${o.ownerToken}`)
+      .send({ leaveTypes: [{ key: 'casual', annualAllocation: 40, enabled: true }] })
+      .expect(200);
+    const applied = await h
+      .api()
+      .post(`${API}/leaves`)
+      .set('Authorization', `Bearer ${member.token}`)
+      .send({ leaveType: 'casual', startDate: '2026-09-01', endDate: '2026-09-30', reason: 'Sabbatical' })
+      .expect(201);
+    await h
+      .api()
+      .put(`${API}/leaves/${applied.body.data.id}/approve`)
+      .set('Authorization', `Bearer ${o.ownerToken}`)
+      .expect(200);
+    return { o, member };
+  };
+
   test("the owner sets an employee's monthly salary", ({ given, when, then }) => {
     let o: CreatedOrg;
     let member: Member;
@@ -155,44 +194,111 @@ defineFeature(feature, (test) => {
     });
   });
 
-  test('a member on approved paid leave for the month is paid in full', ({ given, when, then }) => {
+  test('a member on approved paid leave for the month has no loss-of-pay', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an employee member on a salary and paid leave all month', async () => {
+      ({ o, member } = await setupFullPaidMonth(44000));
+    });
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then("the member's payslip has no loss-of-pay and full gross earnings", async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
+      expect(slip).toBeDefined();
+      expect(slip.lopDetails.lopDays).toBe(0);
+      expect(slip.lopDeduction).toBe(0);
+      expect(slip.grossEarnings).toBe(44000);
+      expect(slip.lopDetails.paidLeaveDays).toBeGreaterThan(0);
+    });
+  });
+
+  test('statutory deductions reduce net pay', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an employee member on a salary and paid leave all month', async () => {
+      ({ o, member } = await setupFullPaidMonth(44000));
+    });
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then(
+      "the member's payslip deducts provident fund and professional tax and shows the employer contribution",
+      async () => {
+        const slip = findSlip(await myPayslips(member).expect(200));
+        expect(slip).toBeDefined();
+        // Default config: PF employee = 12% of the 15000 wage ceiling = 1800; PT (MH) = 200;
+        // ESI does not apply (gross 44000 > 21000). Net = 44000 − 1800 − 200 = 42000.
+        expect(slip.statutory.pfEmployee).toBe(1800);
+        expect(slip.statutory.pfEmployer).toBe(1800);
+        expect(slip.statutory.professionalTax).toBe(200);
+        expect(slip.statutory.esiEmployee).toBe(0);
+        expect(slip.totalDeductions).toBe(2000);
+        expect(slip.netPay).toBe(42000);
+        const codes = (slip.deductions as any[]).map((d) => d.code);
+        expect(codes).toEqual(expect.arrayContaining(['PF', 'PT']));
+        const erCodes = (slip.employerContributions as any[]).map((d) => d.code);
+        expect(erCodes).toContain('PF_ER');
+      },
+    );
+  });
+
+  test('the owner turns statutory deductions off through payroll policy', ({ given, and, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an employee member on a salary and paid leave all month', async () => {
+      ({ o, member } = await setupFullPaidMonth(44000));
+    });
+    and('the owner disables PF, ESI and professional tax', async () => {
+      await h
+        .api()
+        .put(`${API}/policies/payroll-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ pf: { enabled: false }, esi: { enabled: false }, ptState: 'none' })
+        .expect(200);
+    });
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then("the member's payslip has no statutory deductions and net equals gross", async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
+      expect(slip).toBeDefined();
+      expect(slip.statutory.pfEmployee).toBe(0);
+      expect(slip.statutory.esiEmployee).toBe(0);
+      expect(slip.statutory.professionalTax).toBe(0);
+      expect(slip.totalDeductions).toBe(0);
+      expect(slip.netPay).toBe(44000);
+    });
+  });
+
+  test('salary components drive the payslip earnings and PF wage', ({ given, when, then }) => {
     let o: CreatedOrg;
     let member: Member;
     given(
-      'an organization with an employee member on a salary and paid leave all month',
+      'an organization with an employee member on a component-based salary and paid leave all month',
       async () => {
-        ({ o, member } = await orgWithMember());
-        await setSalary(o, member.userId, 44000).expect(200);
-        // Raise casual allocation so a whole month of paid leave fits the balance.
-        await h
-          .api()
-          .put(`${API}/policies/leave-config`)
-          .set('Authorization', `Bearer ${o.ownerToken}`)
-          .send({ leaveTypes: [{ key: 'casual', annualAllocation: 40, enabled: true }] })
-          .expect(200);
-        const applied = await h
-          .api()
-          .post(`${API}/leaves`)
-          .set('Authorization', `Bearer ${member.token}`)
-          .send({ leaveType: 'casual', startDate: '2026-09-01', endDate: '2026-09-30', reason: 'Sabbatical' })
-          .expect(201);
-        await h
-          .api()
-          .put(`${API}/leaves/${applied.body.data.id}/approve`)
-          .set('Authorization', `Bearer ${o.ownerToken}`)
-          .expect(200);
+        // Basic 12000 (< 15000 ceiling ⇒ PF wage = Basic), HRA 6000, Special 2000 ⇒ gross 20000.
+        ({ o, member } = await setupFullPaidMonth(0, [
+          { code: 'BASIC', name: 'Basic', amount: 12000 },
+          { code: 'HRA', name: 'House Rent Allowance', amount: 6000 },
+          { code: 'SPECIAL', name: 'Special Allowance', amount: 2000 },
+        ]));
       },
     );
     when('the owner generates payslips for that month', async () => {
       await generate(o).expect(200);
     });
-    then('the member\'s payslip has no loss-of-pay and the full net salary', async () => {
-      const res = await myPayslips(member).expect(200);
-      const slip = (res.body.data as any[]).find((p) => p.month === MONTH && p.year === YEAR);
+    then('the payslip earnings list the components and PF is computed on the Basic', async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
       expect(slip).toBeDefined();
-      expect(slip.lopDetails.lopDays).toBe(0);
-      expect(slip.netPay).toBe(44000);
-      expect(slip.lopDetails.paidLeaveDays).toBeGreaterThan(0);
+      expect(slip.grossEarnings).toBe(20000);
+      const earnCodes = (slip.earnings as any[]).map((e) => e.code);
+      expect(earnCodes).toEqual(expect.arrayContaining(['BASIC', 'HRA', 'SPECIAL']));
+      // PF wage = Basic 12000 (under ceiling) ⇒ employee PF = 12% = 1440.
+      expect(slip.statutory.pfWage).toBe(12000);
+      expect(slip.statutory.pfEmployee).toBe(1440);
+      // ESI applies (gross 20000 ≤ 21000): 0.75% of 20000 = 150.
+      expect(slip.statutory.esiEmployee).toBe(150);
     });
   });
 

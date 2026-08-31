@@ -191,3 +191,31 @@ export class UpdateLeaveConfigDto {
   @Type(() => LeaveConfigTypeDto)
   leaveTypes?: LeaveConfigTypeDto[];
 }
+
+export class PfConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employeeRate?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employerRate?: number;
+  @IsOptional() @IsNumber() @Min(0) wageCeiling?: number;
+}
+
+export class EsiConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employeeRate?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employerRate?: number;
+  @IsOptional() @IsNumber() @Min(0) wageCeiling?: number;
+}
+
+export class UpdatePayrollConfigDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PfConfigDto)
+  pf?: PfConfigDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EsiConfigDto)
+  esi?: EsiConfigDto;
+
+  @IsOptional() @IsString() @MaxLength(8) ptState?: string;
+}

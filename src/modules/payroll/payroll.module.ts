@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { LeaveModule } from '../leave/leave.module';
+import { PolicyModule } from '../policy/policy.module';
 import { NotificationModule } from '../notification/notification.module';
 import { SalaryStructureEntity } from './entities/salary-structure.entity';
 import { PayslipEntity } from './entities/payslip.entity';
@@ -27,6 +28,7 @@ import { PayrollController } from './payroll.controller';
     AuthModule,
     AttendanceModule,
     LeaveModule,
+    PolicyModule,
     NotificationModule,
     TypeOrmModule.forFeature([
       SalaryStructureEntity,

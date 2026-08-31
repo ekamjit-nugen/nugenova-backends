@@ -46,6 +46,14 @@ import {
   resolveLeaveConfig,
   sanitizeLeaveConfig,
 } from './leave-config';
+import {
+  defaultPayrollConfig,
+  resolvePayrollConfig,
+  sanitizePayrollConfig,
+  ptStateOptions,
+  PayrollConfigInput,
+} from './payroll-config';
+import { PayrollStatutoryConfig } from '../payroll/statutory';
 
 /** What attendance needs to govern a clock-in for one employee. */
 export interface ResolvedWorkContext {
@@ -506,6 +514,62 @@ export class PolicyService {
     policy.updatedBy = userId;
     await this.repo.save(policy);
     return resolveLeaveConfig(stored);
+  }
+
+  // ── payroll statutory configuration (owner-configurable, on a policy row) ────
+
+  /** The default statutory config + PT-state options — the Settings editor's start. */
+  payrollConfigCatalog() {
+    return { defaults: defaultPayrollConfig(), ptStates: ptStateOptions() };
+  }
+
+  /** The org's payroll policy row (category `payroll`, applicableTo `all`) — singleton. */
+  private async findPayrollPolicy(orgId: string): Promise<PolicyEntity | null> {
+    return this.repo.findOne({
+      where: {
+        organizationId: orgId,
+        category: 'payroll',
+        applicableTo: 'all',
+        isDeleted: false,
+      },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  /** Resolve the org's statutory config (saved, else defaults). Never throws. */
+  async getPayrollConfig(orgId: string): Promise<PayrollStatutoryConfig> {
+    const policy = await this.findPayrollPolicy(orgId);
+    const stored = (policy?.extraConfig?.payroll as Partial<PayrollStatutoryConfig>) || null;
+    return resolvePayrollConfig(stored);
+  }
+
+  /** Create-or-update the org's statutory (PF/ESI/PT) config. */
+  async upsertPayrollConfig(
+    orgId: string,
+    input: PayrollConfigInput,
+    userId: string,
+  ): Promise<PayrollStatutoryConfig> {
+    const clean = sanitizePayrollConfig(input);
+    let policy = await this.findPayrollPolicy(orgId);
+    if (!policy) {
+      policy = this.repo.create({
+        organizationId: orgId,
+        policyName: 'Payroll Configuration',
+        description: 'Statutory deduction rules (PF, ESI, Professional Tax) applied when running payroll.',
+        category: 'payroll',
+        applicableTo: 'all',
+        applicableIds: [],
+        excludedEmployeeIds: [],
+        isActive: true,
+        acknowledgementRequired: false,
+        createdBy: userId,
+        updatedBy: userId,
+      });
+    }
+    policy.extraConfig = { ...(policy.extraConfig || {}), payroll: clean };
+    policy.updatedBy = userId;
+    await this.repo.save(policy);
+    return clean;
   }
 
   /**

@@ -8,16 +8,18 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
-import { SalaryStructureEntity } from '../entities/salary-structure.entity';
-import { PayslipEntity } from '../entities/payslip.entity';
+import { SalaryStructureEntity, SalaryComponent } from '../entities/salary-structure.entity';
+import { PayslipEntity, PayslipLine } from '../entities/payslip.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrganizationEntity } from '../../organization/entities/organization.entity';
 import { DepartmentEntity } from '../../organization/entities/department.entity';
 import { AttendanceService } from '../../attendance/services/attendance.service';
 import { LeaveService } from '../../leave/services/leave.service';
+import { PolicyService } from '../../policy/policy.service';
 import { NotifierService } from '../../notification/notifier.service';
 import { resolveLop, computeSimplePayslip, rupeesInWords } from '../payroll-calc';
+import { computeStatutory, PayrollStatutoryConfig } from '../statutory';
 import { SetSalaryDto, GeneratePayslipsDto } from '../dto';
 
 /** Org roles that manage payroll (owners/admins) — never a payroll subject gate. */
@@ -40,6 +42,7 @@ export class PayrollService {
     private readonly departments: Repository<DepartmentEntity>,
     private readonly attendance: AttendanceService,
     private readonly leave: LeaveService,
+    private readonly policy: PolicyService,
     private readonly notifier: NotifierService,
   ) {}
 
@@ -70,13 +73,18 @@ export class PayrollService {
       await this.salaries.save(prior);
     }
     const { name, email } = await this.nameEmail(userId);
+    const { components, monthlySalary } = this.normalizeComponents(
+      dto.components,
+      dto.monthlySalary,
+    );
     const saved = await this.salaries.save(
       this.salaries.create({
         organizationId: orgId,
         userId,
         employeeName: name,
         employeeEmail: email,
-        monthlySalary: dto.monthlySalary,
+        monthlySalary,
+        components,
         effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
         supersedes: prior?.id ?? null,
         createdBy: actorId,
@@ -84,6 +92,46 @@ export class PayrollService {
       }),
     );
     return this.salaryView(saved);
+  }
+
+  /**
+   * Reconcile a submitted component breakdown with the gross figure. If components
+   * are given, gross is their sum (the breakdown is authoritative); otherwise the
+   * whole salary is a single implicit Basic component. Rounds to whole rupees.
+   */
+  private normalizeComponents(
+    input: SalaryComponent[] | undefined,
+    monthlySalary: number,
+  ): { components: SalaryComponent[]; monthlySalary: number } {
+    const clean = (input || [])
+      .map((c) => ({
+        code: (c.code || '').trim().toUpperCase().slice(0, 20),
+        name: (c.name || '').trim().slice(0, 60),
+        amount: Math.max(0, Math.round(Number(c.amount) || 0)),
+      }))
+      .filter((c) => c.code && c.name && c.amount > 0);
+    if (!clean.length) {
+      return { components: [], monthlySalary: Math.round(monthlySalary) };
+    }
+    const sum = clean.reduce((t, c) => t + c.amount, 0);
+    return { components: clean, monthlySalary: sum };
+  }
+
+  /** The Basic component amount that drives PF (else the whole salary is Basic). */
+  private basicOf(salary: SalaryStructureEntity): number {
+    const comps = salary.components || [];
+    const basic = comps.find((c) => c.code === 'BASIC');
+    if (basic) return Number(basic.amount);
+    return comps.length ? 0 : Number(salary.monthlySalary);
+  }
+
+  /** Full-value earning lines (pre-LOP); a single Basic line when no breakdown. */
+  private earningLines(salary: SalaryStructureEntity): PayslipLine[] {
+    const comps = salary.components || [];
+    if (comps.length) {
+      return comps.map((c) => ({ code: c.code, name: c.name, amount: Number(c.amount) }));
+    }
+    return [{ code: 'BASIC', name: 'Basic', amount: Number(salary.monthlySalary) }];
   }
 
   async getSalary(orgId: string, userId: string) {
@@ -107,6 +155,11 @@ export class PayrollService {
       employeeName: s.employeeName,
       employeeEmail: s.employeeEmail,
       monthlySalary: Number(s.monthlySalary),
+      components: (s.components || []).map((c) => ({
+        code: c.code,
+        name: c.name,
+        amount: Number(c.amount),
+      })),
       effectiveFrom: s.effectiveFrom,
     };
   }
@@ -120,7 +173,13 @@ export class PayrollService {
   }
 
   /** Compute one employee's payslip figures for a month (no persistence). */
-  private async computeFor(orgId: string, salary: SalaryStructureEntity, month: number, year: number) {
+  private async computeFor(
+    orgId: string,
+    salary: SalaryStructureEntity,
+    month: number,
+    year: number,
+    cfg: PayrollStatutoryConfig,
+  ) {
     const { start, end } = this.monthBounds(month, year);
     // Only paid from when the salary takes effect within the month.
     const effFrom = salary.effectiveFrom > start ? salary.effectiveFrom : start;
@@ -136,7 +195,43 @@ export class PayrollService {
       lopLeaveDays: lv.lopLeaveDays,
     });
     const comp = computeSimplePayslip(Number(salary.monthlySalary), lop);
-    return { comp, lop };
+
+    // Statutory runs on the LOP-adjusted (earned) wage: gross earned this month,
+    // and the correspondingly-prorated Basic (PF's wage base).
+    const gross = comp.grossEarnings;
+    const earnedGross = Math.max(0, comp.grossEarnings - comp.lopDeduction);
+    const paidRatio = gross > 0 ? earnedGross / gross : 0;
+    const earnedBasic = Math.round(this.basicOf(salary) * paidRatio);
+    const statutory = computeStatutory(earnedBasic, earnedGross, month, cfg);
+
+    // Line items. Earnings are full-value (pre-LOP), summing to grossEarnings; LOP
+    // + statutory sit on the deduction side so net = gross − LOP − employee stat.
+    const earnings: PayslipLine[] = this.earningLines(salary);
+    const deductions: PayslipLine[] = [];
+    if (comp.lopDeduction > 0) {
+      deductions.push({ code: 'LOP', name: 'Loss of Pay', amount: comp.lopDeduction });
+    }
+    if (statutory.pfEmployee > 0) {
+      deductions.push({ code: 'PF', name: 'Provident Fund', amount: statutory.pfEmployee });
+    }
+    if (statutory.esiEmployee > 0) {
+      deductions.push({ code: 'ESI', name: 'ESI', amount: statutory.esiEmployee });
+    }
+    if (statutory.professionalTax > 0) {
+      deductions.push({ code: 'PT', name: 'Professional Tax', amount: statutory.professionalTax });
+    }
+    const employerContributions: PayslipLine[] = [];
+    if (statutory.pfEmployer > 0) {
+      employerContributions.push({ code: 'PF_ER', name: 'PF (Employer)', amount: statutory.pfEmployer });
+    }
+    if (statutory.esiEmployer > 0) {
+      employerContributions.push({ code: 'ESI_ER', name: 'ESI (Employer)', amount: statutory.esiEmployer });
+    }
+
+    const totalDeductions = comp.lopDeduction + statutory.employeeDeductions;
+    const netPay = Math.max(0, comp.grossEarnings - totalDeductions);
+
+    return { comp, lop, statutory, earnings, deductions, employerContributions, totalDeductions, netPay };
   }
 
   /**
@@ -157,10 +252,12 @@ export class PayrollService {
     }
 
     const org = await this.orgs.findOne({ where: { id: orgId } });
+    const cfg = await this.policy.getPayrollConfig(orgId);
     const results: ReturnType<typeof this.payslipView>[] = [];
     for (const salary of salaried) {
       try {
-        const { comp, lop } = await this.computeFor(orgId, salary, dto.month, dto.year);
+        const { comp, lop, statutory, earnings, deductions, employerContributions, totalDeductions, netPay } =
+          await this.computeFor(orgId, salary, dto.month, dto.year, cfg);
         const member = await this.memberships.findOne({
           where: { organizationId: orgId, userId: salary.userId },
         });
@@ -180,9 +277,20 @@ export class PayrollService {
         row.monthlySalary = comp.monthlySalary;
         row.grossEarnings = comp.grossEarnings;
         row.lopDeduction = comp.lopDeduction;
-        row.totalDeductions = comp.totalDeductions;
-        row.netPay = comp.netPay;
-        row.netPayWords = rupeesInWords(comp.netPay);
+        row.totalDeductions = totalDeductions;
+        row.netPay = netPay;
+        row.netPayWords = rupeesInWords(netPay);
+        row.earnings = earnings;
+        row.deductions = deductions;
+        row.employerContributions = employerContributions;
+        row.statutory = {
+          pfEmployee: statutory.pfEmployee,
+          pfEmployer: statutory.pfEmployer,
+          pfWage: statutory.pfWage,
+          esiEmployee: statutory.esiEmployee,
+          esiEmployer: statutory.esiEmployer,
+          professionalTax: statutory.professionalTax,
+        };
         row.lopDetails = {
           workingDays: lop.workingDays,
           presentDays: lop.presentDays,
@@ -251,6 +359,10 @@ export class PayrollService {
       totalDeductions: Number(p.totalDeductions),
       netPay: Number(p.netPay),
       netPayWords: p.netPayWords,
+      earnings: (p.earnings || []).map((l) => ({ ...l, amount: Number(l.amount) })),
+      deductions: (p.deductions || []).map((l) => ({ ...l, amount: Number(l.amount) })),
+      employerContributions: (p.employerContributions || []).map((l) => ({ ...l, amount: Number(l.amount) })),
+      statutory: p.statutory || null,
       lopDetails: p.lopDetails,
       employeeSnapshot: p.employeeSnapshot,
       orgSnapshot: p.orgSnapshot,
