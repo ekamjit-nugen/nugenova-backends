@@ -91,6 +91,66 @@ export class PayrollController {
     return { success: true, message: `Generated ${data.generated} payslip(s)`, data };
   }
 
+  // ── governed run lifecycle (Phase B) ────────────────────────────────────────
+
+  @Get('runs')
+  @RequirePermission('payroll', 'view')
+  async listRuns(@Req() req: any) {
+    const data = await this.payroll.listRuns(this.orgId(req));
+    return { success: true, data };
+  }
+
+  @Get('runs/:id')
+  @RequirePermission('payroll', 'view')
+  async getRun(@Param('id') id: string, @Req() req: any) {
+    const data = await this.payroll.getRun(this.orgId(req), id);
+    return { success: true, data };
+  }
+
+  /** Open (or resume) a draft run for a month. */
+  @Post('runs')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermission('payroll', 'edit')
+  async createRun(@Body() dto: GeneratePayslipsDto, @Req() req: any) {
+    const data = await this.payroll.createRun(this.orgId(req), dto.month, dto.year, req.user.userId);
+    return { success: true, message: `Run ${data.runNumber} opened`, data };
+  }
+
+  /** Compute the run's draft payslips and move it to review. */
+  @Post('runs/:id/process')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('payroll', 'edit')
+  async processRun(@Param('id') id: string, @Req() req: any) {
+    const data = await this.payroll.processRun(this.orgId(req), id, req.user.userId);
+    return { success: true, message: 'Run processed — ready for review', data };
+  }
+
+  /** Approve a run in review (must differ from the preparer — separation of duties). */
+  @Post('runs/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('payroll', 'edit')
+  async approveRun(@Param('id') id: string, @Req() req: any) {
+    const data = await this.payroll.approveRun(this.orgId(req), id, req.user.userId);
+    return { success: true, message: 'Run approved', data };
+  }
+
+  /** Finalize an approved run — its payslips publish to employees. */
+  @Post('runs/:id/finalize')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('payroll', 'edit')
+  async finalizeRun(@Param('id') id: string, @Req() req: any) {
+    const data = await this.payroll.finalizeRun(this.orgId(req), id, req.user.userId);
+    return { success: true, message: 'Run finalized — payslips published', data };
+  }
+
+  @Post('runs/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('payroll', 'edit')
+  async cancelRun(@Param('id') id: string, @Body() body: { note?: string }, @Req() req: any) {
+    const data = await this.payroll.cancelRun(this.orgId(req), id, req.user.userId, body?.note);
+    return { success: true, message: 'Run cancelled', data };
+  }
+
   @Get('payslips')
   @RequirePermission('payroll', 'view')
   async listPayslips(

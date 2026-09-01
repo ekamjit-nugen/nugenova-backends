@@ -59,6 +59,20 @@ Payslips itemise **earnings**, **deductions**, and **employer contributions**.
   is hardcoded in the run path.
 - **Net** = `gross − LOP − employeeStatutory − customEmployee − recurring`.
 
+## Phase B — governed run lifecycle (maker-checker)
+
+Payroll now runs as a **governed unit** (`payroll_runs` table). Direct
+`payslips/generate` stays as the quick, ungoverned path (publishes `final`
+immediately); the governed path is: `POST /payroll/runs` (open a draft, one live
+run per month) → `…/process` (compute **draft** payslips, → review, roll-up totals)
+→ `…/approve` (**separation of duties** — approver ≠ preparer, EXCEPT the org owner
+as sole approver, recorded as an audit note) → `…/finalize` (draft payslips flip to
+`final` + employees notified) → `…/cancel` (discards drafts). Payslips carry
+`status` (`draft`|`final`) + `payrollRunId`; `myPayslips`/`listPayslips` only ever
+return `final`, so drafts stay hidden until finalize. Migration
+`PayrollRun1787920000000`. e2e `payroll-run.feature` (3): full lifecycle +
+draft-hidden, can't-finalize-before-approve, @security employee-can't-drive.
+
 ## LOP model (cleaner than legacy)
 
 A day's pay is lost for: each **unaccounted working day** (absent / never clocked
@@ -138,8 +152,7 @@ Remove `PayrollModule` from app.module; the two tables are additive
 ## Deferred (Phase 3+)
 
 **TDS** (income-tax slabs + declarations); **OT** from attendance hours; statutory
-**returns** (ECR/24Q/Form 16); maker-checker run lifecycle (draft→review→approve→
-finalize→pay); bank payout/CSV; investment declarations, expenses, loans;
+**returns** (ECR/24Q/Form 16); bank payout/CSV; investment declarations, expenses, loans;
 server-side PDF; analytics. Full-&-Final settlement — gratuity (Gratuity Act §4),
 leave encashment, notice recovery — **does exist in the legacy** (`offboarding.schema.ts`)
 and is deferred here, NOT absent upstream. (Corrects an earlier note in this file.)

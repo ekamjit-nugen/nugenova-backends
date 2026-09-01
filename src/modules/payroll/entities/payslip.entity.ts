@@ -111,6 +111,15 @@ export class PayslipEntity extends PgBaseEntity {
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   generatedBy: string | null;
 
+  /** The governed run that produced this slip (null for direct-generate). */
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  payrollRunId: string | null;
+
+  /** `draft` while its run is in progress; `final` once the run is finalized (or
+   *  direct-generate). Employees only ever see `final`. */
+  @Column({ type: 'varchar', default: 'final' })
+  status: string;
+
   @Column({ type: 'boolean', default: false })
   isDeleted: boolean;
 }

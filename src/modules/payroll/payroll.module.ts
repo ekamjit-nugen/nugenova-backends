@@ -8,6 +8,7 @@ import { PolicyModule } from '../policy/policy.module';
 import { NotificationModule } from '../notification/notification.module';
 import { SalaryStructureEntity } from './entities/salary-structure.entity';
 import { PayslipEntity } from './entities/payslip.entity';
+import { PayrollRunEntity } from './entities/payroll-run.entity';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { DepartmentEntity } from '../organization/entities/department.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
@@ -33,6 +34,7 @@ import { PayrollController } from './payroll.controller';
     TypeOrmModule.forFeature([
       SalaryStructureEntity,
       PayslipEntity,
+      PayrollRunEntity,
       OrganizationEntity,
       DepartmentEntity,
       OrgMembershipEntity,

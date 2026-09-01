@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -10,6 +11,7 @@ import { In, Repository } from 'typeorm';
 
 import { SalaryStructureEntity, SalaryComponent, RecurringDeduction } from '../entities/salary-structure.entity';
 import { PayslipEntity, PayslipLine } from '../entities/payslip.entity';
+import { PayrollRunEntity, PayrollRunStatus } from '../entities/payroll-run.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrganizationEntity } from '../../organization/entities/organization.entity';
@@ -32,6 +34,8 @@ export class PayrollService {
     private readonly salaries: Repository<SalaryStructureEntity>,
     @InjectRepository(PayslipEntity)
     private readonly payslips: Repository<PayslipEntity>,
+    @InjectRepository(PayrollRunEntity)
+    private readonly runs: Repository<PayrollRunEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity)
@@ -313,98 +317,119 @@ export class PayrollService {
     return { comp, lop, statutory, earnings, deductions, employerContributions, totalDeductions, netPay };
   }
 
-  /**
-   * Generate (or regenerate) payslips for a month. One payslip per employee/month
-   * (upsert on the unique key). Runs the given users, else every active-salaried
-   * member. Returns the created/updated payslip views + a per-run summary.
-   */
-  async generatePayslips(orgId: string, dto: GeneratePayslipsDto, actorId: string) {
+  /** Compute + upsert one employee's payslip for a month. Shared by direct-generate
+   *  (status `final`, notify) and a run's process (status `draft`, no notify). */
+  private async buildAndSavePayslip(
+    orgId: string,
+    salary: SalaryStructureEntity,
+    month: number,
+    year: number,
+    cfg: PayrollStatutoryConfig,
+    org: OrganizationEntity | null,
+    actorId: string,
+    opts: { runId?: string | null; status?: string; notify?: boolean },
+  ): Promise<PayslipEntity> {
+    const { comp, lop, statutory, earnings, deductions, employerContributions, totalDeductions, netPay } =
+      await this.computeFor(orgId, salary, month, year, cfg);
+    const member = await this.memberships.findOne({
+      where: { organizationId: orgId, userId: salary.userId },
+    });
+    const dept = member?.departmentId
+      ? await this.departments.findOne({ where: { id: member.departmentId } })
+      : null;
+
+    const existing = await this.payslips.findOne({ where: { userId: salary.userId, year, month } });
+    const row: PayslipEntity =
+      existing ?? this.payslips.create({ organizationId: orgId, userId: salary.userId, month, year });
+    row.monthlySalary = comp.monthlySalary;
+    row.grossEarnings = comp.grossEarnings;
+    row.lopDeduction = comp.lopDeduction;
+    row.totalDeductions = totalDeductions;
+    row.netPay = netPay;
+    row.netPayWords = rupeesInWords(netPay);
+    row.earnings = earnings;
+    row.deductions = deductions;
+    row.employerContributions = employerContributions;
+    row.statutory = {
+      pfEmployee: statutory.pfEmployee,
+      pfEmployer: statutory.pfEmployer,
+      pfWage: statutory.pfWage,
+      esiEmployee: statutory.esiEmployee,
+      esiEmployer: statutory.esiEmployer,
+      professionalTax: statutory.professionalTax,
+      lwfEmployee: statutory.lwfEmployee,
+      lwfEmployer: statutory.lwfEmployer,
+    };
+    row.lopDetails = {
+      workingDays: lop.workingDays,
+      presentDays: lop.presentDays,
+      halfDays: lop.halfDays,
+      paidLeaveDays: lop.paidLeaveDays,
+      lopLeaveDays: lop.lopLeaveDays,
+      absentDays: lop.absentDays,
+      lopDays: lop.lopDays,
+      payableDays: comp.payableDays,
+      perDayPay: comp.perDayPay,
+    };
+    row.employeeSnapshot = {
+      userId: salary.userId,
+      name: salary.employeeName,
+      email: salary.employeeEmail,
+      department: dept?.name ?? null,
+      designation: member?.role ?? null,
+    };
+    row.orgSnapshot = { organizationId: orgId, name: org?.name ?? null };
+    row.generatedBy = actorId;
+    if (opts.runId !== undefined) row.payrollRunId = opts.runId;
+    if (opts.status) row.status = opts.status;
+    const saved = await this.payslips.save(row);
+
+    if (opts.notify) {
+      await this.notifier.notify({
+        organizationId: orgId,
+        userId: salary.userId,
+        actorId,
+        type: 'payroll_payslip_ready',
+        title: 'Payslip ready',
+        body: `Your payslip for ${this.monthLabel(month)} ${year} is available.`,
+        data: { actionUrl: '/payroll/my', payslipId: saved.id },
+      });
+    }
+    return saved;
+  }
+
+  private async salariedFor(orgId: string, userIds?: string[]): Promise<SalaryStructureEntity[]> {
     let salaried = await this.salaries.find({
       where: { organizationId: orgId, isActive: true, isDeleted: false },
     });
-    if (dto.userIds?.length) {
-      const set = new Set(dto.userIds);
+    if (userIds?.length) {
+      const set = new Set(userIds);
       salaried = salaried.filter((s) => set.has(s.userId));
     }
+    return salaried;
+  }
+
+  /**
+   * Direct-generate (the quick, ungoverned path): compute + publish `final` payslips
+   * for a month immediately. One payslip per employee/month (upsert). The governed
+   * path is the run lifecycle below.
+   */
+  async generatePayslips(orgId: string, dto: GeneratePayslipsDto, actorId: string) {
+    const salaried = await this.salariedFor(orgId, dto.userIds);
     if (!salaried.length) {
       throw new BadRequestException('No salaried employees to run — set salaries first');
     }
-
     const org = await this.orgs.findOne({ where: { id: orgId } });
     const cfg = await this.policy.getPayrollConfig(orgId);
     const results: ReturnType<typeof this.payslipView>[] = [];
     for (const salary of salaried) {
       try {
-        const { comp, lop, statutory, earnings, deductions, employerContributions, totalDeductions, netPay } =
-          await this.computeFor(orgId, salary, dto.month, dto.year, cfg);
-        const member = await this.memberships.findOne({
-          where: { organizationId: orgId, userId: salary.userId },
+        const saved = await this.buildAndSavePayslip(orgId, salary, dto.month, dto.year, cfg, org, actorId, {
+          runId: null,
+          status: 'final',
+          notify: true,
         });
-        const dept = member?.departmentId
-          ? await this.departments.findOne({ where: { id: member.departmentId } })
-          : null;
-
-        const existing = await this.payslips.findOne({
-          where: { userId: salary.userId, year: dto.year, month: dto.month },
-        });
-        const row: PayslipEntity = existing ?? this.payslips.create({
-          organizationId: orgId,
-          userId: salary.userId,
-          month: dto.month,
-          year: dto.year,
-        });
-        row.monthlySalary = comp.monthlySalary;
-        row.grossEarnings = comp.grossEarnings;
-        row.lopDeduction = comp.lopDeduction;
-        row.totalDeductions = totalDeductions;
-        row.netPay = netPay;
-        row.netPayWords = rupeesInWords(netPay);
-        row.earnings = earnings;
-        row.deductions = deductions;
-        row.employerContributions = employerContributions;
-        row.statutory = {
-          pfEmployee: statutory.pfEmployee,
-          pfEmployer: statutory.pfEmployer,
-          pfWage: statutory.pfWage,
-          esiEmployee: statutory.esiEmployee,
-          esiEmployer: statutory.esiEmployer,
-          professionalTax: statutory.professionalTax,
-          lwfEmployee: statutory.lwfEmployee,
-          lwfEmployer: statutory.lwfEmployer,
-        };
-        row.lopDetails = {
-          workingDays: lop.workingDays,
-          presentDays: lop.presentDays,
-          halfDays: lop.halfDays,
-          paidLeaveDays: lop.paidLeaveDays,
-          lopLeaveDays: lop.lopLeaveDays,
-          absentDays: lop.absentDays,
-          lopDays: lop.lopDays,
-          payableDays: comp.payableDays,
-          perDayPay: comp.perDayPay,
-        };
-        row.employeeSnapshot = {
-          userId: salary.userId,
-          name: salary.employeeName,
-          email: salary.employeeEmail,
-          department: dept?.name ?? null,
-          designation: member?.role ?? null,
-        };
-        row.orgSnapshot = { organizationId: orgId, name: org?.name ?? null };
-        row.generatedBy = actorId;
-        const saved = await this.payslips.save(row);
         results.push(this.payslipView(saved));
-
-        // Notify the employee their payslip is ready.
-        await this.notifier.notify({
-          organizationId: orgId,
-          userId: salary.userId,
-          actorId,
-          type: 'payroll_payslip_ready',
-          title: 'Payslip ready',
-          body: `Your payslip for ${this.monthLabel(dto.month)} ${dto.year} is available.`,
-          data: { actionUrl: '/payroll/my', payslipId: saved.id },
-        });
       } catch (err) {
         this.logger.error(`payslip failed for ${salary.userId}: ${String(err)}`);
       }
@@ -425,6 +450,195 @@ export class PayrollService {
     ][m - 1] ?? String(m);
   }
 
+  // ── payroll run lifecycle (Phase B — governed, maker-checker) ────────────────
+
+  private runView(r: PayrollRunEntity) {
+    return {
+      id: r.id,
+      month: r.month,
+      year: r.year,
+      monthLabel: this.monthLabel(r.month),
+      runNumber: r.runNumber,
+      status: r.status,
+      totals: r.totals || null,
+      preparedBy: r.preparedBy,
+      preparedAt: r.preparedAt,
+      approvedBy: r.approvedBy,
+      approvedAt: r.approvedAt,
+      finalizedBy: r.finalizedBy,
+      finalizedAt: r.finalizedAt,
+      note: r.note,
+      createdAt: r.createdAt,
+    };
+  }
+
+  private async getRunEntity(orgId: string, runId: string): Promise<PayrollRunEntity> {
+    const run = await this.runs.findOne({ where: { id: runId, organizationId: orgId, isDeleted: false } });
+    if (!run) throw new NotFoundException('Payroll run not found');
+    return run;
+  }
+
+  private async nextRunNumber(orgId: string, month: number, year: number): Promise<string> {
+    const n = await this.runs.count({ where: { organizationId: orgId, year, month } });
+    return `PR-${year}-${String(month).padStart(2, '0')}-${String(n + 1).padStart(2, '0')}`;
+  }
+
+  /** Open (or return the in-progress) run for a month. One live run per period. */
+  async createRun(orgId: string, month: number, year: number, actorId: string) {
+    const inProgress = await this.runs.findOne({
+      where: { organizationId: orgId, month, year, isDeleted: false, status: In<PayrollRunStatus>(['draft', 'review', 'approved']) },
+    });
+    if (inProgress) return this.getRun(orgId, inProgress.id);
+    const finalized = await this.runs.findOne({
+      where: { organizationId: orgId, month, year, isDeleted: false, status: 'finalized' },
+    });
+    if (finalized) throw new ConflictException('Payroll for this month is already finalized');
+    if (!(await this.salariedFor(orgId)).length) {
+      throw new BadRequestException('No salaried employees to run — set salaries first');
+    }
+    const run = await this.runs.save(
+      this.runs.create({
+        organizationId: orgId,
+        month,
+        year,
+        runNumber: await this.nextRunNumber(orgId, month, year),
+        status: 'draft',
+        totals: { employees: 0, grossEarnings: 0, totalDeductions: 0, netPay: 0, employerContributions: 0 },
+        preparedBy: actorId,
+        preparedAt: new Date(),
+      }),
+    );
+    return this.getRun(orgId, run.id);
+  }
+
+  /** Compute the run's payslips as DRAFT and move it to `review`. Re-runnable. */
+  async processRun(orgId: string, runId: string, actorId: string) {
+    const run = await this.getRunEntity(orgId, runId);
+    if (!['draft', 'review'].includes(run.status)) {
+      throw new BadRequestException(`A ${run.status} run cannot be processed`);
+    }
+    const org = await this.orgs.findOne({ where: { id: orgId } });
+    const cfg = await this.policy.getPayrollConfig(orgId);
+    const salaried = await this.salariedFor(orgId);
+    const t = { employees: 0, grossEarnings: 0, totalDeductions: 0, netPay: 0, employerContributions: 0 };
+    for (const salary of salaried) {
+      try {
+        const saved = await this.buildAndSavePayslip(orgId, salary, run.month, run.year, cfg, org, actorId, {
+          runId: run.id,
+          status: 'draft',
+          notify: false,
+        });
+        t.employees += 1;
+        t.grossEarnings += Number(saved.grossEarnings);
+        t.totalDeductions += Number(saved.totalDeductions);
+        t.netPay += Number(saved.netPay);
+        t.employerContributions += (saved.employerContributions || []).reduce((s, l) => s + Number(l.amount), 0);
+      } catch (err) {
+        this.logger.error(`run ${run.runNumber}: payslip failed for ${salary.userId}: ${String(err)}`);
+      }
+    }
+    run.totals = {
+      employees: t.employees,
+      grossEarnings: Math.round(t.grossEarnings),
+      totalDeductions: Math.round(t.totalDeductions),
+      netPay: Math.round(t.netPay),
+      employerContributions: Math.round(t.employerContributions),
+    };
+    run.status = 'review';
+    await this.runs.save(run);
+    return this.getRun(orgId, run.id);
+  }
+
+  /** Approve a run in review. Maker-checker: the approver must NOT be the preparer. */
+  async approveRun(orgId: string, runId: string, actorId: string) {
+    const run = await this.getRunEntity(orgId, runId);
+    if (run.status !== 'review') {
+      throw new BadRequestException(`Only a run in review can be approved (it is ${run.status})`);
+    }
+    if (run.preparedBy && run.preparedBy === actorId) {
+      // Separation of duties — the approver must differ from the preparer, EXCEPT
+      // for the org owner acting as sole approver (recorded as an audit note).
+      const actor = await this.memberships.findOne({ where: { organizationId: orgId, userId: actorId } });
+      if ((actor?.role || '').toLowerCase() !== 'owner') {
+        throw new ForbiddenException(
+          'Separation of duties: the run must be approved by someone other than the person who prepared it',
+        );
+      }
+      run.note = `${run.note ? run.note + ' · ' : ''}Self-approved by owner (sole approver)`;
+    }
+    run.status = 'approved';
+    run.approvedBy = actorId;
+    run.approvedAt = new Date();
+    await this.runs.save(run);
+    return this.getRun(orgId, run.id);
+  }
+
+  /** Finalize an approved run: its draft payslips become `final` and employees are notified. */
+  async finalizeRun(orgId: string, runId: string, actorId: string) {
+    const run = await this.getRunEntity(orgId, runId);
+    if (run.status !== 'approved') {
+      throw new BadRequestException(`Only an approved run can be finalized (it is ${run.status})`);
+    }
+    const slips = await this.payslips.find({
+      where: { organizationId: orgId, payrollRunId: run.id, isDeleted: false },
+    });
+    for (const s of slips) {
+      s.status = 'final';
+      await this.payslips.save(s);
+      await this.notifier.notify({
+        organizationId: orgId,
+        userId: s.userId,
+        actorId,
+        type: 'payroll_payslip_ready',
+        title: 'Payslip ready',
+        body: `Your payslip for ${this.monthLabel(run.month)} ${run.year} is available.`,
+        data: { actionUrl: '/payroll/my', payslipId: s.id },
+      });
+    }
+    run.status = 'finalized';
+    run.finalizedBy = actorId;
+    run.finalizedAt = new Date();
+    await this.runs.save(run);
+    return this.getRun(orgId, run.id);
+  }
+
+  /** Cancel a non-finalized run; its draft payslips are discarded. */
+  async cancelRun(orgId: string, runId: string, actorId: string, note?: string) {
+    const run = await this.getRunEntity(orgId, runId);
+    if (run.status === 'finalized') throw new BadRequestException('A finalized run cannot be cancelled');
+    if (run.status === 'cancelled') return this.getRun(orgId, run.id);
+    const slips = await this.payslips.find({
+      where: { organizationId: orgId, payrollRunId: run.id, isDeleted: false },
+    });
+    for (const s of slips) {
+      if (s.status !== 'final') {
+        s.isDeleted = true;
+        await this.payslips.save(s);
+      }
+    }
+    run.status = 'cancelled';
+    if (note) run.note = note;
+    await this.runs.save(run);
+    return this.getRun(orgId, run.id);
+  }
+
+  async listRuns(orgId: string) {
+    const rows = await this.runs.find({
+      where: { organizationId: orgId, isDeleted: false },
+      order: { year: 'DESC', month: 'DESC', createdAt: 'DESC' },
+    });
+    return rows.map((r) => this.runView(r));
+  }
+
+  async getRun(orgId: string, runId: string) {
+    const run = await this.getRunEntity(orgId, runId);
+    const slips = await this.payslips.find({
+      where: { organizationId: orgId, payrollRunId: run.id, isDeleted: false },
+      order: { netPay: 'DESC' },
+    });
+    return { ...this.runView(run), payslips: slips.map((s) => this.payslipView(s)) };
+  }
+
   // ── reads ────────────────────────────────────────────────────────────────
 
   private payslipView(p: PayslipEntity) {
@@ -440,6 +654,8 @@ export class PayrollService {
       totalDeductions: Number(p.totalDeductions),
       netPay: Number(p.netPay),
       netPayWords: p.netPayWords,
+      status: p.status,
+      payrollRunId: p.payrollRunId,
       earnings: (p.earnings || []).map((l) => ({ ...l, amount: Number(l.amount) })),
       deductions: (p.deductions || []).map((l) => ({ ...l, amount: Number(l.amount) })),
       employerContributions: (p.employerContributions || []).map((l) => ({ ...l, amount: Number(l.amount) })),
@@ -452,14 +668,16 @@ export class PayrollService {
   }
 
   async myPayslips(orgId: string, userId: string, year?: number) {
-    const where: Record<string, unknown> = { organizationId: orgId, userId, isDeleted: false };
+    // Employees only ever see FINAL payslips — a run's drafts stay hidden until finalized.
+    const where: Record<string, unknown> = { organizationId: orgId, userId, isDeleted: false, status: 'final' };
     if (year) where.year = year;
     const rows = await this.payslips.find({ where, order: { year: 'DESC', month: 'DESC' } });
     return rows.map((p) => this.payslipView(p));
   }
 
   async listPayslips(orgId: string, month?: number, year?: number) {
-    const where: Record<string, unknown> = { organizationId: orgId, isDeleted: false };
+    // The month roster shows finalized payslips; in-progress drafts live on the run.
+    const where: Record<string, unknown> = { organizationId: orgId, isDeleted: false, status: 'final' };
     if (month) where.month = month;
     if (year) where.year = year;
     const rows = await this.payslips.find({ where, order: { year: 'DESC', month: 'DESC' } });
