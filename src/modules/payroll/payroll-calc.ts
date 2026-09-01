@@ -27,6 +27,13 @@ export interface LopInput {
   paidLeaveDays: number;
   /** Approved LOP-type leave days in the period. */
   lopLeaveDays: number;
+  /**
+   * Whether unaccounted working days should be docked as absence (LOP). Default
+   * true. Set false for orgs that don't run attendance-based payroll — then only
+   * explicit LOP-type leave + half-days dock, and everyone is assumed present
+   * otherwise (avoids paying net 0 to every employee when no clock-in data exists).
+   */
+  dockUnaccounted?: boolean;
 }
 
 export interface LopResult {
@@ -59,7 +66,10 @@ export function resolveLop(input: LopInput): LopResult {
   const accounted = presentDays + halfDays + paidLeaveDays + lopLeaveDays;
   const absentDays = Math.max(0, round2(workingDays - accounted));
 
-  const lopDays = Math.min(workingDays, round2(absentDays + lopLeaveDays + 0.5 * halfDays));
+  // Unaccounted days only dock when attendance-based LOP is on (default). Otherwise
+  // the employee is assumed present and only explicit LOP-leave + half-days dock.
+  const dockedAbsence = input.dockUnaccounted === false ? 0 : absentDays;
+  const lopDays = Math.min(workingDays, round2(dockedAbsence + lopLeaveDays + 0.5 * halfDays));
 
   return {
     workingDays,

@@ -30,6 +30,18 @@ describe('resolveLop', () => {
     const r = resolveLop({ workingDays: 22, presentDays: 0, halfDays: 0, paidLeaveDays: 0, lopLeaveDays: 30 });
     expect(r.lopDays).toBe(22);
   });
+
+  it('dockUnaccounted:false assumes present — no absence LOP', () => {
+    // No attendance/leave at all; without attendance-based LOP nobody is docked.
+    const r = resolveLop({ workingDays: 22, presentDays: 0, halfDays: 0, paidLeaveDays: 0, lopLeaveDays: 0, dockUnaccounted: false });
+    expect(r.absentDays).toBe(22);
+    expect(r.lopDays).toBe(0);
+  });
+
+  it('dockUnaccounted:false still docks explicit LOP-leave + half-days', () => {
+    const r = resolveLop({ workingDays: 22, presentDays: 0, halfDays: 2, paidLeaveDays: 0, lopLeaveDays: 3, dockUnaccounted: false });
+    expect(r.lopDays).toBe(4); // 3 lop-leave + 0.5*2, no absence docking
+  });
 });
 
 describe('computeSimplePayslip', () => {

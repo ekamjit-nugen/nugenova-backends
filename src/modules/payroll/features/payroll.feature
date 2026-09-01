@@ -20,10 +20,15 @@ Feature: Payroll (simple monthly payslips)
     When the employee tries to generate payslips
     Then the payroll run is rejected as forbidden
 
-  Scenario: a member with no attendance is fully docked
-    Given an organization with an employee member on a salary
+  Scenario: with attendance-based payroll on, a member with no attendance is fully docked
+    Given an organization with an employee member on a salary and attendance-based LOP enabled
     When the owner generates payslips for that month
     Then the member's payslip is fully loss-of-pay with zero net
+
+  Scenario: by default no attendance data means the member is assumed present
+    Given an organization with an employee member on a salary
+    When the owner generates payslips for that month
+    Then the member's payslip is paid in full with no loss-of-pay
 
   Scenario: a member on approved paid leave for the month has no loss-of-pay
     Given an organization with an employee member on a salary and paid leave all month
@@ -61,6 +66,11 @@ Feature: Payroll (simple monthly payslips)
     Given an organization with an employee member on a salary with a 2000 loan recovery and paid leave all month
     When the owner generates payslips for that month
     Then the member's payslip deducts the 2000 loan recovery
+
+  Scenario: a capped loan recovery stops once the total is recovered
+    Given an organization with an employee on a salary and a 2000-per-month loan capped at 3000
+    When the owner runs payroll for three consecutive months
+    Then the loan recovers 2000, then 1000, then nothing
 
   @security
   Scenario: a member cannot read another member's payslip

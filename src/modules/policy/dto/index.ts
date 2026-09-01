@@ -243,4 +243,6 @@ export class UpdatePayrollConfigDto {
   @ValidateNested({ each: true })
   @Type(() => CustomDeductionDto)
   customDeductions?: CustomDeductionDto[];
+
+  @IsOptional() @IsBoolean() lopFromAttendance?: boolean;
 }

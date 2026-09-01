@@ -34,6 +34,12 @@ export interface PayrollStatutoryConfig {
   lwf: LwfConfig;
   /** Owner-defined org-wide deductions / contributions. */
   customDeductions: CustomStatutoryItem[];
+  /**
+   * Dock unaccounted working days as loss-of-pay from attendance. Off ⇒ employees
+   * are assumed present unless on explicit LOP-type leave (for orgs that don't run
+   * attendance-based payroll — otherwise no clock-in data would pay everyone net 0).
+   */
+  lopFromAttendance: boolean;
 }
 
 export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
@@ -42,6 +48,7 @@ export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
   ptState: 'MH',
   lwf: { enabled: false, state: 'none' },
   customDeductions: [],
+  lopFromAttendance: false,
 };
 
 // ── PF ─────────────────────────────────────────────────────────────────────────
@@ -58,8 +65,21 @@ export function computePF(basicMonthly: number, cfg: PfConfig): { employee: numb
 
 // ── ESI ──────────────────────────────────────────────────────────────────────
 
-export function computeESI(grossMonthly: number, cfg: EsiConfig): { employee: number; employer: number } {
-  if (!cfg.enabled || grossMonthly > cfg.wageCeiling) return { employee: 0, employer: 0 };
+/**
+ * ESI. Coverage is decided by the FULL monthly gross against the ceiling (not the
+ * LOP-reduced gross) — otherwise a high earner with heavy LOP would wrongly be
+ * pulled into ESI for that month. The contribution is then charged on the actual
+ * (earned) gross paid. `membershipGross` defaults to `grossMonthly` for callers
+ * that don't distinguish. (Full H1/H2 contribution-period lock-in — staying in ESI
+ * for the whole half-year once enrolled — needs enrollment history and is a
+ * follow-up; this fixes the per-month LOP cliff.)
+ */
+export function computeESI(
+  grossMonthly: number,
+  cfg: EsiConfig,
+  membershipGross: number = grossMonthly,
+): { employee: number; employer: number } {
+  if (!cfg.enabled || membershipGross > cfg.wageCeiling) return { employee: 0, employer: 0 };
   return {
     employee: round0(grossMonthly * (cfg.employeeRate / 100)),
     employer: round0(grossMonthly * (cfg.employerRate / 100)),
@@ -371,7 +391,8 @@ export function computeStatutory(
   fullGross: number = gross,
 ): StatutoryResult {
   const pf = computePF(basic, cfg.pf);
-  const esi = computeESI(gross, cfg.esi);
+  // ESI: charge on the earned gross, but decide coverage on the full monthly gross.
+  const esi = computeESI(gross, cfg.esi, fullGross);
   const pt = computePT(gross, cfg.ptState, month);
   const lwf = computeLWF(cfg.lwf ?? { enabled: false, state: 'none' }, month);
 

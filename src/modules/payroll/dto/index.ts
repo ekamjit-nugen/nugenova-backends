@@ -21,6 +21,8 @@ export class RecurringDeductionDto {
   @IsString() @MaxLength(20) code: string;
   @IsString() @MaxLength(60) name: string;
   @IsNumber() @Min(0) @Max(100000000) amount: number;
+  /** Total to recover (loan principal); recovery stops once reached. */
+  @IsOptional() @IsNumber() @Min(0) @Max(100000000) total?: number;
 }
 
 export class SetSalaryDto {

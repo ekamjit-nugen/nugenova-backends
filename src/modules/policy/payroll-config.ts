@@ -42,6 +42,7 @@ export interface PayrollConfigInput {
   ptState?: string;
   lwf?: Partial<LwfConfig>;
   customDeductions?: CustomDeductionInput[];
+  lopFromAttendance?: boolean;
 }
 
 /**
@@ -58,6 +59,7 @@ export function defaultPayrollConfig(): PayrollStatutoryConfig {
     ptState: 'none',
     lwf: { enabled: false, state: 'none' },
     customDeductions: [],
+    lopFromAttendance: false,
   };
 }
 
@@ -160,6 +162,7 @@ export function resolvePayrollConfig(
     ptState,
     lwf: { enabled: bool(lwf.enabled, d.lwf.enabled), state: lwfState },
     customDeductions: sanitizeCustomDeductions(s.customDeductions),
+    lopFromAttendance: bool(s.lopFromAttendance, d.lopFromAttendance),
   };
 }
 

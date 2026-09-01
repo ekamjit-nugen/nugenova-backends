@@ -106,7 +106,8 @@ export class PayrollService {
       const amount = Math.max(0, Math.round(Number(r.amount) || 0));
       if (!code || !name || amount <= 0 || seen.has(code)) continue;
       seen.add(code);
-      out.push({ code, name, amount });
+      const total = r.total != null && Number(r.total) > 0 ? Math.round(Number(r.total)) : undefined;
+      out.push(total != null ? { code, name, amount, total } : { code, name, amount });
     }
     return out;
   }
@@ -181,6 +182,7 @@ export class PayrollService {
         code: r.code,
         name: r.name,
         amount: Number(r.amount),
+        ...(r.total != null ? { total: Number(r.total) } : {}),
       })),
       effectiveFrom: s.effectiveFrom,
     };
@@ -192,6 +194,29 @@ export class PayrollService {
     const start = new Date(Date.UTC(year, month - 1, 1));
     const end = new Date(Date.UTC(year, month, 0)); // last day of month
     return { start, end };
+  }
+
+  /**
+   * Sum every deduction line, by code, across the employee's payslips in STRICTLY
+   * earlier months than (year, month) — the cumulative amount already recovered.
+   * Strictly-earlier keeps this idempotent when the current month is regenerated.
+   */
+  private async recoveredBefore(
+    orgId: string,
+    userId: string,
+    year: number,
+    month: number,
+  ): Promise<Map<string, number>> {
+    const rows = await this.payslips.find({ where: { organizationId: orgId, userId, isDeleted: false } });
+    const cutoff = year * 12 + (month - 1);
+    const map = new Map<string, number>();
+    for (const p of rows) {
+      if (p.year * 12 + (p.month - 1) >= cutoff) continue;
+      for (const d of p.deductions || []) {
+        map.set(d.code, (map.get(d.code) || 0) + Number(d.amount || 0));
+      }
+    }
+    return map;
   }
 
   /** Compute one employee's payslip figures for a month (no persistence). */
@@ -215,6 +240,8 @@ export class PayrollService {
       halfDays: att.halfDays,
       paidLeaveDays: lv.paidLeaveDays,
       lopLeaveDays: lv.lopLeaveDays,
+      // Only dock unaccounted days when the org runs attendance-based payroll.
+      dockUnaccounted: cfg.lopFromAttendance,
     });
     const comp = computeSimplePayslip(Number(salary.monthlySalary), lop);
 
@@ -251,10 +278,17 @@ export class PayrollService {
       if (c.employee > 0) deductions.push({ code: c.code, name: c.name, amount: c.employee });
     }
     // Per-employee recurring recoveries (loan EMI, advance) — fixed, not prorated.
+    // A capped recovery (`total` set) STOPS once earlier payslips have recovered it.
+    const priorRecovered = await this.recoveredBefore(orgId, salary.userId, year, month);
     let recurringTotal = 0;
     for (const r of salary.recurringDeductions || []) {
-      const amt = Math.max(0, Math.round(Number(r.amount) || 0));
+      let amt = Math.max(0, Math.round(Number(r.amount) || 0));
       if (amt <= 0) continue;
+      if (r.total != null) {
+        const remaining = Math.max(0, Math.round(Number(r.total)) - (priorRecovered.get(r.code) || 0));
+        amt = Math.min(amt, remaining);
+        if (amt <= 0) continue; // fully recovered — no further deduction
+      }
       recurringTotal += amt;
       deductions.push({ code: r.code, name: r.name, amount: amt });
     }

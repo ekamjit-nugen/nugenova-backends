@@ -12,7 +12,13 @@ export interface SalaryComponent {
 export interface RecurringDeduction {
   code: string;
   name: string;
-  amount: number; // rupees/month
+  amount: number; // rupees/month (the per-month instalment)
+  /**
+   * Optional total to recover (loan principal). When set, recovery STOPS once the
+   * cumulative amount taken across payslips reaches it — no indefinite over-recovery.
+   * Omit for a standing/indefinite deduction.
+   */
+  total?: number;
 }
 
 /**

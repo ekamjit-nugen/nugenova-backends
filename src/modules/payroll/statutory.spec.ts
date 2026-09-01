@@ -36,6 +36,12 @@ describe('computeESI', () => {
   it('is zero above the ceiling', () => {
     expect(computeESI(25000, cfg).employee).toBe(0);
   });
+  it('decides coverage on the membership gross, charges on the earned gross', () => {
+    // Heavy LOP: earned 15000, but full monthly gross 25000 > ceiling → NOT covered.
+    expect(computeESI(15000, cfg, 25000).employee).toBe(0);
+    // Full gross 20000 ≤ ceiling → covered; charged on the earned 10000 = 0.75%.
+    expect(computeESI(10000, cfg, 20000).employee).toBe(75);
+  });
 });
 
 describe('computePT', () => {

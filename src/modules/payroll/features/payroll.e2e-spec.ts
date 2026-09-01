@@ -194,12 +194,18 @@ defineFeature(feature, (test) => {
     });
   });
 
-  test('a member with no attendance is fully docked', ({ given, when, then }) => {
+  test('with attendance-based payroll on, a member with no attendance is fully docked', ({ given, when, then }) => {
     let o: CreatedOrg;
     let member: Member;
-    given('an organization with an employee member on a salary', async () => {
+    given('an organization with an employee member on a salary and attendance-based LOP enabled', async () => {
       ({ o, member } = await orgWithMember());
       await setSalary(o, member.userId, 44000).expect(200);
+      await h
+        .api()
+        .put(`${API}/policies/payroll-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ lopFromAttendance: true })
+        .expect(200);
     });
     when('the owner generates payslips for that month', async () => {
       await generate(o).expect(200);
@@ -211,6 +217,26 @@ defineFeature(feature, (test) => {
       expect(slip.netPay).toBe(0);
       expect(slip.lopDetails.lopDays).toBe(slip.lopDetails.workingDays);
       expect(slip.lopDetails.workingDays).toBeGreaterThan(0);
+    });
+  });
+
+  test('by default no attendance data means the member is assumed present', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an employee member on a salary', async () => {
+      ({ o, member } = await orgWithMember());
+      await setSalary(o, member.userId, 44000).expect(200);
+    });
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then('the member\'s payslip is paid in full with no loss-of-pay', async () => {
+      const res = await myPayslips(member).expect(200);
+      const slip = (res.body.data as any[])[0];
+      expect(slip).toBeDefined();
+      expect(slip.lopDetails.lopDays).toBe(0);
+      expect(slip.lopDeduction).toBe(0);
+      expect(slip.netPay).toBe(44000);
     });
   });
 
@@ -397,6 +423,45 @@ defineFeature(feature, (test) => {
       expect(loan.amount).toBe(2000);
       // PF 1800 + PT 200 + loan 2000 = 4000 off 44000.
       expect(slip.netPay).toBe(44000 - 1800 - 200 - 2000);
+    });
+  });
+
+  test('a capped loan recovery stops once the total is recovered', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    const loanOf = (slip: any) => (slip?.deductions as any[] | undefined)?.find((d) => d.code === 'LOAN')?.amount ?? 0;
+    const runMonth = (m: number) =>
+      h.api().post(`${API}/payroll/payslips/generate`).set('Authorization', `Bearer ${o.ownerToken}`).send({ month: m, year: YEAR });
+    const slipFor = async (m: number) => {
+      const res = await myPayslips(member).expect(200);
+      return (res.body.data as any[]).find((p) => p.month === m && p.year === YEAR);
+    };
+
+    given('an organization with an employee on a salary and a 2000-per-month loan capped at 3000', async () => {
+      ({ o, member } = await orgWithMember());
+      // Default config (statutory off, assume-present) → net = salary − loan only.
+      await h
+        .api()
+        .put(`${API}/payroll/salary/${member.userId}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({
+          monthlySalary: 44000,
+          effectiveFrom: '2026-01-01',
+          recurringDeductions: [{ code: 'LOAN', name: 'Loan Recovery', amount: 2000, total: 3000 }],
+        })
+        .expect(200);
+    });
+    when('the owner runs payroll for three consecutive months', async () => {
+      await runMonth(9).expect(200);
+      await runMonth(10).expect(200);
+      await runMonth(11).expect(200);
+    });
+    then('the loan recovers 2000, then 1000, then nothing', async () => {
+      expect(loanOf(await slipFor(9))).toBe(2000); // full instalment
+      expect(loanOf(await slipFor(10))).toBe(1000); // only the remaining 1000
+      const nov = await slipFor(11);
+      expect(loanOf(nov)).toBe(0); // fully recovered — no LOAN line
+      expect(nov.netPay).toBe(44000);
     });
   });
 

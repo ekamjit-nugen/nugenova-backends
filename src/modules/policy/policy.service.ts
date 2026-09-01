@@ -571,6 +571,8 @@ export class PolicyService {
       lwf: { ...current.lwf, ...(input.lwf || {}) },
       customDeductions:
         input.customDeductions !== undefined ? input.customDeductions : current.customDeductions,
+      lopFromAttendance:
+        input.lopFromAttendance !== undefined ? input.lopFromAttendance : current.lopFromAttendance,
     };
     const clean = sanitizePayrollConfig(merged);
     let policy = await this.findPayrollPolicy(orgId);
