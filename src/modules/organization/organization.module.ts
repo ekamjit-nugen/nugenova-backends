@@ -8,6 +8,7 @@ import { DepartmentEntity } from './entities/department.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { SessionEntity } from '../auth/entities/session.entity';
 
 import { OrganizationService } from './services/organization.service';
 import { DepartmentService } from './services/department.service';
@@ -38,6 +39,7 @@ import { AdminTermsController } from './admin-terms.controller';
       RoleEntity,
       OrgMembershipEntity,
       UserEntity,
+      SessionEntity,
     ]),
   ],
   controllers: [
