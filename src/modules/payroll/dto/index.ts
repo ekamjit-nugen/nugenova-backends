@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -15,6 +16,16 @@ export class SalaryComponentDto {
   @IsString() @MaxLength(20) code: string;
   @IsString() @MaxLength(60) name: string;
   @IsNumber() @Min(0) @Max(100000000) amount: number;
+}
+
+export class TaxInputsDto {
+  @IsOptional() @IsIn(['new', 'old']) regime?: 'new' | 'old';
+  @IsOptional() @IsNumber() @Min(0) @Max(100000000) section80C?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100000000) section80D?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100000000) section80E?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100000000) homeLoanInterest?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100000000) hraExemptionAnnual?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100000000) otherExemptions?: number;
 }
 
 export class RecurringDeductionDto {
@@ -45,6 +56,12 @@ export class SetSalaryDto {
   @ValidateNested({ each: true })
   @Type(() => RecurringDeductionDto)
   recurringDeductions?: RecurringDeductionDto[];
+
+  /** Income-tax regime + declared deductions (drives TDS). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TaxInputsDto)
+  taxInputs?: TaxInputsDto;
 
   @IsOptional()
   @IsString()

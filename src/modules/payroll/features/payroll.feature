@@ -72,6 +72,11 @@ Feature: Payroll (simple monthly payslips)
     When the owner runs payroll for three consecutive months
     Then the loan recovers 2000, then 1000, then nothing
 
+  Scenario: income tax (TDS) is withheld when enabled and shows year-to-date
+    Given an organization with an employee on 150000 per month and income tax enabled
+    When the owner generates payslips for that month
+    Then the payslip withholds TDS and reports year-to-date figures
+
   @security
   Scenario: a member cannot read another member's payslip
     Given an organization with two members who both have payslips

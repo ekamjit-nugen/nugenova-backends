@@ -33,6 +33,22 @@ export interface PayslipStatutory {
   lwfEmployer: number;
 }
 
+/** TDS detail baked onto the payslip (when income tax is enabled). */
+export interface PayslipTds {
+  regime: 'new' | 'old';
+  annualTaxable: number;
+  annualTax: number;
+  monthly: number;
+}
+
+/** Year-to-date figures (this FY, up to and including this payslip). */
+export interface PayslipYtd {
+  grossEarnings: number;
+  totalDeductions: number;
+  tds: number;
+  netPay: number;
+}
+
 /** A snapshot of who/what the payslip was generated for (immutable). */
 export interface PayslipEmployeeSnapshot {
   userId: string;
@@ -101,6 +117,14 @@ export class PayslipEntity extends PgBaseEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   statutory: PayslipStatutory;
+
+  /** TDS detail (empty when income tax is off for the org). */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  tds: PayslipTds | Record<string, never>;
+
+  /** Year-to-date figures for this FY, through this payslip. */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  ytd: PayslipYtd | Record<string, never>;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   employeeSnapshot: PayslipEmployeeSnapshot;

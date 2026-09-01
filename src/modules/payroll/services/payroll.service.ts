@@ -22,6 +22,8 @@ import { PolicyService } from '../../policy/policy.service';
 import { NotifierService } from '../../notification/notifier.service';
 import { resolveLop, computeSimplePayslip, rupeesInWords } from '../payroll-calc';
 import { computeStatutory, PayrollStatutoryConfig } from '../statutory';
+import { computeMonthlyTds, regimeSpec } from '../tds';
+import { TaxInputs } from '../entities/salary-structure.entity';
 import { SetSalaryDto, GeneratePayslipsDto } from '../dto';
 
 /** Org roles that manage payroll (owners/admins) — never a payroll subject gate. */
@@ -82,6 +84,7 @@ export class PayrollService {
       dto.monthlySalary,
     );
     const recurringDeductions = this.normalizeRecurring(dto.recurringDeductions);
+    const taxInputs = this.normalizeTaxInputs(dto.taxInputs);
     const saved = await this.salaries.save(
       this.salaries.create({
         organizationId: orgId,
@@ -91,6 +94,7 @@ export class PayrollService {
         monthlySalary,
         components,
         recurringDeductions,
+        taxInputs,
         effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
         supersedes: prior?.id ?? null,
         createdBy: actorId,
@@ -137,6 +141,19 @@ export class PayrollService {
     }
     const sum = clean.reduce((t, c) => t + c.amount, 0);
     return { components: clean, monthlySalary: sum };
+  }
+
+  /** Clean per-employee tax inputs (regime + non-negative declared deductions). */
+  private normalizeTaxInputs(input: TaxInputs | undefined): TaxInputs {
+    if (!input) return {};
+    const out: TaxInputs = {};
+    if (input.regime === 'new' || input.regime === 'old') out.regime = input.regime;
+    const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
+    for (const k of ['section80C', 'section80D', 'section80E', 'homeLoanInterest', 'hraExemptionAnnual', 'otherExemptions'] as const) {
+      const v = n(input[k]);
+      if (v > 0) out[k] = v;
+    }
+    return out;
   }
 
   /** The Basic component amount that drives PF (else the whole salary is Basic). */
@@ -188,6 +205,7 @@ export class PayrollService {
         amount: Number(r.amount),
         ...(r.total != null ? { total: Number(r.total) } : {}),
       })),
+      taxInputs: s.taxInputs || {},
       effectiveFrom: s.effectiveFrom,
     };
   }
@@ -221,6 +239,42 @@ export class PayrollService {
       }
     }
     return map;
+  }
+
+  /** Amount of a named deduction line on a payslip (0 if absent). */
+  private lineAmount(p: PayslipEntity, code: string): number {
+    const line = (p.deductions || []).find((d) => d.code === code);
+    return line ? Number(line.amount) : 0;
+  }
+
+  /** Financial-year start year for (month, year): Apr–Mar → the year April falls in. */
+  private fyStartYear(month: number, year: number): number {
+    return month >= 4 ? year : year - 1;
+  }
+
+  /** The employee's payslips in the same FY as (year, month), strictly earlier. */
+  private async fyPayslipsBefore(
+    orgId: string,
+    userId: string,
+    year: number,
+    month: number,
+  ): Promise<PayslipEntity[]> {
+    const rows = await this.payslips.find({ where: { organizationId: orgId, userId, isDeleted: false } });
+    const fy = this.fyStartYear(month, year);
+    const cutoff = year * 12 + month;
+    return rows.filter((p) => this.fyStartYear(p.month, p.year) === fy && p.year * 12 + p.month < cutoff);
+  }
+
+  /** Sum the old-regime declared deductions from the tax inputs (per-section caps). */
+  private oldRegimeExemptions(t?: TaxInputs): number {
+    if (!t) return 0;
+    const c80 = Math.min(Math.max(0, Number(t.section80C) || 0), 150000);
+    const c24 = Math.min(Math.max(0, Number(t.homeLoanInterest) || 0), 200000);
+    const d80 = Math.max(0, Number(t.section80D) || 0);
+    const e80 = Math.max(0, Number(t.section80E) || 0);
+    const hra = Math.max(0, Number(t.hraExemptionAnnual) || 0);
+    const other = Math.max(0, Number(t.otherExemptions) || 0);
+    return c80 + c24 + d80 + e80 + hra + other;
   }
 
   /** Compute one employee's payslip figures for a month (no persistence). */
@@ -329,8 +383,35 @@ export class PayrollService {
     actorId: string,
     opts: { runId?: string | null; status?: string; notify?: boolean },
   ): Promise<PayslipEntity> {
-    const { comp, lop, statutory, earnings, deductions, employerContributions, totalDeductions, netPay } =
-      await this.computeFor(orgId, salary, month, year, cfg);
+    const base = await this.computeFor(orgId, salary, month, year, cfg);
+    const { comp, lop, statutory, earnings, employerContributions } = base;
+    let deductions = base.deductions;
+    let totalDeductions = base.totalDeductions;
+    let netPay = base.netPay;
+
+    // Earlier payslips this FY — feed both the TDS true-up and the YTD block.
+    const fyRows = await this.fyPayslipsBefore(orgId, salary.userId, year, month);
+
+    // ── TDS (income tax) — deduct on top of statutory, with monthly true-up ──────
+    let tdsDetail: import('../entities/payslip.entity').PayslipTds | Record<string, never> = {};
+    let tdsMonthly = 0;
+    if (cfg.tds.enabled) {
+      const regime: 'new' | 'old' = salary.taxInputs?.regime === 'old' ? 'old' : salary.taxInputs?.regime === 'new' ? 'new' : cfg.tds.regime;
+      const spec = regimeSpec(regime);
+      const annualGross = comp.grossEarnings * 12; // simple projection from the current month
+      const exemptions = regime === 'old' ? this.oldRegimeExemptions(salary.taxInputs) : 0;
+      const annualTaxable = Math.max(0, annualGross - spec.standardDeduction - exemptions);
+      const tdsPaidYtd = fyRows.reduce((s, p) => s + this.lineAmount(p, 'TDS'), 0);
+      const { annualTax, monthly } = computeMonthlyTds({ annualTaxable, regime, month, tdsPaidYtd });
+      tdsMonthly = monthly;
+      tdsDetail = { regime, annualTaxable, annualTax, monthly };
+      if (monthly > 0) {
+        deductions = [...deductions, { code: 'TDS', name: 'TDS (Income Tax)', amount: monthly }];
+        totalDeductions += monthly;
+        netPay = Math.max(0, comp.grossEarnings - totalDeductions);
+      }
+    }
+
     const member = await this.memberships.findOne({
       where: { organizationId: orgId, userId: salary.userId },
     });
@@ -370,6 +451,23 @@ export class PayrollService {
       lopDays: lop.lopDays,
       payableDays: comp.payableDays,
       perDayPay: comp.perDayPay,
+    };
+    row.tds = tdsDetail;
+    // Year-to-date (this FY, through this payslip) = earlier FY payslips + this one.
+    const ytdPrior = fyRows.reduce(
+      (a, p) => ({
+        gross: a.gross + Number(p.grossEarnings),
+        ded: a.ded + Number(p.totalDeductions),
+        tds: a.tds + this.lineAmount(p, 'TDS'),
+        net: a.net + Number(p.netPay),
+      }),
+      { gross: 0, ded: 0, tds: 0, net: 0 },
+    );
+    row.ytd = {
+      grossEarnings: Math.round(ytdPrior.gross + comp.grossEarnings),
+      totalDeductions: Math.round(ytdPrior.ded + totalDeductions),
+      tds: Math.round(ytdPrior.tds + tdsMonthly),
+      netPay: Math.round(ytdPrior.net + netPay),
     };
     row.employeeSnapshot = {
       userId: salary.userId,
@@ -660,6 +758,8 @@ export class PayrollService {
       deductions: (p.deductions || []).map((l) => ({ ...l, amount: Number(l.amount) })),
       employerContributions: (p.employerContributions || []).map((l) => ({ ...l, amount: Number(l.amount) })),
       statutory: p.statutory || null,
+      tds: p.tds && Object.keys(p.tds).length ? p.tds : null,
+      ytd: p.ytd && Object.keys(p.ytd).length ? p.ytd : null,
       lopDetails: p.lopDetails,
       employeeSnapshot: p.employeeSnapshot,
       orgSnapshot: p.orgSnapshot,

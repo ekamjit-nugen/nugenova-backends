@@ -220,6 +220,11 @@ export class CustomDeductionDto {
   @IsOptional() @IsNumber() @Min(0) employerValue?: number;
 }
 
+export class TdsConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsIn(['new', 'old']) regime?: 'new' | 'old';
+}
+
 export class UpdatePayrollConfigDto {
   @IsOptional()
   @ValidateNested()
@@ -245,4 +250,9 @@ export class UpdatePayrollConfigDto {
   customDeductions?: CustomDeductionDto[];
 
   @IsOptional() @IsBoolean() lopFromAttendance?: boolean;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TdsConfigDto)
+  tds?: TdsConfigDto;
 }

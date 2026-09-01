@@ -73,6 +73,20 @@ return `final`, so drafts stay hidden until finalize. Migration
 `PayrollRun1787920000000`. e2e `payroll-run.feature` (3): full lifecycle +
 draft-hidden, can't-finalize-before-approve, @security employee-can't-drive.
 
+## Phase C — income tax (TDS) + YTD
+
+Pure, unit-tested **`tds.ts`** engine (FY 2025-26, new + old regime): progressive
+slabs, standard deduction (₹75k new / ₹50k old), §87A rebate with new-regime
+marginal relief at the ₹12L boundary, surcharge (regime-capped), 4% cess. Monthly
+TDS = projected annual tax spread over the remaining FY months, **trued-up** against
+what was already withheld this FY (never negative). Config: `payroll-config.tds
+{enabled (default off), regime}`. Per-employee override + old-regime declarations on
+`salary_structures.tax_inputs` (regime, 80C≤1.5L / 80D / 80E / 24b≤2L / HRA / other).
+Payslip gains a **`tds`** breakdown + a **`ytd`** block (gross/deductions/tds/net for
+the FY, through this slip). Migration `PayrollTds1787930000000`. Tests: `tds.spec`
+(12) + e2e (TDS withheld + YTD). Deferred: investment-declaration self-service +
+proofs, Form 16, statutory returns.
+
 ## LOP model (cleaner than legacy)
 
 A day's pay is lost for: each **unaccounted working day** (absent / never clocked
@@ -151,8 +165,8 @@ Remove `PayrollModule` from app.module; the two tables are additive
 
 ## Deferred (Phase 3+)
 
-**TDS** (income-tax slabs + declarations); **OT** from attendance hours; statutory
-**returns** (ECR/24Q/Form 16); bank payout/CSV; investment declarations, expenses, loans;
+**OT** from attendance hours; statutory **returns** (ECR/24Q/Form 16); bank
+payout/CSV; investment-declaration self-service + proofs, expenses, loans w/ amortization;
 server-side PDF; analytics. Full-&-Final settlement — gratuity (Gratuity Act §4),
 leave encashment, notice recovery — **does exist in the legacy** (`offboarding.schema.ts`)
 and is deferred here, NOT absent upstream. (Corrects an earlier note in this file.)

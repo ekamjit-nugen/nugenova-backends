@@ -465,6 +465,33 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('income tax (TDS) is withheld when enabled and shows year-to-date', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an employee on 150000 per month and income tax enabled', async () => {
+      // Paid leave all month ⇒ no LOP; TDS on (new regime), statutory left off.
+      ({ o, member } = await setupFullPaidMonth(150000, undefined, undefined, { tds: { enabled: true, regime: 'new' } }));
+    });
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then('the payslip withholds TDS and reports year-to-date figures', async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
+      expect(slip).toBeDefined();
+      // Annual taxable 17,25,000 (18L − 75k std) → tax 1,50,800; Sept has 7 FY months
+      // left → monthly ≈ 21,543.
+      expect(slip.tds).toBeTruthy();
+      expect(slip.tds.regime).toBe('new');
+      expect(slip.tds.annualTax).toBe(150800);
+      const tdsLine = (slip.deductions as any[]).find((d) => d.code === 'TDS');
+      expect(tdsLine.amount).toBe(21543);
+      expect(slip.netPay).toBe(150000 - 21543);
+      // First payslip of the FY → YTD equals this month.
+      expect(slip.ytd.tds).toBe(21543);
+      expect(slip.ytd.grossEarnings).toBe(150000);
+    });
+  });
+
   test("a member cannot read another member's payslip", ({ given, when, then }) => {
     let o: CreatedOrg;
     let a: Member;

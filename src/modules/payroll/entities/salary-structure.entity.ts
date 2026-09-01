@@ -8,6 +8,18 @@ export interface SalaryComponent {
   amount: number;
 }
 
+/** Per-employee income-tax inputs — regime + declared annual deductions (old regime). */
+export interface TaxInputs {
+  /** Per-employee regime override; falls back to the org default when unset. */
+  regime?: 'new' | 'old';
+  section80C?: number; // capped ₹1.5L
+  section80D?: number; // health insurance
+  section80E?: number; // education-loan interest
+  homeLoanInterest?: number; // §24(b), capped ₹2L (self-occupied)
+  hraExemptionAnnual?: number; // §10(13A)
+  otherExemptions?: number;
+}
+
 /** A fixed monthly employee-side recovery specific to one employee (loan, advance). */
 export interface RecurringDeduction {
   code: string;
@@ -56,6 +68,10 @@ export class SalaryStructureEntity extends PgBaseEntity {
   /** Employee-specific fixed monthly recoveries (loan EMI, advance, fines). */
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   recurringDeductions: RecurringDeduction[];
+
+  /** Income-tax regime + declared deductions driving TDS. */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  taxInputs: TaxInputs;
 
   @Column({ type: 'timestamptz' })
   effectiveFrom: Date;

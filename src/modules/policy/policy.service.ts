@@ -573,6 +573,7 @@ export class PolicyService {
         input.customDeductions !== undefined ? input.customDeductions : current.customDeductions,
       lopFromAttendance:
         input.lopFromAttendance !== undefined ? input.lopFromAttendance : current.lopFromAttendance,
+      tds: { ...current.tds, ...(input.tds || {}) },
     };
     const clean = sanitizePayrollConfig(merged);
     let policy = await this.findPayrollPolicy(orgId);

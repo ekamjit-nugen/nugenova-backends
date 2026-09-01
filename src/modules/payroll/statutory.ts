@@ -40,6 +40,8 @@ export interface PayrollStatutoryConfig {
    * attendance-based payroll — otherwise no clock-in data would pay everyone net 0).
    */
   lopFromAttendance: boolean;
+  /** Income-tax (TDS): whether to withhold, and the default regime. */
+  tds: { enabled: boolean; regime: 'new' | 'old' };
 }
 
 export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
@@ -49,6 +51,7 @@ export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
   lwf: { enabled: false, state: 'none' },
   customDeductions: [],
   lopFromAttendance: false,
+  tds: { enabled: false, regime: 'new' },
 };
 
 // ── PF ─────────────────────────────────────────────────────────────────────────
