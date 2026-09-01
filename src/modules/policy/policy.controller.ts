@@ -25,6 +25,7 @@ import {
   UpdatePolicyDto,
   UpdateOnboardingConfigDto,
   UpdateLeaveConfigDto,
+  UpdatePayrollConfigDto,
 } from './dto';
 
 class SetActiveDto {
@@ -201,6 +202,33 @@ export class PolicyController {
       req.user.userId,
     );
     return { success: true, message: 'Leave configuration updated', data };
+  }
+
+  /** Default statutory config + PT-state options for the Settings → Payroll editor. */
+  @Get('payroll-catalog')
+  @RequirePermission('policies', 'view')
+  async payrollCatalog() {
+    return { success: true, data: this.policies.payrollConfigCatalog() };
+  }
+
+  /** The org's live statutory (PF/ESI/PT) configuration. */
+  @Get('payroll-config')
+  @RequirePermission('policies', 'view')
+  async getPayrollConfig(@Req() req: any) {
+    const data = await this.policies.getPayrollConfig(this.orgId(req));
+    return { success: true, data };
+  }
+
+  /** Create-or-update the org's statutory deduction configuration. */
+  @Put('payroll-config')
+  @RequirePermission('policies', 'edit')
+  async updatePayrollConfig(@Body() dto: UpdatePayrollConfigDto, @Req() req: any) {
+    const data = await this.policies.upsertPayrollConfig(
+      this.orgId(req),
+      dto,
+      req.user.userId,
+    );
+    return { success: true, message: 'Payroll configuration updated', data };
   }
 
   @Get()

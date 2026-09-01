@@ -35,7 +35,7 @@ const ALL = ['view', 'create', 'edit', 'delete', 'export', 'assign'];
  *  Roles matrix `SECTIONS` + `RESOURCE_LABELS`). */
 const ALL_RESOURCES = [
   'dashboard', 'employees', 'departments', 'roles', 'attendance', 'leaves',
-  'policies', 'reports', 'settings', 'projects', 'tasks', 'invoices',
+  'payroll', 'policies', 'reports', 'settings', 'projects', 'tasks', 'invoices',
   'expenses', 'clients',
 ];
 
@@ -76,6 +76,7 @@ export const DEFAULT_ROLES: DefaultRoleDef[] = [
       { resource: 'employees', actions: [...ALL] },
       { resource: 'attendance', actions: [...ALL] },
       { resource: 'leaves', actions: [...ALL] },
+      { resource: 'payroll', actions: [...ALL] },
       { resource: 'departments', actions: [...ALL] },
       { resource: 'policies', actions: [...ALL] },
       { resource: 'reports', actions: ['view', 'export'] },

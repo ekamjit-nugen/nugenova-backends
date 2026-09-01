@@ -191,3 +191,68 @@ export class UpdateLeaveConfigDto {
   @Type(() => LeaveConfigTypeDto)
   leaveTypes?: LeaveConfigTypeDto[];
 }
+
+export class PfConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employeeRate?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employerRate?: number;
+  @IsOptional() @IsNumber() @Min(0) wageCeiling?: number;
+}
+
+export class EsiConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employeeRate?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) employerRate?: number;
+  @IsOptional() @IsNumber() @Min(0) wageCeiling?: number;
+}
+
+export class LwfConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsString() @MaxLength(8) state?: string;
+}
+
+export class CustomDeductionDto {
+  @IsString() @MaxLength(20) code: string;
+  @IsString() @MaxLength(60) name: string;
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsString() @MaxLength(24) basis?: string;
+  @IsOptional() @IsNumber() @Min(0) employeeValue?: number;
+  @IsOptional() @IsNumber() @Min(0) employerValue?: number;
+}
+
+export class TdsConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsIn(['new', 'old']) regime?: 'new' | 'old';
+}
+
+export class UpdatePayrollConfigDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PfConfigDto)
+  pf?: PfConfigDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EsiConfigDto)
+  esi?: EsiConfigDto;
+
+  @IsOptional() @IsString() @MaxLength(8) ptState?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LwfConfigDto)
+  lwf?: LwfConfigDto;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CustomDeductionDto)
+  customDeductions?: CustomDeductionDto[];
+
+  @IsOptional() @IsBoolean() lopFromAttendance?: boolean;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TdsConfigDto)
+  tds?: TdsConfigDto;
+}

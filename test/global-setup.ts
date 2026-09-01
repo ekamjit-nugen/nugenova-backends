@@ -37,6 +37,11 @@ import { WfhRequests1787850000000 } from '../src/bootstrap/database/migrations/1
 import { Notifications1787860000000 } from '../src/bootstrap/database/migrations/1787860000000-Notifications';
 import { NotificationPreferences1787870000000 } from '../src/bootstrap/database/migrations/1787870000000-NotificationPreferences';
 import { Leave1787880000000 } from '../src/bootstrap/database/migrations/1787880000000-Leave';
+import { Payroll1787890000000 } from '../src/bootstrap/database/migrations/1787890000000-Payroll';
+import { PayrollStatutory1787900000000 } from '../src/bootstrap/database/migrations/1787900000000-PayrollStatutory';
+import { PayrollRecurringDeductions1787910000000 } from '../src/bootstrap/database/migrations/1787910000000-PayrollRecurringDeductions';
+import { PayrollRun1787920000000 } from '../src/bootstrap/database/migrations/1787920000000-PayrollRun';
+import { PayrollTds1787930000000 } from '../src/bootstrap/database/migrations/1787930000000-PayrollTds';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -46,6 +51,9 @@ import { PolicyAcknowledgementEntity } from '../src/modules/policy/entities/poli
 import { PolicyVersionEntity } from '../src/modules/policy/entities/policy-version.entity';
 import { NotificationEntity } from '../src/modules/notification/entities/notification.entity';
 import { NotificationPreferenceEntity } from '../src/modules/notification/entities/notification-preference.entity';
+import { SalaryStructureEntity } from '../src/modules/payroll/entities/salary-structure.entity';
+import { PayslipEntity } from '../src/modules/payroll/entities/payslip.entity';
+import { PayrollRunEntity } from '../src/modules/payroll/entities/payroll-run.entity';
 import { LeaveRequestEntity } from '../src/modules/leave/entities/leave-request.entity';
 import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.entity';
 
@@ -102,6 +110,9 @@ module.exports = async function globalSetup(): Promise<void> {
       NotificationPreferenceEntity,
       LeaveRequestEntity,
       LeaveBalanceEntity,
+      SalaryStructureEntity,
+      PayslipEntity,
+      PayrollRunEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -127,6 +138,11 @@ module.exports = async function globalSetup(): Promise<void> {
       Notifications1787860000000,
       NotificationPreferences1787870000000,
       Leave1787880000000,
+      Payroll1787890000000,
+      PayrollStatutory1787900000000,
+      PayrollRecurringDeductions1787910000000,
+      PayrollRun1787920000000,
+      PayrollTds1787930000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

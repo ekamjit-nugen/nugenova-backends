@@ -46,6 +46,17 @@ import {
   resolveLeaveConfig,
   sanitizeLeaveConfig,
 } from './leave-config';
+import {
+  defaultPayrollConfig,
+  resolvePayrollConfig,
+  sanitizePayrollConfig,
+  ptStateOptions,
+  lwfStateOptions,
+  deductionBasisOptions,
+  deductionTemplates,
+  PayrollConfigInput,
+} from './payroll-config';
+import { PayrollStatutoryConfig } from '../payroll/statutory';
 
 /** What attendance needs to govern a clock-in for one employee. */
 export interface ResolvedWorkContext {
@@ -506,6 +517,85 @@ export class PolicyService {
     policy.updatedBy = userId;
     await this.repo.save(policy);
     return resolveLeaveConfig(stored);
+  }
+
+  // ── payroll statutory configuration (owner-configurable, on a policy row) ────
+
+  /** The default statutory config + option lists — the Settings editor's start. */
+  payrollConfigCatalog() {
+    return {
+      defaults: defaultPayrollConfig(),
+      ptStates: ptStateOptions(),
+      lwfStates: lwfStateOptions(),
+      deductionBases: deductionBasisOptions(),
+      templates: deductionTemplates(),
+    };
+  }
+
+  /** The org's payroll policy row (category `payroll`, applicableTo `all`) — singleton. */
+  private async findPayrollPolicy(orgId: string): Promise<PolicyEntity | null> {
+    return this.repo.findOne({
+      where: {
+        organizationId: orgId,
+        category: 'payroll',
+        applicableTo: 'all',
+        isDeleted: false,
+      },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  /** Resolve the org's statutory config (saved, else defaults). Never throws. */
+  async getPayrollConfig(orgId: string): Promise<PayrollStatutoryConfig> {
+    const policy = await this.findPayrollPolicy(orgId);
+    const stored = (policy?.extraConfig?.payroll as Partial<PayrollStatutoryConfig>) || null;
+    return resolvePayrollConfig(stored);
+  }
+
+  /**
+   * Create-or-update the org's statutory config. This is a PARTIAL merge onto the
+   * current config: only the fields present in `input` change (so, e.g., a PUT that
+   * sends just `customDeductions` leaves PF/ESI/PT untouched). Since defaults are
+   * opt-in (everything off), a full-replace here would silently disable deductions.
+   */
+  async upsertPayrollConfig(
+    orgId: string,
+    input: PayrollConfigInput,
+    userId: string,
+  ): Promise<PayrollStatutoryConfig> {
+    const current = await this.getPayrollConfig(orgId);
+    const merged: PayrollConfigInput = {
+      pf: { ...current.pf, ...(input.pf || {}) },
+      esi: { ...current.esi, ...(input.esi || {}) },
+      ptState: input.ptState ?? current.ptState,
+      lwf: { ...current.lwf, ...(input.lwf || {}) },
+      customDeductions:
+        input.customDeductions !== undefined ? input.customDeductions : current.customDeductions,
+      lopFromAttendance:
+        input.lopFromAttendance !== undefined ? input.lopFromAttendance : current.lopFromAttendance,
+      tds: { ...current.tds, ...(input.tds || {}) },
+    };
+    const clean = sanitizePayrollConfig(merged);
+    let policy = await this.findPayrollPolicy(orgId);
+    if (!policy) {
+      policy = this.repo.create({
+        organizationId: orgId,
+        policyName: 'Payroll Configuration',
+        description: 'Statutory deduction rules (PF, ESI, Professional Tax) applied when running payroll.',
+        category: 'payroll',
+        applicableTo: 'all',
+        applicableIds: [],
+        excludedEmployeeIds: [],
+        isActive: true,
+        acknowledgementRequired: false,
+        createdBy: userId,
+        updatedBy: userId,
+      });
+    }
+    policy.extraConfig = { ...(policy.extraConfig || {}), payroll: clean };
+    policy.updatedBy = userId;
+    await this.repo.save(policy);
+    return clean;
   }
 
   /**

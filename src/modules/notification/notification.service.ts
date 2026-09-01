@@ -47,6 +47,7 @@ export function categoryForType(type: string): string {
   const t = (type || '').toLowerCase();
   if (t.startsWith('wfh') || t.startsWith('attendance')) return 'attendance';
   if (t.startsWith('leave')) return 'leave';
+  if (t.startsWith('payroll')) return 'payroll';
   if (t.startsWith('onboarding')) return 'onboarding';
   if (t.startsWith('policy') || t.startsWith('policies')) return 'policy';
   return 'system';
