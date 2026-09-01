@@ -158,6 +158,60 @@ export class TaxDeclarationService {
     return Math.max(0, Math.min(100000000, Math.round(Number(n) || 0)));
   }
 
+  /**
+   * Owner/HR records a declaration ON BEHALF of an employee. HR is authoritative,
+   * so it's saved as `verified` immediately (it drives that employee's TDS at
+   * once — no submit/review round-trip). Notifies the employee.
+   */
+  async setForEmployee(
+    orgId: string,
+    userId: string,
+    fyStart: number,
+    dto: SaveTaxDeclarationDto,
+    actorId: string,
+  ) {
+    const proofs = await this.cleanProofs(orgId, dto.proofs);
+    let row = await this.find(orgId, userId, fyStart);
+    if (!row) {
+      row = this.declarations.create({ organizationId: orgId, userId, financialYearStart: fyStart });
+    }
+    row.regime = dto.regime === 'old' ? 'old' : 'new';
+    row.section80C = this.clamp(dto.section80C);
+    row.section80D = this.clamp(dto.section80D);
+    row.section80E = this.clamp(dto.section80E);
+    row.homeLoanInterest = this.clamp(dto.homeLoanInterest);
+    row.hraExemptionAnnual = this.clamp(dto.hraExemptionAnnual);
+    row.otherExemptions = this.clamp(dto.otherExemptions);
+    row.proofs = proofs;
+    row.status = 'verified';
+    row.submittedAt = row.submittedAt ?? new Date();
+    row.reviewedBy = actorId;
+    row.reviewedAt = new Date();
+    row.reviewNote = null;
+    const saved = await this.declarations.save(row);
+
+    await this.notifier.notify({
+      organizationId: orgId,
+      userId,
+      actorId,
+      type: 'tax_declaration_verified',
+      title: 'Tax declaration updated',
+      body: `Your ${this.label(fyStart)} tax declaration was recorded by payroll and applies to your income tax.`,
+      data: { actionUrl: '/payroll/my' },
+    });
+    return this.view(saved);
+  }
+
+  /** Every salaried-or-declared employee's declaration for a FY (manager list). */
+  async listForFy(orgId: string, fyStart: number) {
+    const rows = await this.declarations.find({
+      where: { organizationId: orgId, financialYearStart: fyStart, isDeleted: false },
+      order: { createdAt: 'DESC' },
+    });
+    const names = await this.nameMap(orgId, rows.map((r) => r.userId));
+    return rows.map((r) => ({ ...this.view(r), employee: names.get(r.userId) || null }));
+  }
+
   /** Submit for review (draft/rejected → submitted). Notifies payroll managers. */
   async submitMine(orgId: string, userId: string, fyStart: number) {
     const row = await this.find(orgId, userId, fyStart);

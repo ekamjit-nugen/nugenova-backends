@@ -62,7 +62,7 @@ export class TaxDeclarationController {
     return { success: true, message: 'Declaration submitted for review', data };
   }
 
-  // ── review queue (payroll/HR) ────────────────────────────────────────────────
+  // ── payroll/HR: enter declarations on behalf of employees ────────────────────
 
   @Get()
   @RequirePermission('payroll', 'view')
@@ -72,6 +72,27 @@ export class TaxDeclarationController {
       fyStart: fy ? this.fyStart(fy) : undefined,
     });
     return { success: true, data };
+  }
+
+  /** An employee's declaration for a FY (for HR to view/edit). */
+  @Get('employee/:userId')
+  @RequirePermission('payroll', 'view')
+  async getForEmployee(@Param('userId') userId: string, @Query('fy') fy: string, @Req() req: any) {
+    const data = await this.service.getMine(this.orgId(req), userId, this.fyStart(fy));
+    return { success: true, data };
+  }
+
+  /** HR records/updates an employee's declaration (saved as verified — drives TDS). */
+  @Put('employee/:userId')
+  @RequirePermission('payroll', 'edit')
+  async setForEmployee(
+    @Param('userId') userId: string,
+    @Query('fy') fy: string,
+    @Body() dto: SaveTaxDeclarationDto,
+    @Req() req: any,
+  ) {
+    const data = await this.service.setForEmployee(this.orgId(req), userId, this.fyStart(fy), dto, req.user.userId);
+    return { success: true, message: 'Declaration saved', data };
   }
 
   @Post(':id/review')

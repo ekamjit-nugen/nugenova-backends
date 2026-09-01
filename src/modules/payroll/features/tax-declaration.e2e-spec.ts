@@ -148,4 +148,36 @@ defineFeature(feature, (test) => {
       expect(slip.tds.annualTaxable).toBe(MONTHLY * 12 - STD_DED_OLD);
     });
   });
+
+  test('HR records a declaration for an employee and it drives TDS at once', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let member: Member;
+
+    given('an organization with income tax on the old regime and an employee on a taxable salary', async () => {
+      ({ o, member } = await setup());
+    });
+    when("the owner records the employee's declaration for them", async () => {
+      await h
+        .api()
+        .put(`${API}/payroll/tax-declarations/employee/${member.userId}?fy=${FY}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ regime: 'old', section80C: 150000, section80D: 25000 })
+        .expect(200);
+    });
+    then('the declaration is verified without a separate approval step', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/payroll/tax-declarations/employee/${member.userId}?fy=${FY}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .expect(200);
+      expect(res.body.data.status).toBe('verified');
+    });
+    and("the employee's payslip TDS reflects the declared deductions", async () => {
+      await generate(o).expect(200);
+      const res = await mySlips(member).expect(200);
+      const slip = res.body.data.find((s: any) => s.month === MONTH && s.year === YEAR);
+      expect(slip.tds.regime).toBe('old');
+      expect(slip.tds.annualTaxable).toBe(MONTHLY * 12 - STD_DED_OLD - 175000);
+    });
+  });
 });

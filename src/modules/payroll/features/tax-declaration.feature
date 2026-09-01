@@ -19,3 +19,9 @@ Feature: Investment declarations
     Given an organization with income tax on the old regime and an employee on a taxable salary
     When the employee submits a declaration but it is not verified
     Then the employee's payslip TDS ignores the declared deductions
+
+  Scenario: HR records a declaration for an employee and it drives TDS at once
+    Given an organization with income tax on the old regime and an employee on a taxable salary
+    When the owner records the employee's declaration for them
+    Then the declaration is verified without a separate approval step
+    And the employee's payslip TDS reflects the declared deductions
