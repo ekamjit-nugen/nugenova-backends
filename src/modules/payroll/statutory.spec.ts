@@ -24,6 +24,18 @@ describe('computePF', () => {
   it('is zero when disabled', () => {
     expect(computePF(30000, { ...cfg, enabled: false }).employee).toBe(0);
   });
+  it('splits the employer share into EPS (capped ₹1250) + EPF above the ceiling', () => {
+    const pf = computePF(30000, cfg); // EPS wage capped at 15000 → 8.33% = 1250
+    expect(pf.eps).toBe(1250);
+    expect(pf.epfEmployer).toBe(550); // 1800 employer − 1250 EPS
+    expect(pf.eps + pf.epfEmployer).toBe(pf.employer);
+  });
+  it('splits EPS/EPF below the ceiling too', () => {
+    const pf = computePF(10000, cfg); // EPS = 8.33% of 10000 = 833
+    expect(pf.eps).toBe(833);
+    expect(pf.epfEmployer).toBe(367); // 1200 − 833
+    expect(pf.eps + pf.epfEmployer).toBe(pf.employer);
+  });
 });
 
 describe('computeESI', () => {

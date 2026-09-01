@@ -19,6 +19,7 @@ import {
 } from '../organization/guards/require-permission.decorator';
 import { PayrollService } from './services/payroll.service';
 import { SetSalaryDto, GeneratePayslipsDto } from './dto';
+import { RETURN_TYPES, ReturnKind } from './payroll-returns';
 
 /**
  * Payroll surface (`/api/v1/payroll`). JWT + PayrollAccessGuard. Undecorated
@@ -149,6 +150,34 @@ export class PayrollController {
   async cancelRun(@Param('id') id: string, @Body() body: { note?: string }, @Req() req: any) {
     const data = await this.payroll.cancelRun(this.orgId(req), id, req.user.userId, body?.note);
     return { success: true, message: 'Run cancelled', data };
+  }
+
+  // ── statutory registers / returns (Phase C) ─────────────────────────────────
+
+  /** The return/register types available for download. */
+  @Get('returns/types')
+  @RequirePermission('payroll', 'view')
+  returnTypes() {
+    return { success: true, data: RETURN_TYPES };
+  }
+
+  /** Generate one register/return for a finalized month (returned as a file payload). */
+  @Get('returns')
+  @RequirePermission('payroll', 'view')
+  async generateReturn(
+    @Query('type') type: string,
+    @Query('month') month: string,
+    @Query('year') year: string,
+    @Req() req: any,
+  ) {
+    const valid = RETURN_TYPES.some((t) => t.value === type);
+    const data = await this.payroll.generateReturn(
+      this.orgId(req),
+      (valid ? type : 'register') as ReturnKind,
+      Number(month),
+      Number(year),
+    );
+    return { success: true, data };
   }
 
   @Get('payslips')

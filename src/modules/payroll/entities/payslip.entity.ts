@@ -26,6 +26,9 @@ export interface PayslipStatutory {
   pfEmployee: number;
   pfEmployer: number;
   pfWage: number;
+  /** Employer PF split into pension (EPS) and provident-fund (EPF) — for the PF ECR. */
+  pfEps?: number;
+  pfEpfEmployer?: number;
   esiEmployee: number;
   esiEmployer: number;
   professionalTax: number;

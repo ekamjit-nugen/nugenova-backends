@@ -56,13 +56,26 @@ export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
 
 // ── PF ─────────────────────────────────────────────────────────────────────────
 
-export function computePF(basicMonthly: number, cfg: PfConfig): { employee: number; employer: number; wage: number } {
-  if (!cfg.enabled) return { employee: 0, employer: 0, wage: 0 };
+/** EPS is 8.33% of the pension wage (capped at ₹15,000 → ₹1,250/mo). */
+const EPS_RATE = 8.33;
+const EPS_WAGE_CEILING = 15000;
+
+export function computePF(
+  basicMonthly: number,
+  cfg: PfConfig,
+): { employee: number; employer: number; wage: number; eps: number; epfEmployer: number } {
+  if (!cfg.enabled) return { employee: 0, employer: 0, wage: 0, eps: 0, epfEmployer: 0 };
   const wage = Math.min(Math.max(0, basicMonthly), Math.max(0, cfg.wageCeiling));
+  const employer = round0(wage * (cfg.employerRate / 100));
+  // Split the employer share: EPS (pension) then EPF (the remainder).
+  const eps = Math.min(round0(Math.min(wage, EPS_WAGE_CEILING) * (EPS_RATE / 100)), round0(EPS_WAGE_CEILING * (EPS_RATE / 100)));
+  const epfEmployer = Math.max(0, employer - eps);
   return {
     wage: round0(wage),
     employee: round0(wage * (cfg.employeeRate / 100)),
-    employer: round0(wage * (cfg.employerRate / 100)),
+    employer,
+    eps,
+    epfEmployer,
   };
 }
 
@@ -368,6 +381,9 @@ export interface StatutoryResult {
   pfEmployee: number;
   pfEmployer: number;
   pfWage: number;
+  /** Employer PF split into pension (EPS) and provident-fund (EPF) shares — for the ECR. */
+  pfEps: number;
+  pfEpfEmployer: number;
   esiEmployee: number;
   esiEmployer: number;
   professionalTax: number;
@@ -411,6 +427,8 @@ export function computeStatutory(
     pfEmployee: pf.employee,
     pfEmployer: pf.employer,
     pfWage: pf.wage,
+    pfEps: pf.eps,
+    pfEpfEmployer: pf.epfEmployer,
     esiEmployee: esi.employee,
     esiEmployer: esi.employer,
     professionalTax: pt,

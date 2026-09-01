@@ -23,6 +23,7 @@ import { NotifierService } from '../../notification/notifier.service';
 import { resolveLop, computeSimplePayslip, rupeesInWords } from '../payroll-calc';
 import { computeStatutory, PayrollStatutoryConfig } from '../statutory';
 import { computeMonthlyTds, regimeSpec } from '../tds';
+import { buildReturn, ReturnFile, ReturnRow, ReturnKind } from '../payroll-returns';
 import { TaxInputs } from '../entities/salary-structure.entity';
 import { SetSalaryDto, GeneratePayslipsDto } from '../dto';
 
@@ -435,6 +436,8 @@ export class PayrollService {
       pfEmployee: statutory.pfEmployee,
       pfEmployer: statutory.pfEmployer,
       pfWage: statutory.pfWage,
+      pfEps: statutory.pfEps,
+      pfEpfEmployer: statutory.pfEpfEmployer,
       esiEmployee: statutory.esiEmployee,
       esiEmployer: statutory.esiEmployer,
       professionalTax: statutory.professionalTax,
@@ -782,6 +785,61 @@ export class PayrollService {
     if (year) where.year = year;
     const rows = await this.payslips.find({ where, order: { year: 'DESC', month: 'DESC' } });
     return rows.map((p) => this.payslipView(p));
+  }
+
+  /** Statutory registers / return exports for a finalized month. */
+  async generateReturn(orgId: string, type: ReturnKind, month: number, year: number): Promise<ReturnFile> {
+    if (!month || month < 1 || month > 12) throw new BadRequestException('A valid month is required');
+    if (!year || year < 2000 || year > 2100) throw new BadRequestException('A valid year is required');
+    const rows = await this.payslips.find({
+      where: { organizationId: orgId, isDeleted: false, status: 'final', month, year },
+      order: { createdAt: 'ASC' },
+    });
+    const returnRows: ReturnRow[] = rows.map((p) => this.toReturnRow(p));
+    return buildReturn(type, returnRows, month, year);
+  }
+
+  /** Flatten one payslip to the register row shape (money read straight off the slip). */
+  private toReturnRow(p: PayslipEntity): ReturnRow {
+    const s = p.statutory;
+    const basic = (p.earnings || []).find((e) => e.code === 'BASIC')?.amount
+      ?? (p.earnings || [])[0]?.amount
+      ?? Number(p.grossEarnings);
+    const tds = this.lineAmount(p, 'TDS');
+    const pt = Number(s?.professionalTax || 0);
+    const pfEmployee = Number(s?.pfEmployee || 0);
+    const esiEmployee = Number(s?.esiEmployee || 0);
+    const lwfEmployee = Number(s?.lwfEmployee || 0);
+    const known = Number(p.lopDeduction || 0) + pfEmployee + esiEmployee + pt + lwfEmployee + tds;
+    const otherDeductions = Math.max(0, Number(p.totalDeductions || 0) - known);
+    const snap = p.employeeSnapshot || ({} as PayslipEntity['employeeSnapshot']);
+    return {
+      name: snap?.name || 'Employee',
+      email: snap?.email || '',
+      pan: null,
+      uan: null,
+      esicNumber: null,
+      pfNumber: null,
+      workingDays: Number(p.lopDetails?.workingDays || 0),
+      payableDays: Number(p.lopDetails?.payableDays || 0),
+      lopDays: Number(p.lopDetails?.lopDays || 0),
+      grossEarnings: Number(p.grossEarnings || 0),
+      basic: Number(basic || 0),
+      lopDeduction: Number(p.lopDeduction || 0),
+      pfWage: Number(s?.pfWage || 0),
+      pfEmployee,
+      pfEmployer: Number(s?.pfEmployer || 0),
+      pfEps: Number(s?.pfEps || 0),
+      pfEpfEmployer: Number(s?.pfEpfEmployer || 0),
+      esiEmployee,
+      esiEmployer: Number(s?.esiEmployer || 0),
+      professionalTax: pt,
+      lwfEmployee,
+      tds,
+      otherDeductions,
+      totalDeductions: Number(p.totalDeductions || 0),
+      netPay: Number(p.netPay || 0),
+    };
   }
 
   async getPayslip(orgId: string, id: string, actorUserId: string, canManage: boolean) {

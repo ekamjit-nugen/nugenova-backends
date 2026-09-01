@@ -84,8 +84,25 @@ what was already withheld this FY (never negative). Config: `payroll-config.tds
 `salary_structures.tax_inputs` (regime, 80C≤1.5L / 80D / 80E / 24b≤2L / HRA / other).
 Payslip gains a **`tds`** breakdown + a **`ytd`** block (gross/deductions/tds/net for
 the FY, through this slip). Migration `PayrollTds1787930000000`. Tests: `tds.spec`
-(12) + e2e (TDS withheld + YTD). Deferred: investment-declaration self-service +
-proofs, Form 16, statutory returns.
+(12) + e2e (TDS withheld + YTD).
+
+### Statutory registers & returns
+
+The employer's PF share now splits into **EPS** (8.33% of the pension wage, capped
+at ₹1,250) + **EPF** (the remainder) — carried on `payslip.statutory.pfEps` /
+`pfEpfEmployer`, so the PF register is EPFO-ECR-shaped. Pure **`payroll-returns.ts`**
+turns a finalized month's payslips into filing-preparation CSVs: a full **payroll
+register**, a **PF (ECR)** register (gross/EPF/EPS/EDLI wages + the three
+contribution splits + NCP days), an **ESI** register (covered members only), a
+**PT** register, and a **TDS Form-24Q Annexure I** register (deductee-wise, §192).
+Money is read straight off the immutable payslips; the identifier columns (UAN /
+PAN / ESIC) are emitted **blank** to fill in the portal — these are preparation
+exports, not upload-ready government files. `GET /payroll/returns/types` +
+`GET /payroll/returns?type&month&year` (payroll:view) return `{filename, mimeType,
+content, rowCount}`; the FE downloads it as a Blob from a "Registers & returns"
+panel. Tests: `payroll-returns.spec` (11) + `payroll-returns.feature` e2e (register
++ EPS/EPF split, @security employee-forbidden). Deferred: investment-declaration
+self-service + proofs, Form 16, PF-number/UAN/PAN capture for upload-ready files.
 
 ## LOP model (cleaner than legacy)
 
