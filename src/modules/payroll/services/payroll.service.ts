@@ -24,6 +24,7 @@ import { resolveLop, computeSimplePayslip, rupeesInWords } from '../payroll-calc
 import { computeStatutory, PayrollStatutoryConfig } from '../statutory';
 import { computeMonthlyTds, regimeSpec } from '../tds';
 import { buildReturn, ReturnFile, ReturnRow, ReturnKind } from '../payroll-returns';
+import { buildForm16PartB, fyQuarter, Form16PartB } from '../form16';
 import { TaxDeclarationService } from './tax-declaration.service';
 import { TaxInputs } from '../entities/salary-structure.entity';
 import { SetSalaryDto, GeneratePayslipsDto } from '../dto';
@@ -846,6 +847,78 @@ export class PayrollService {
       otherDeductions,
       totalDeductions: Number(p.totalDeductions || 0),
       netPay: Number(p.netPay || 0),
+    };
+  }
+
+  /**
+   * Form 16 (Part B) — the annual salary + tax computation for one employee in a
+   * financial year, built from that FY's finalized payslips + the (verified)
+   * declaration. Part A (challan/deposit) comes from TRACES; here `tdsDeducted` is
+   * the tax we actually withheld across the year.
+   */
+  async generateForm16(orgId: string, userId: string, fyStart: number) {
+    const rows = await this.payslips.find({
+      where: { organizationId: orgId, userId, isDeleted: false, status: 'final' },
+    });
+    const fyRows = rows
+      .filter((p) => this.fyStartYear(p.month, p.year) === fyStart)
+      .sort((a, b) => a.year * 12 + a.month - (b.year * 12 + b.month));
+
+    const cfg = await this.policy.getPayrollConfig(orgId);
+    // Regime + declared deductions: a VERIFIED declaration wins, else the salary
+    // structure's manager-set inputs, else the org default regime with nothing declared.
+    const verified = await this.taxDeclarations.resolvedFor(orgId, userId, fyStart);
+    const salary = await this.activeSalary(orgId, userId);
+    const src = verified ?? salary?.taxInputs ?? {};
+    const regime: 'new' | 'old' = src.regime === 'old' ? 'old' : src.regime === 'new' ? 'new' : cfg.tds.regime;
+
+    const grossSalary = fyRows.reduce((s, p) => s + Number(p.grossEarnings || 0), 0);
+    const tdsDeducted = fyRows.reduce((s, p) => s + this.lineAmount(p, 'TDS'), 0);
+    const quarterlyTds = { q1: 0, q2: 0, q3: 0, q4: 0 };
+    for (const p of fyRows) quarterlyTds[fyQuarter(p.month)] += this.lineAmount(p, 'TDS');
+
+    const partB: Form16PartB = buildForm16PartB({
+      fyStart,
+      regime,
+      grossSalary,
+      section10Exemptions: (Number(src.hraExemptionAnnual) || 0) + (Number(src.otherExemptions) || 0),
+      homeLoanInterest: Number(src.homeLoanInterest) || 0,
+      chapterVIA: {
+        section80C: Number(src.section80C) || 0,
+        section80D: Number(src.section80D) || 0,
+        section80E: Number(src.section80E) || 0,
+        other: 0,
+      },
+      tdsDeducted,
+      quarterlyTds,
+    });
+
+    const [org, name] = await Promise.all([
+      this.orgs.findOne({ where: { id: orgId } }),
+      this.nameEmail(userId),
+    ]);
+    const last = fyRows[fyRows.length - 1];
+
+    return {
+      ...partB,
+      months: fyRows.length,
+      declarationVerified: !!verified,
+      employer: {
+        name: org?.name || null,
+        // TAN/PAN aren't captured in Nexora yet — filled in on the portal.
+        tan: null,
+        pan: null,
+      },
+      employee: {
+        userId,
+        name: name.name,
+        email: name.email,
+        pan: null,
+        department: last?.employeeSnapshot?.department || null,
+        designation: last?.employeeSnapshot?.designation || null,
+      },
+      // Part A (challan/deposit particulars) is issued from TRACES, not this system.
+      partANote: 'Part A (tax deposited / challan particulars) is issued from the TRACES portal after the quarterly TDS returns (Form 24Q) are filed.',
     };
   }
 

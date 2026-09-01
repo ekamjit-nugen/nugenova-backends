@@ -61,6 +61,22 @@ export class PayrollController {
     return { success: true, data };
   }
 
+  /** FY start year from `?fy=2025`, defaulting to the current financial year. */
+  private fyStart(fy?: string): number {
+    const n = Number(fy);
+    if (n >= 2000 && n <= 2100) return Math.floor(n);
+    const d = new Date();
+    const m = d.getUTCMonth() + 1;
+    return m >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
+  }
+
+  /** The caller's own Form 16 (Part B) for a financial year. */
+  @Get('form16/me')
+  async myForm16(@Query('fy') fy: string, @Req() req: any) {
+    const data = await this.payroll.generateForm16(this.orgId(req), req.user.userId, this.fyStart(fy));
+    return { success: true, data };
+  }
+
   // ── manager surface (declared before `:id` params) ──────────────────────────
 
   @Get('salaries')
@@ -74,6 +90,14 @@ export class PayrollController {
   @RequirePermission('payroll', 'view')
   async getSalary(@Param('userId') userId: string, @Req() req: any) {
     const data = await this.payroll.getSalary(this.orgId(req), userId);
+    return { success: true, data };
+  }
+
+  /** A member's Form 16 (Part B) for a financial year. */
+  @Get('form16/:userId')
+  @RequirePermission('payroll', 'view')
+  async form16For(@Param('userId') userId: string, @Query('fy') fy: string, @Req() req: any) {
+    const data = await this.payroll.generateForm16(this.orgId(req), userId, this.fyStart(fy));
     return { success: true, data };
   }
 
