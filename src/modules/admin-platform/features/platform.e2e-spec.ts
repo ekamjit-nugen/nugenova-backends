@@ -33,13 +33,39 @@ defineFeature(feature, (test) => {
     when('they request the platform usage overview', async () => {
       res = await usage(saToken);
     });
-    then('the overview reports organization, user and member totals', () => {
+    then('the overview reports account, security and infrastructure signals', () => {
       expect(res.status).toBe(200);
       const d = res.body.data;
+      // accounts + seats
       expect(typeof d.organizations.total).toBe('number');
       expect(typeof d.users.total).toBe('number');
       expect(typeof d.members.total).toBe('number');
-      expect(d.features).toBeDefined();
+      // communications infra (throughput only)
+      expect(typeof d.communications.emails.sent).toBe('number');
+      expect(typeof d.communications.emails.failed).toBe('number');
+      expect(typeof d.communications.notifications.total).toBe('number');
+      // security posture
+      expect(typeof d.security.mfaEnabled).toBe('number');
+      expect(typeof d.security.mfaAdoption).toBe('number');
+      expect(typeof d.security.emailVerified).toBe('number');
+      expect(typeof d.security.sessions.active).toBe('number');
+    });
+    and('it exposes no tenant business data', () => {
+      const d = res.body.data;
+      // The super admin must not see inside any org: no payroll/leave/policy/
+      // attendance/onboarding aggregates, and no notification-category breakdown.
+      expect(d.features).toBeUndefined();
+      expect(d.communications.notifications.byCategory).toBeUndefined();
+      // per-org rows carry only account-level fields (seats, status), never
+      // tenant record counts.
+      const row = (d.perOrg as any[])[0];
+      if (row) {
+        expect(row.policies).toBeUndefined();
+        expect(row.payslips).toBeUndefined();
+        expect(row.leaveRequests).toBeUndefined();
+        expect(row.attendanceRecords).toBeUndefined();
+        expect(typeof row.members).toBe('number');
+      }
     });
     and('it lists per-organization usage', () => {
       expect(Array.isArray(res.body.data.perOrg)).toBe(true);
