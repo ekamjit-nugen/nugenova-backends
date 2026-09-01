@@ -14,6 +14,8 @@ import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { SessionEntity } from '../../auth/entities/session.entity';
+import { DepartmentEntity } from '../entities/department.entity';
+import { RoleEntity } from '../../auth/entities/role.entity';
 import { TermsService } from '../../terms/terms.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
@@ -78,6 +80,10 @@ export class OrganizationService {
     private readonly membershipRepo: Repository<OrgMembershipEntity>,
     @InjectRepository(SessionEntity)
     private readonly sessionRepo: Repository<SessionEntity>,
+    @InjectRepository(DepartmentEntity)
+    private readonly departmentRepo: Repository<DepartmentEntity>,
+    @InjectRepository(RoleEntity)
+    private readonly roleRepo: Repository<RoleEntity>,
     private readonly terms: TermsService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
@@ -367,6 +373,32 @@ export class OrganizationService {
     const seatBase = active.length || users.length;
     const ageDays = Math.max(0, Math.floor((now.getTime() - org.createdAt.getTime()) / 86_400_000));
 
+    // Structure (org composition — counts + role mix, no HR content).
+    const [departments, roles] = await Promise.all([
+      this.departmentRepo.count({ where: { organizationId: id } }),
+      this.roleRepo.count({ where: { organizationId: id } }),
+    ]);
+    const roleMix = new Map<string, number>();
+    for (const m of active) {
+      const r = (m.role || 'member').toLowerCase();
+      roleMix.set(r, (roleMix.get(r) || 0) + 1);
+    }
+    const membersByRole = [...roleMix.entries()]
+      .map(([role, count]) => ({ role, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Profile — the owner's setup-wizard workspace config (safe, self-reported).
+    const s = (org.settings || {}) as Record<string, unknown>;
+    const str = (k: string) => (typeof s[k] === 'string' ? (s[k] as string) : null);
+    const profile = {
+      industry: str('industry'),
+      size: str('size'),
+      website: str('website'),
+      timezone: str('timezone'),
+      currency: str('currency'),
+      workModel: str('workModel'),
+    };
+
     return {
       organization: {
         id: org.id,
@@ -377,6 +409,9 @@ export class OrganizationService {
         createdAt: org.createdAt,
         ageDays,
       },
+      profile,
+      structure: { departments, roles, membersByRole },
+      setup: { onboardingStep: org.onboardingStep, onboardingCompleted: org.onboardingCompleted },
       consent: {
         accepted: pub.consentAccepted,
         version: pub.consentVersion,
