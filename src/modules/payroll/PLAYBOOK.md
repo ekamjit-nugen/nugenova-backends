@@ -140,7 +140,11 @@ Remove `PayrollModule` from app.module; the two tables are additive
 **TDS** (income-tax slabs + declarations); **OT** from attendance hours; statutory
 **returns** (ECR/24Q/Form 16); maker-checker run lifecycle (draft→review→approve→
 finalize→pay); bank payout/CSV; investment declarations, expenses, loans;
-server-side PDF; analytics. Gratuity/F&F/encashment don't exist in the legacy either.
+server-side PDF; analytics. Full-&-Final settlement — gratuity (Gratuity Act §4),
+leave encashment, notice recovery — **does exist in the legacy** (`offboarding.schema.ts`)
+and is deferred here, NOT absent upstream. (Corrects an earlier note in this file.)
+See the payroll gap analysis for the full legacy-parity backlog + the two live
+correctness fixes (leave clip — done; loan-recovery cap — pending).
 
 ## Scenarios & tests
 

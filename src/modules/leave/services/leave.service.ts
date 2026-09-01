@@ -509,7 +509,11 @@ export class LeaveService {
   /**
    * Approved leave days overlapping a pay period, split into PAID vs LOP by leave
    * type (the `lop` / any isLop type is unpaid). What PAYROLL consumes to dock pay.
-   * Phase 1 counts a leave's full `totalDays` when it overlaps the period.
+   *
+   * A leave is CLIPPED to `[start, end]` and its working days recounted for the
+   * overlapping portion only — so a leave straddling a month boundary (or falling
+   * partly before a mid-month salary `effectiveFrom`) is never counted in full in
+   * two pay periods.
    */
   async leaveSummaryForPeriod(
     orgId: string,
@@ -521,11 +525,16 @@ export class LeaveService {
       where: { organizationId: orgId, userId, status: 'approved', isDeleted: false },
     });
     const types = await this.resolvedTypes(orgId);
+    const holidays = await this.holidayKeys(orgId, start, end);
     let paidLeaveDays = 0;
     let lopLeaveDays = 0;
     for (const r of rows) {
       if (!rangesOverlap(start, end, r.startDate, r.endDate)) continue;
-      const days = Number(r.totalDays);
+      // Intersect the leave with the pay period, then count only those working days.
+      const clipStart = r.startDate > start ? r.startDate : start;
+      const clipEnd = r.endDate < end ? r.endDate : end;
+      const days = countLeaveDays({ start: clipStart, end: clipEnd, halfDay: r.halfDay, holidays });
+      if (days <= 0) continue;
       if (types.get(r.leaveType)?.isLop) lopLeaveDays += days;
       else paidLeaveDays += days;
     }
