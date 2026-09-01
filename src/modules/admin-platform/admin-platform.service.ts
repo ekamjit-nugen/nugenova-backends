@@ -3,81 +3,76 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { OrganizationEntity } from '../organization/entities/organization.entity';
-import { DepartmentEntity } from '../organization/entities/department.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
-import { PolicyEntity } from '../policy/entities/policy.entity';
-import { AttendanceEntity } from '../attendance/entities/attendance.entity';
-import { WfhRequestEntity } from '../attendance/entities/wfh-request.entity';
-import { MemberOnboardingEntity } from '../onboarding/entities/member-onboarding.entity';
 import { NotificationEntity } from '../notification/entities/notification.entity';
+import { SessionEntity } from '../auth/entities/session.entity';
+import { EmailOutboxEntity } from '../../bootstrap/mail/email-outbox.entity';
 
 const DAY = 86_400_000;
 
-/** A `{ orgId → count }` map built from a single grouped query (no N+1). */
-type CountMap = Map<string, number>;
-
 /**
- * AdminPlatformService — platform-wide usage aggregation for the super admin.
- * Every number is cross-tenant (the super admin is the only caller, gated by the
- * PlatformAdminGuard), computed with grouped queries rather than per-org loops.
+ * AdminPlatformService — the super admin's PLATFORM operations view.
+ *
+ * Scope boundary (important): the super admin operates the platform; they are NOT
+ * a member of any tenant and must NOT see what happens *inside* an organization.
+ * So this service reports only account-, security-, and infrastructure-level
+ * signals — organizations, seats, auth/session posture, and mail/notification
+ * throughput. It deliberately exposes NO tenant business data (payroll, leave,
+ * policies, onboarding, attendance, HR content); those stay private to each org.
+ *
+ * Every number is a cross-tenant aggregate computed with grouped queries.
  */
 @Injectable()
 export class AdminPlatformService {
   constructor(
     @InjectRepository(OrganizationEntity)
     private readonly orgs: Repository<OrganizationEntity>,
-    @InjectRepository(DepartmentEntity)
-    private readonly departments: Repository<DepartmentEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
-    @InjectRepository(PolicyEntity)
-    private readonly policies: Repository<PolicyEntity>,
-    @InjectRepository(AttendanceEntity)
-    private readonly attendance: Repository<AttendanceEntity>,
-    @InjectRepository(WfhRequestEntity)
-    private readonly wfh: Repository<WfhRequestEntity>,
-    @InjectRepository(MemberOnboardingEntity)
-    private readonly onboardings: Repository<MemberOnboardingEntity>,
     @InjectRepository(NotificationEntity)
     private readonly notifications: Repository<NotificationEntity>,
+    @InjectRepository(SessionEntity)
+    private readonly sessions: Repository<SessionEntity>,
+    @InjectRepository(EmailOutboxEntity)
+    private readonly emails: Repository<EmailOutboxEntity>,
   ) {}
 
-  /** COUNT(*) grouped by an org column → Map(orgId → count). */
-  private async countByOrg(
-    repo: Repository<any>,
-    where?: (qb: any) => void,
-  ): Promise<CountMap> {
-    const qb = repo
+  /** COUNT(*) on a repo where createdAt ≥ `since`. */
+  private countSince(repo: Repository<any>, since: Date): Promise<number> {
+    return repo.createQueryBuilder('e').where('e.createdAt >= :since', { since }).getCount();
+  }
+
+  /** Rows-per-day since `since` → Map(YYYY-MM-DD → count), for trend sparklines. */
+  private async dailyCounts(repo: Repository<any>, since: Date): Promise<Map<string, number>> {
+    const rows = await repo
       .createQueryBuilder('e')
-      .select('e.organizationId', 'orgId')
-      .addSelect('COUNT(*)', 'count')
-      .groupBy('e.organizationId');
-    if (where) where(qb);
-    const rows = await qb.getRawMany<{ orgId: string; count: string }>();
-    return new Map(rows.map((r) => [r.orgId, Number(r.count)]));
+      .select("to_char(date_trunc('day', e.created_at), 'YYYY-MM-DD')", 'd')
+      .addSelect('COUNT(*)', 'c')
+      .where('e.created_at >= :since', { since })
+      .groupBy("date_trunc('day', e.created_at)")
+      .getRawMany<{ d: string; c: string }>();
+    return new Map(rows.map((r) => [r.d, Number(r.c)]));
   }
 
   async getUsage() {
     const now = Date.now();
+    const nowDate = new Date(now);
+    const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0);
+
     const allOrgs = await this.orgs.find({ order: { createdAt: 'DESC' } });
 
-    // ── per-org counts (one grouped query each) ──────────────────────────────
-    const [
-      membersByOrg,
-      deptsByOrg,
-      policiesByOrg,
-      attendanceByOrg,
-      onboardingByOrg,
-    ] = await Promise.all([
-      this.countByOrg(this.memberships, (qb) => qb.andWhere("e.status = 'active'")),
-      this.countByOrg(this.departments),
-      this.countByOrg(this.policies, (qb) => qb.andWhere('e.isDeleted = false')),
-      this.countByOrg(this.attendance),
-      this.countByOrg(this.onboardings, (qb) => qb.andWhere('e.isDeleted = false')),
-    ]);
+    // ── seats per org (the one account-level usage number we surface) ──────────
+    const seatRows = await this.memberships
+      .createQueryBuilder('m')
+      .select('m.organizationId', 'orgId')
+      .addSelect('COUNT(*)', 'count')
+      .where("m.status = 'active'")
+      .groupBy('m.organizationId')
+      .getRawMany<{ orgId: string; count: string }>();
+    const seatsByOrg = new Map(seatRows.map((r) => [r.orgId, Number(r.count)]));
 
     const perOrg = allOrgs.map((o) => ({
       id: o.id,
@@ -85,15 +80,11 @@ export class AdminPlatformService {
       slug: o.slug,
       status: o.status,
       consented: !!o.consent,
-      members: membersByOrg.get(o.id) || 0,
-      departments: deptsByOrg.get(o.id) || 0,
-      policies: policiesByOrg.get(o.id) || 0,
-      attendanceRecords: attendanceByOrg.get(o.id) || 0,
-      onboardings: onboardingByOrg.get(o.id) || 0,
+      members: seatsByOrg.get(o.id) || 0, // active seats — a billing/account metric
       createdAt: o.createdAt,
     }));
 
-    // ── organizations ────────────────────────────────────────────────────────
+    // ── organizations (accounts) ───────────────────────────────────────────────
     const organizations = {
       total: allOrgs.length,
       active: allOrgs.filter((o) => o.status === 'active').length,
@@ -101,99 +92,151 @@ export class AdminPlatformService {
       consented: allOrgs.filter((o) => !!o.consent).length,
       newLast7: allOrgs.filter((o) => now - o.createdAt.getTime() <= 7 * DAY).length,
       newLast30: allOrgs.filter((o) => now - o.createdAt.getTime() <= 30 * DAY).length,
+      engaged: perOrg.filter((o) => o.members > 0).length,
     };
 
-    // ── users ────────────────────────────────────────────────────────────────
-    const [userTotal, userActive, platformAdmins] = await Promise.all([
-      this.users.count(),
-      this.users.count({ where: { isActive: true } }),
-      this.users.count({ where: { isPlatformAdmin: true } }),
+    // ── users + seats ──────────────────────────────────────────────────────────
+    const [userTotal, userActive, platformAdmins, membersTotal, membersActive] =
+      await Promise.all([
+        this.users.count(),
+        this.users.count({ where: { isActive: true } }),
+        this.users.count({ where: { isPlatformAdmin: true } }),
+        this.memberships.count(),
+        this.memberships.count({ where: { status: 'active' } }),
+      ]);
+
+    // ── communications (infrastructure throughput — no tenant content) ─────────
+    const emailStatusRows = await this.emails
+      .createQueryBuilder('e')
+      .select('e.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('e.status')
+      .getRawMany<{ status: string; count: string }>();
+    const emailBy = (s: string) => Number(emailStatusRows.find((r) => r.status === s)?.count || 0);
+    const emailsSent = emailBy('sent');
+    const emailsFailed = emailBy('failed');
+    const emailsQueued = emailBy('queued');
+    const emailsTotal = emailStatusRows.reduce((s, r) => s + Number(r.count), 0);
+    const emailsAttempted = emailsSent + emailsFailed; // 'queued' = outbox driver, not transmitted
+    const [emailsLast7, emailsLast30] = await Promise.all([
+      this.countSince(this.emails, new Date(now - 7 * DAY)),
+      this.countSince(this.emails, new Date(now - 30 * DAY)),
     ]);
 
-    // ── members (memberships) by role tier + status ──────────────────────────
-    const memberRoleRows = await this.memberships
-      .createQueryBuilder('m')
-      .select('m.role', 'role')
-      .addSelect('COUNT(*)', 'count')
-      .where("m.status = 'active'")
-      .groupBy('m.role')
-      .getRawMany<{ role: string; count: string }>();
-    const byRole = memberRoleRows
-      .map((r) => ({ role: r.role, count: Number(r.count) }))
-      .sort((a, b) => b.count - a.count);
-    const membersTotal = await this.memberships.count();
-    const membersActive = await this.memberships.count({ where: { status: 'active' } });
+    // Notifications: only the AGGREGATE volume (a throughput signal). We do NOT
+    // break down by category/type — that would leak which features tenants use.
+    const [notifTotal, notifUnread, notifLast7, notifLast30] = await Promise.all([
+      this.notifications.count(),
+      this.notifications.count({ where: { read: false, isDeleted: false } }),
+      this.countSince(this.notifications, new Date(now - 7 * DAY)),
+      this.countSince(this.notifications, new Date(now - 30 * DAY)),
+    ]);
 
-    // ── feature usage ─────────────────────────────────────────────────────────
-    const policyCatRows = await this.policies
-      .createQueryBuilder('p')
-      .select('p.category', 'category')
-      .addSelect('COUNT(*)', 'count')
-      .where('p.isDeleted = false')
-      .groupBy('p.category')
-      .getRawMany<{ category: string; count: string }>();
-
-    const onbStatusRows = await this.onboardings
-      .createQueryBuilder('o')
-      .select('o.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .where('o.isDeleted = false')
-      .groupBy('o.status')
-      .getRawMany<{ status: string; count: string }>();
-    const onbBy = (s: string) =>
-      Number(onbStatusRows.find((r) => r.status === s)?.count || 0);
-
-    const wfhStatusRows = await this.wfh
-      .createQueryBuilder('w')
-      .select('w.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .where('w.isDeleted = false')
-      .groupBy('w.status')
-      .getRawMany<{ status: string; count: string }>();
-    const wfhBy = (s: string) =>
-      Number(wfhStatusRows.find((r) => r.status === s)?.count || 0);
-
-    const features = {
-      policies: {
-        total: await this.policies.count({ where: { isDeleted: false } }),
-        active: await this.policies.count({ where: { isDeleted: false, isActive: true } }),
-        byCategory: policyCatRows
-          .map((r) => ({ category: r.category, count: Number(r.count) }))
-          .sort((a, b) => b.count - a.count),
-      },
-      attendance: {
-        records: await this.attendance.count(),
-        orgsUsing: attendanceByOrg.size,
-      },
-      onboarding: {
-        total: onbStatusRows.reduce((s, r) => s + Number(r.count), 0),
-        pending: onbBy('pending'),
-        inProgress: onbBy('in_progress'),
-        completed: onbBy('completed'),
+    const communications = {
+      emails: {
+        total: emailsTotal,
+        sent: emailsSent,
+        failed: emailsFailed,
+        queued: emailsQueued,
+        attempted: emailsAttempted,
+        deliveryRate: emailsAttempted ? Math.round((emailsSent / emailsAttempted) * 100) : null,
+        last7: emailsLast7,
+        last30: emailsLast30,
       },
       notifications: {
-        total: await this.notifications.count(),
-        unread: await this.notifications.count({ where: { read: false, isDeleted: false } }),
+        total: notifTotal,
+        unread: notifUnread,
+        read: notifTotal - notifUnread,
+        readRate: notifTotal ? Math.round(((notifTotal - notifUnread) / notifTotal) * 100) : 0,
+        last7: notifLast7,
+        last30: notifLast30,
       },
-      wfh: {
-        total: wfhStatusRows.reduce((s, r) => s + Number(r.count), 0),
-        pending: wfhBy('pending'),
-        approved: wfhBy('approved'),
-      },
-      departments: { total: await this.departments.count() },
     };
 
-    // Engagement: orgs that have any people/attendance/policy activity beyond seed.
-    const activeOrgs = perOrg.filter(
-      (o) => o.members > 0 || o.attendanceRecords > 0 || o.onboardings > 0,
-    ).length;
+    // ── security posture (MFA, verification, sessions, lockouts) ───────────────
+    const activeSessionQb = () =>
+      this.sessions
+        .createQueryBuilder('s')
+        .where('s.isRevoked = false')
+        .andWhere('s.expiresAt > :now', { now: nowDate });
+    const mfaMethodRows = await this.users
+      .createQueryBuilder('u')
+      .select('u.mfaMethod', 'method')
+      .addSelect('COUNT(*)', 'count')
+      .where('u.mfaEnabled = true')
+      .groupBy('u.mfaMethod')
+      .getRawMany<{ method: string | null; count: string }>();
+    const [mfaEnabled, emailVerified, everLoggedIn, lockedNow, activeSessions, sessionsTotal] =
+      await Promise.all([
+        this.users.count({ where: { mfaEnabled: true } }),
+        this.users.count({ where: { isEmailVerified: true } }),
+        this.users.createQueryBuilder('u').where('u.lastLogin IS NOT NULL').getCount(),
+        this.users.createQueryBuilder('u').where('u.lockUntil > :now', { now: nowDate }).getCount(),
+        activeSessionQb().getCount(),
+        this.sessions.count(),
+      ]);
+    const uniqueSessionRow = await activeSessionQb()
+      .select('COUNT(DISTINCT s.userId)', 'c')
+      .getRawOne<{ c: string }>();
+
+    const security = {
+      mfaEnabled,
+      mfaAdoption: pct(mfaEnabled, userActive),
+      mfaByMethod: mfaMethodRows
+        .map((r) => ({ method: r.method || 'unknown', count: Number(r.count) }))
+        .sort((a, b) => b.count - a.count),
+      emailVerified,
+      emailVerifiedPct: pct(emailVerified, userTotal),
+      everLoggedIn,
+      dormant: userTotal - everLoggedIn,
+      lockedNow,
+      sessions: {
+        active: activeSessions,
+        uniqueUsers: Number(uniqueSessionRow?.c || 0),
+        total: sessionsTotal,
+      },
+    };
+
+    // ── 30-day daily trends (platform activity — counts only, no tenant content) ─
+    const SERIES_DAYS = 30;
+    const startDay = new Date(now - (SERIES_DAYS - 1) * DAY);
+    startDay.setUTCHours(0, 0, 0, 0);
+    const days: string[] = [];
+    for (let i = 0; i < SERIES_DAYS; i++) {
+      days.push(new Date(startDay.getTime() + i * DAY).toISOString().slice(0, 10));
+    }
+    const [orgDaily, userDaily, emailDaily, notifDaily, sessDaily] = await Promise.all([
+      this.dailyCounts(this.orgs, startDay),
+      this.dailyCounts(this.users, startDay),
+      this.dailyCounts(this.emails, startDay),
+      this.dailyCounts(this.notifications, startDay),
+      this.dailyCounts(this.sessions, startDay),
+    ]);
+    const fill = (m: Map<string, number>) => days.map((d) => m.get(d) || 0);
+    const series = {
+      days,
+      signups: fill(orgDaily),
+      users: fill(userDaily),
+      emails: fill(emailDaily),
+      notifications: fill(notifDaily),
+      logins: fill(sessDaily),
+    };
 
     return {
       generatedAt: new Date(),
-      organizations: { ...organizations, engaged: activeOrgs },
-      users: { total: userTotal, active: userActive, platformAdmins },
-      members: { total: membersTotal, active: membersActive, byRole },
-      features,
+      organizations,
+      series,
+      users: {
+        total: userTotal,
+        active: userActive,
+        platformAdmins,
+        verified: emailVerified,
+        everLoggedIn,
+        dormant: userTotal - everLoggedIn,
+      },
+      members: { total: membersTotal, active: membersActive },
+      communications,
+      security,
       perOrg,
       recentOrgs: perOrg.slice(0, 6),
     };

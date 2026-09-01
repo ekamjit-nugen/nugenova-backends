@@ -7,12 +7,15 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Repository } from 'typeorm';
+import { In, MoreThan, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 
 import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { SessionEntity } from '../../auth/entities/session.entity';
+import { DepartmentEntity } from '../entities/department.entity';
+import { RoleEntity } from '../../auth/entities/role.entity';
 import { TermsService } from '../../terms/terms.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
@@ -75,6 +78,12 @@ export class OrganizationService {
     private readonly userRepo: Repository<UserEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly membershipRepo: Repository<OrgMembershipEntity>,
+    @InjectRepository(SessionEntity)
+    private readonly sessionRepo: Repository<SessionEntity>,
+    @InjectRepository(DepartmentEntity)
+    private readonly departmentRepo: Repository<DepartmentEntity>,
+    @InjectRepository(RoleEntity)
+    private readonly roleRepo: Repository<RoleEntity>,
     private readonly terms: TermsService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
@@ -317,6 +326,114 @@ export class OrganizationService {
 
   async get(id: string): Promise<OrgPublic> {
     return this.toPublic(await this.getEntity(id));
+  }
+
+  /**
+   * Platform-operator INSIGHTS for one org — account status, the owner contact,
+   * seat usage, the org's aggregate auth/security posture, and setup/activity.
+   * Same privacy boundary as the platform overview: NO tenant business data
+   * (payroll/leave/policies/attendance/HR content), only account-level signals.
+   */
+  async getInsights(id: string) {
+    const org = await this.getEntity(id);
+    const pub = this.toPublic(org);
+    const now = new Date();
+
+    const memberships = await this.membershipRepo.find({ where: { organizationId: id } });
+    const active = memberships.filter((m) => m.status === 'active');
+    const invited = memberships.filter((m) => m.status !== 'active');
+    const userIds = [...new Set(memberships.map((m) => m.userId).filter((x): x is string => !!x))];
+    const users = userIds.length ? await this.userRepo.find({ where: { id: In(userIds) } }) : [];
+    const byId = new Map(users.map((u) => [u.id, u]));
+
+    const mfaEnabled = users.filter((u) => u.mfaEnabled).length;
+    const verified = users.filter((u) => u.isEmailVerified).length;
+    const everLoggedIn = users.filter((u) => !!u.lastLogin).length;
+    const lastLoginAt = users.reduce<Date | null>(
+      (max, u) => (u.lastLogin && (!max || u.lastLogin > max) ? u.lastLogin : max),
+      null,
+    );
+    const activeSessions = userIds.length
+      ? await this.sessionRepo.count({
+          where: { userId: In(userIds), isRevoked: false, expiresAt: MoreThan(now) },
+        })
+      : 0;
+
+    const ownerMembership = active.find((m) => (m.role || '').toLowerCase() === 'owner') || active[0];
+    const ownerUser = ownerMembership?.userId ? byId.get(ownerMembership.userId) : undefined;
+    const owner = ownerUser
+      ? {
+          name: `${ownerUser.firstName ?? ''} ${ownerUser.lastName ?? ''}`.trim() || ownerUser.email,
+          email: ownerUser.email,
+          lastLogin: ownerUser.lastLogin ?? null,
+        }
+      : null;
+
+    const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0);
+    const seatBase = active.length || users.length;
+    const ageDays = Math.max(0, Math.floor((now.getTime() - org.createdAt.getTime()) / 86_400_000));
+
+    // Structure (org composition — counts + role mix, no HR content).
+    const [departments, roles] = await Promise.all([
+      this.departmentRepo.count({ where: { organizationId: id } }),
+      this.roleRepo.count({ where: { organizationId: id } }),
+    ]);
+    const roleMix = new Map<string, number>();
+    for (const m of active) {
+      const r = (m.role || 'member').toLowerCase();
+      roleMix.set(r, (roleMix.get(r) || 0) + 1);
+    }
+    const membersByRole = [...roleMix.entries()]
+      .map(([role, count]) => ({ role, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Profile — the owner's setup-wizard workspace config (safe, self-reported).
+    const s = (org.settings || {}) as Record<string, unknown>;
+    const str = (k: string) => (typeof s[k] === 'string' ? (s[k] as string) : null);
+    const profile = {
+      industry: str('industry'),
+      size: str('size'),
+      website: str('website'),
+      timezone: str('timezone'),
+      currency: str('currency'),
+      workModel: str('workModel'),
+    };
+
+    return {
+      organization: {
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        status: org.status,
+        lifecycle: pub.lifecycle,
+        createdAt: org.createdAt,
+        ageDays,
+      },
+      profile,
+      structure: { departments, roles, membersByRole },
+      setup: { onboardingStep: org.onboardingStep, onboardingCompleted: org.onboardingCompleted },
+      consent: {
+        accepted: pub.consentAccepted,
+        version: pub.consentVersion,
+        acceptedAt: pub.consentAcceptedAt,
+        currentVersion: pub.currentTermsVersion,
+        needsConsent: pub.needsConsent,
+      },
+      owner,
+      people: {
+        members: memberships.length,
+        active: active.length,
+        invited: invited.length,
+        mfaEnabled,
+        mfaAdoption: pct(mfaEnabled, seatBase),
+        verified,
+        verifiedPct: pct(verified, users.length),
+        everLoggedIn,
+        dormant: Math.max(0, users.length - everLoggedIn),
+        activeSessions,
+      },
+      activity: { lastLoginAt, createdAt: org.createdAt, ageDays },
+    };
   }
 
   // ── Consent (owner) ──────────────────────────────────────────────────────

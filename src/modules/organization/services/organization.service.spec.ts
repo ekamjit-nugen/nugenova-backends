@@ -6,6 +6,9 @@ import { OrganizationService } from './organization.service';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { SessionEntity } from '../../auth/entities/session.entity';
+import { DepartmentEntity } from '../entities/department.entity';
+import { RoleEntity } from '../../auth/entities/role.entity';
 import { TermsService } from '../../terms/terms.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { ConfigService } from '@nestjs/config';
@@ -47,6 +50,18 @@ describe('OrganizationService (unit, no DB)', () => {
         {
           provide: getRepositoryToken(OrgMembershipEntity),
           useValue: membershipRepo,
+        },
+        {
+          provide: getRepositoryToken(SessionEntity),
+          useValue: { ...passthrough(), count: jest.fn().mockResolvedValue(0) },
+        },
+        {
+          provide: getRepositoryToken(DepartmentEntity),
+          useValue: { ...passthrough(), count: jest.fn().mockResolvedValue(0) },
+        },
+        {
+          provide: getRepositoryToken(RoleEntity),
+          useValue: { ...passthrough(), count: jest.fn().mockResolvedValue(0) },
         },
         {
           provide: TermsService,

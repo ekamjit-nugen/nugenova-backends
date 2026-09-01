@@ -3,21 +3,20 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
-import { DepartmentEntity } from '../organization/entities/department.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
-import { PolicyEntity } from '../policy/entities/policy.entity';
-import { AttendanceEntity } from '../attendance/entities/attendance.entity';
-import { WfhRequestEntity } from '../attendance/entities/wfh-request.entity';
-import { MemberOnboardingEntity } from '../onboarding/entities/member-onboarding.entity';
 import { NotificationEntity } from '../notification/entities/notification.entity';
+import { SessionEntity } from '../auth/entities/session.entity';
+import { EmailOutboxEntity } from '../../bootstrap/mail/email-outbox.entity';
 
 import { AdminPlatformService } from './admin-platform.service';
 import { AdminPlatformController } from './admin-platform.controller';
 
 /**
- * Admin platform — the super admin's cross-tenant usage overview. Registers
- * (read-only) every entity it aggregates; AuthModule supplies the JWT +
+ * Admin platform — the super admin's cross-tenant PLATFORM operations overview.
+ * Registers (read-only) only the account/security/infra entities it aggregates —
+ * deliberately NOT tenant business entities (payroll/leave/policy/attendance/…),
+ * which stay private to each organization. AuthModule supplies the JWT +
  * platform-admin guards.
  */
 @Module({
@@ -25,14 +24,11 @@ import { AdminPlatformController } from './admin-platform.controller';
     AuthModule,
     TypeOrmModule.forFeature([
       OrganizationEntity,
-      DepartmentEntity,
       UserEntity,
       OrgMembershipEntity,
-      PolicyEntity,
-      AttendanceEntity,
-      WfhRequestEntity,
-      MemberOnboardingEntity,
       NotificationEntity,
+      SessionEntity,
+      EmailOutboxEntity,
     ]),
   ],
   controllers: [AdminPlatformController],

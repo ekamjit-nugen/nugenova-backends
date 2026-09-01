@@ -43,6 +43,13 @@ export class AdminOrganizationController {
     return { success: true, data };
   }
 
+  /** Account/security/setup insights for one org (no tenant business data). */
+  @Get(':id/insights')
+  async insights(@Param('id') id: string) {
+    const data = await this.orgService.getInsights(id);
+    return { success: true, data };
+  }
+
   /** Manually halt an org (conditions not met) — its owner is fully blocked. */
   @Post(':id/halt')
   @HttpCode(HttpStatus.OK)
