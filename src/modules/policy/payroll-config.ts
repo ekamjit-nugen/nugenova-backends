@@ -44,6 +44,7 @@ export interface PayrollConfigInput {
   customDeductions?: CustomDeductionInput[];
   lopFromAttendance?: boolean;
   tds?: { enabled?: boolean; regime?: string };
+  employer?: { tan?: string | null; pan?: string | null };
 }
 
 /**
@@ -62,7 +63,14 @@ export function defaultPayrollConfig(): PayrollStatutoryConfig {
     customDeductions: [],
     lopFromAttendance: false,
     tds: { enabled: false, regime: 'new' },
+    employer: { tan: null, pan: null },
   };
+}
+
+/** Upper-case + trim an identifier; keep only A–Z/0–9; null when empty. */
+function cleanId(v: unknown, maxLen: number): string | null {
+  const s = String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, maxLen);
+  return s || null;
 }
 
 const ALL_STATE_OPTIONS = INDIAN_STATES.map((s) => ({ value: s.code, label: s.name }));
@@ -168,6 +176,10 @@ export function resolvePayrollConfig(
     tds: {
       enabled: bool(s.tds?.enabled, d.tds.enabled),
       regime: s.tds?.regime === 'old' ? 'old' : 'new',
+    },
+    employer: {
+      tan: cleanId(s.employer?.tan, 10),
+      pan: cleanId(s.employer?.pan, 10),
     },
   };
 }

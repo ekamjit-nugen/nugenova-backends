@@ -43,13 +43,13 @@ defineFeature(feature, (test) => {
       .api()
       .put(`${API}/payroll/salary/${member.userId}`)
       .set('Authorization', `Bearer ${o.ownerToken}`)
-      .send({ monthlySalary: MONTHLY, effectiveFrom: '2026-01-01' })
+      .send({ monthlySalary: MONTHLY, effectiveFrom: '2026-01-01', statutoryIds: { pan: 'ABCDE1234F' } })
       .expect(200);
     await h
       .api()
       .put(`${API}/policies/payroll-config`)
       .set('Authorization', `Bearer ${o.ownerToken}`)
-      .send({ tds: { enabled: true, regime: 'new' } })
+      .send({ tds: { enabled: true, regime: 'new' }, employer: { tan: 'DELA12345B', pan: 'AAACO1234P' } })
       .expect(200);
     for (const month of [9, 12]) {
       await h
@@ -85,6 +85,10 @@ defineFeature(feature, (test) => {
       expect(f16.grossSalary).toBe(MONTHLY * 2);
       expect(f16.tdsDeducted).toBeGreaterThan(0);
       expect(f16.employee.email).toBe(member.email);
+      // Statutory IDs flow through: employer TAN/PAN + employee PAN.
+      expect(f16.employer.tan).toBe('DELA12345B');
+      expect(f16.employer.pan).toBe('AAACO1234P');
+      expect(f16.employee.pan).toBe('ABCDE1234F');
     });
     and('the quarterly TDS adds up to the total deducted', () => {
       const q = f16.quarterlyTds;

@@ -28,6 +28,12 @@ export class TaxInputsDto {
   @IsOptional() @IsNumber() @Min(0) @Max(100000000) otherExemptions?: number;
 }
 
+export class StatutoryIdsDto {
+  @IsOptional() @IsString() @MaxLength(16) pan?: string | null;
+  @IsOptional() @IsString() @MaxLength(20) uan?: string | null;
+  @IsOptional() @IsString() @MaxLength(24) esicNumber?: string | null;
+}
+
 export class RecurringDeductionDto {
   @IsString() @MaxLength(20) code: string;
   @IsString() @MaxLength(60) name: string;
@@ -62,6 +68,12 @@ export class SetSalaryDto {
   @ValidateNested()
   @Type(() => TaxInputsDto)
   taxInputs?: TaxInputsDto;
+
+  /** Statutory identifiers (PAN / UAN / ESIC) for registers & Form 16. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StatutoryIdsDto)
+  statutoryIds?: StatutoryIdsDto;
 
   @IsOptional()
   @IsString()

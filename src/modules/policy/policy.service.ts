@@ -574,6 +574,7 @@ export class PolicyService {
       lopFromAttendance:
         input.lopFromAttendance !== undefined ? input.lopFromAttendance : current.lopFromAttendance,
       tds: { ...current.tds, ...(input.tds || {}) },
+      employer: { ...current.employer, ...(input.employer || {}) },
     };
     const clean = sanitizePayrollConfig(merged);
     let policy = await this.findPayrollPolicy(orgId);

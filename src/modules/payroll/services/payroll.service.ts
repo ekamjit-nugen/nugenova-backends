@@ -89,6 +89,10 @@ export class PayrollService {
     );
     const recurringDeductions = this.normalizeRecurring(dto.recurringDeductions);
     const taxInputs = this.normalizeTaxInputs(dto.taxInputs);
+    // Statutory IDs are sticky: keep the prior ones unless this save sends new ones.
+    const statutoryIds = dto.statutoryIds
+      ? this.normalizeStatutoryIds(dto.statutoryIds)
+      : prior?.statutoryIds || {};
     const saved = await this.salaries.save(
       this.salaries.create({
         organizationId: orgId,
@@ -99,6 +103,7 @@ export class PayrollService {
         components,
         recurringDeductions,
         taxInputs,
+        statutoryIds,
         effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
         supersedes: prior?.id ?? null,
         createdBy: actorId,
@@ -160,6 +165,15 @@ export class PayrollService {
     return out;
   }
 
+  /** Clean statutory IDs — upper-case alphanumerics, empty ⇒ omitted. */
+  private normalizeStatutoryIds(input: { pan?: string | null; uan?: string | null; esicNumber?: string | null }) {
+    const clean = (v: unknown, max: number) => {
+      const s = String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, max);
+      return s || null;
+    };
+    return { pan: clean(input.pan, 10), uan: clean(input.uan, 12), esicNumber: clean(input.esicNumber, 17) };
+  }
+
   /** The Basic component amount that drives PF (else the whole salary is Basic). */
   private basicOf(salary: SalaryStructureEntity): number {
     const comps = salary.components || [];
@@ -210,6 +224,11 @@ export class PayrollService {
         ...(r.total != null ? { total: Number(r.total) } : {}),
       })),
       taxInputs: s.taxInputs || {},
+      statutoryIds: {
+        pan: s.statutoryIds?.pan ?? null,
+        uan: s.statutoryIds?.uan ?? null,
+        esicNumber: s.statutoryIds?.esicNumber ?? null,
+      },
       effectiveFrom: s.effectiveFrom,
     };
   }
@@ -803,12 +822,17 @@ export class PayrollService {
       where: { organizationId: orgId, isDeleted: false, status: 'final', month, year },
       order: { createdAt: 'ASC' },
     });
-    const returnRows: ReturnRow[] = rows.map((p) => this.toReturnRow(p));
+    // Overlay each employee's statutory IDs (PAN/UAN/ESIC) from their active salary.
+    const salaries = await this.salaries.find({
+      where: { organizationId: orgId, isActive: true, isDeleted: false },
+    });
+    const idsByUser = new Map(salaries.map((s) => [s.userId, s.statutoryIds || {}]));
+    const returnRows: ReturnRow[] = rows.map((p) => this.toReturnRow(p, idsByUser.get(p.userId)));
     return buildReturn(type, returnRows, month, year);
   }
 
   /** Flatten one payslip to the register row shape (money read straight off the slip). */
-  private toReturnRow(p: PayslipEntity): ReturnRow {
+  private toReturnRow(p: PayslipEntity, ids?: { pan?: string | null; uan?: string | null; esicNumber?: string | null }): ReturnRow {
     const s = p.statutory;
     const basic = (p.earnings || []).find((e) => e.code === 'BASIC')?.amount
       ?? (p.earnings || [])[0]?.amount
@@ -824,9 +848,9 @@ export class PayrollService {
     return {
       name: snap?.name || 'Employee',
       email: snap?.email || '',
-      pan: null,
-      uan: null,
-      esicNumber: null,
+      pan: ids?.pan ?? null,
+      uan: ids?.uan ?? null,
+      esicNumber: ids?.esicNumber ?? null,
       pfNumber: null,
       workingDays: Number(p.lopDetails?.workingDays || 0),
       payableDays: Number(p.lopDetails?.payableDays || 0),
@@ -905,15 +929,15 @@ export class PayrollService {
       declarationVerified: !!verified,
       employer: {
         name: org?.name || null,
-        // TAN/PAN aren't captured in Nexora yet — filled in on the portal.
-        tan: null,
-        pan: null,
+        tan: cfg.employer?.tan || null,
+        pan: cfg.employer?.pan || null,
       },
       employee: {
         userId,
         name: name.name,
         email: name.email,
-        pan: null,
+        pan: salary?.statutoryIds?.pan || null,
+        uan: salary?.statutoryIds?.uan || null,
         department: last?.employeeSnapshot?.department || null,
         designation: last?.employeeSnapshot?.designation || null,
       },

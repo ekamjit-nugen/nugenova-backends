@@ -46,7 +46,7 @@ defineFeature(feature, (test) => {
       .api()
       .put(`${API}/payroll/salary/${member.userId}`)
       .set('Authorization', `Bearer ${o.ownerToken}`)
-      .send({ monthlySalary: 30000, effectiveFrom: '2026-01-01' })
+      .send({ monthlySalary: 30000, effectiveFrom: '2026-01-01', statutoryIds: { uan: '100200300400' } })
       .expect(200);
     await h
       .api()
@@ -94,6 +94,8 @@ defineFeature(feature, (test) => {
       expect(pf.filename).toBe('pf-ecr-register-2026-09.csv');
       expect(pf.content).toContain('EPS contribution (ER)');
       expect(pf.content).toContain('EPF contribution (ER)');
+      // The employee's UAN (from their salary's statutory IDs) fills the UAN column.
+      expect(pf.content).toContain('100200300400');
       // Basic 30000 → PF wage capped 15000 → employer 1800 = EPS 1250 + EPF 550.
       expect(pf.content).toContain('1250');
       expect(pf.content).toContain('550');
