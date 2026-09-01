@@ -24,6 +24,7 @@ import { resolveLop, computeSimplePayslip, rupeesInWords } from '../payroll-calc
 import { computeStatutory, PayrollStatutoryConfig } from '../statutory';
 import { computeMonthlyTds, regimeSpec } from '../tds';
 import { buildReturn, ReturnFile, ReturnRow, ReturnKind } from '../payroll-returns';
+import { TaxDeclarationService } from './tax-declaration.service';
 import { TaxInputs } from '../entities/salary-structure.entity';
 import { SetSalaryDto, GeneratePayslipsDto } from '../dto';
 
@@ -51,6 +52,7 @@ export class PayrollService {
     private readonly leave: LeaveService,
     private readonly policy: PolicyService,
     private readonly notifier: NotifierService,
+    private readonly taxDeclarations: TaxDeclarationService,
   ) {}
 
   // ── salary structures ───────────────────────────────────────────────────────
@@ -397,10 +399,15 @@ export class PayrollService {
     let tdsDetail: import('../entities/payslip.entity').PayslipTds | Record<string, never> = {};
     let tdsMonthly = 0;
     if (cfg.tds.enabled) {
-      const regime: 'new' | 'old' = salary.taxInputs?.regime === 'old' ? 'old' : salary.taxInputs?.regime === 'new' ? 'new' : cfg.tds.regime;
+      // A VERIFIED investment declaration for this FY wins over the manager-set
+      // inputs on the salary structure (self-service → HR-verified → applied here).
+      const fyStart = this.fyStartYear(month, year);
+      const verified = await this.taxDeclarations.resolvedFor(orgId, salary.userId, fyStart);
+      const taxSource: TaxInputs = verified ?? salary.taxInputs ?? {};
+      const regime: 'new' | 'old' = taxSource.regime === 'old' ? 'old' : taxSource.regime === 'new' ? 'new' : cfg.tds.regime;
       const spec = regimeSpec(regime);
       const annualGross = comp.grossEarnings * 12; // simple projection from the current month
-      const exemptions = regime === 'old' ? this.oldRegimeExemptions(salary.taxInputs) : 0;
+      const exemptions = regime === 'old' ? this.oldRegimeExemptions(taxSource) : 0;
       const annualTaxable = Math.max(0, annualGross - spec.standardDeduction - exemptions);
       const tdsPaidYtd = fyRows.reduce((s, p) => s + this.lineAmount(p, 'TDS'), 0);
       const { annualTax, monthly } = computeMonthlyTds({ annualTaxable, regime, month, tdsPaidYtd });

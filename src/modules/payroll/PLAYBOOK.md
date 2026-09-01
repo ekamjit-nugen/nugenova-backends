@@ -101,8 +101,28 @@ exports, not upload-ready government files. `GET /payroll/returns/types` +
 `GET /payroll/returns?type&month&year` (payroll:view) return `{filename, mimeType,
 content, rowCount}`; the FE downloads it as a Blob from a "Registers & returns"
 panel. Tests: `payroll-returns.spec` (11) + `payroll-returns.feature` e2e (register
-+ EPS/EPF split, @security employee-forbidden). Deferred: investment-declaration
-self-service + proofs, Form 16, PF-number/UAN/PAN capture for upload-ready files.
++ EPS/EPF split, @security employee-forbidden).
+
+### Investment declarations (self-service + verify)
+
+Employees self-declare old-regime investments for a financial year, payroll/HR
+verifies, and the **verified** figures drive that employee's TDS. `tax_declarations`
+(one row per org+user+FY-start) holds regime + the six declared lines (80C≤1.5L /
+80D / 80E / 24b≤2L / HRA / other) + **proofs** (references to `/media` files) +
+a `draft → submitted → verified|rejected` workflow. Migration
+`TaxDeclaration1787940000000`. Surface `/payroll/tax-declarations`: `GET/PUT /me`
++ `POST /me/submit` (self-service, any member — edit locked once submitted, a
+reject reopens to draft), `GET /` + `POST /:id/review` (payroll:view/edit — the
+manager queue). Review enforces **separation of duties** (reviewer ≠ declarant,
+owner exempt) and notifies (submit → managers; verify/reject → the employee). In
+`buildAndSavePayslip`, the TDS block calls `TaxDeclarationService.resolvedFor(org,
+user, fyStart)` — a verified declaration **wins over** the manager-set
+`salary.taxInputs`; no verified declaration falls back to those inputs. FE:
+`/payroll/declarations` (self-service form + proof upload via `uploadMedia` +
+manager review queue), linked from the payroll header. Tests: `tax-declaration.
+feature` e2e (3): declare→verify→TDS-applies, @security employee-can't-review,
+unverified-doesn't-change-TDS. Deferred: Form 16, PF-number/UAN/PAN capture for
+upload-ready ECR/24Q files.
 
 ## LOP model (cleaner than legacy)
 

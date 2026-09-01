@@ -93,3 +93,29 @@ export class PayslipQueryDto {
   @Max(2100)
   year?: number;
 }
+
+// ── investment declarations (Phase C) ──────────────────────────────────────────
+
+export class TaxProofDto {
+  @IsString() @MaxLength(24) fileId: string;
+  @IsString() @MaxLength(200) name: string;
+  @IsInt() @Min(0) size: number;
+  @IsString() @MaxLength(40) section: string;
+}
+
+export class SaveTaxDeclarationDto {
+  @IsIn(['new', 'old']) regime: 'new' | 'old';
+  @IsOptional() @IsInt() @Min(0) @Max(100000000) section80C?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100000000) section80D?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100000000) section80E?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100000000) homeLoanInterest?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100000000) hraExemptionAnnual?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100000000) otherExemptions?: number;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => TaxProofDto)
+  proofs?: TaxProofDto[];
+}
+
+export class ReviewTaxDeclarationDto {
+  @IsIn(['verify', 'reject']) action: 'verify' | 'reject';
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+}

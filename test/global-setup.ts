@@ -42,6 +42,7 @@ import { PayrollStatutory1787900000000 } from '../src/bootstrap/database/migrati
 import { PayrollRecurringDeductions1787910000000 } from '../src/bootstrap/database/migrations/1787910000000-PayrollRecurringDeductions';
 import { PayrollRun1787920000000 } from '../src/bootstrap/database/migrations/1787920000000-PayrollRun';
 import { PayrollTds1787930000000 } from '../src/bootstrap/database/migrations/1787930000000-PayrollTds';
+import { TaxDeclaration1787940000000 } from '../src/bootstrap/database/migrations/1787940000000-TaxDeclaration';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -54,6 +55,7 @@ import { NotificationPreferenceEntity } from '../src/modules/notification/entiti
 import { SalaryStructureEntity } from '../src/modules/payroll/entities/salary-structure.entity';
 import { PayslipEntity } from '../src/modules/payroll/entities/payslip.entity';
 import { PayrollRunEntity } from '../src/modules/payroll/entities/payroll-run.entity';
+import { TaxDeclarationEntity } from '../src/modules/payroll/entities/tax-declaration.entity';
 import { LeaveRequestEntity } from '../src/modules/leave/entities/leave-request.entity';
 import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.entity';
 
@@ -113,6 +115,7 @@ module.exports = async function globalSetup(): Promise<void> {
       SalaryStructureEntity,
       PayslipEntity,
       PayrollRunEntity,
+      TaxDeclarationEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -143,6 +146,7 @@ module.exports = async function globalSetup(): Promise<void> {
       PayrollRecurringDeductions1787910000000,
       PayrollRun1787920000000,
       PayrollTds1787930000000,
+      TaxDeclaration1787940000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
