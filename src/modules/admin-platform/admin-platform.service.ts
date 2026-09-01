@@ -45,6 +45,18 @@ export class AdminPlatformService {
     return repo.createQueryBuilder('e').where('e.createdAt >= :since', { since }).getCount();
   }
 
+  /** Rows-per-day since `since` → Map(YYYY-MM-DD → count), for trend sparklines. */
+  private async dailyCounts(repo: Repository<any>, since: Date): Promise<Map<string, number>> {
+    const rows = await repo
+      .createQueryBuilder('e')
+      .select("to_char(date_trunc('day', e.created_at), 'YYYY-MM-DD')", 'd')
+      .addSelect('COUNT(*)', 'c')
+      .where('e.created_at >= :since', { since })
+      .groupBy("date_trunc('day', e.created_at)")
+      .getRawMany<{ d: string; c: string }>();
+    return new Map(rows.map((r) => [r.d, Number(r.c)]));
+  }
+
   async getUsage() {
     const now = Date.now();
     const nowDate = new Date(now);
@@ -185,9 +197,35 @@ export class AdminPlatformService {
       },
     };
 
+    // ── 30-day daily trends (platform activity — counts only, no tenant content) ─
+    const SERIES_DAYS = 30;
+    const startDay = new Date(now - (SERIES_DAYS - 1) * DAY);
+    startDay.setUTCHours(0, 0, 0, 0);
+    const days: string[] = [];
+    for (let i = 0; i < SERIES_DAYS; i++) {
+      days.push(new Date(startDay.getTime() + i * DAY).toISOString().slice(0, 10));
+    }
+    const [orgDaily, userDaily, emailDaily, notifDaily, sessDaily] = await Promise.all([
+      this.dailyCounts(this.orgs, startDay),
+      this.dailyCounts(this.users, startDay),
+      this.dailyCounts(this.emails, startDay),
+      this.dailyCounts(this.notifications, startDay),
+      this.dailyCounts(this.sessions, startDay),
+    ]);
+    const fill = (m: Map<string, number>) => days.map((d) => m.get(d) || 0);
+    const series = {
+      days,
+      signups: fill(orgDaily),
+      users: fill(userDaily),
+      emails: fill(emailDaily),
+      notifications: fill(notifDaily),
+      logins: fill(sessDaily),
+    };
+
     return {
       generatedAt: new Date(),
       organizations,
+      series,
       users: {
         total: userTotal,
         active: userActive,

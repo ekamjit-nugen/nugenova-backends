@@ -49,6 +49,11 @@ defineFeature(feature, (test) => {
       expect(typeof d.security.mfaAdoption).toBe('number');
       expect(typeof d.security.emailVerified).toBe('number');
       expect(typeof d.security.sessions.active).toBe('number');
+      // 30-day trend series for the charts
+      expect(Array.isArray(d.series.days)).toBe(true);
+      expect(d.series.days).toHaveLength(30);
+      expect(d.series.signups).toHaveLength(30);
+      expect(d.series.emails).toHaveLength(30);
     });
     and('it exposes no tenant business data', () => {
       const d = res.body.data;
