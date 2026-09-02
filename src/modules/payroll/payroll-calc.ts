@@ -25,8 +25,11 @@ export interface LopInput {
   halfDays: number;
   /** Approved PAID leave days in the period (casual/sick/earned/…). */
   paidLeaveDays: number;
-  /** Approved LOP-type leave days in the period. */
+  /** Approved LOP-type leave days in the period (INCLUDES over-allowance excess). */
   lopLeaveDays: number;
+  /** Of `lopLeaveDays`, the portion that is paid-type leave taken BEYOND policy
+   *  (display only — already counted inside `lopLeaveDays`). */
+  excessLeaveDays?: number;
   /**
    * Whether unaccounted working days should be docked as absence (LOP). Default
    * true. Set false for orgs that don't run attendance-based payroll — then only
@@ -42,6 +45,8 @@ export interface LopResult {
   halfDays: number;
   paidLeaveDays: number;
   lopLeaveDays: number;
+  /** Paid-type leave taken beyond the policy allowance (subset of lopLeaveDays). */
+  excessLeaveDays: number;
   /** Working days with no attendance/leave to explain them → unpaid. */
   absentDays: number;
   /** Total loss-of-pay days (absent + lop-leave + ½·half), capped at workingDays. */
@@ -77,6 +82,7 @@ export function resolveLop(input: LopInput): LopResult {
     halfDays,
     paidLeaveDays,
     lopLeaveDays,
+    excessLeaveDays: Math.max(0, round2(input.excessLeaveDays ?? 0)),
     absentDays,
     lopDays,
   };

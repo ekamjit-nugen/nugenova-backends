@@ -321,6 +321,7 @@ export class PayrollService {
       halfDays: att.halfDays,
       paidLeaveDays: lv.paidLeaveDays,
       lopLeaveDays: lv.lopLeaveDays,
+      excessLeaveDays: lv.excessLeaveDays,
       // Only dock unaccounted days when the org runs attendance-based payroll.
       dockUnaccounted: cfg.lopFromAttendance,
     });
@@ -477,6 +478,7 @@ export class PayrollService {
       halfDays: lop.halfDays,
       paidLeaveDays: lop.paidLeaveDays,
       lopLeaveDays: lop.lopLeaveDays,
+      excessLeaveDays: lop.excessLeaveDays,
       absentDays: lop.absentDays,
       lopDays: lop.lopDays,
       payableDays: comp.payableDays,

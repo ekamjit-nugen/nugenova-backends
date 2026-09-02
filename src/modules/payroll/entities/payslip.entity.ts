@@ -8,6 +8,8 @@ export interface PayslipLopDetails {
   halfDays: number;
   paidLeaveDays: number;
   lopLeaveDays: number;
+  /** Paid-type leave taken beyond policy (subset of lopLeaveDays). */
+  excessLeaveDays?: number;
   absentDays: number;
   lopDays: number;
   payableDays: number;
