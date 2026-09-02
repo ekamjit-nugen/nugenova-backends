@@ -11,6 +11,7 @@ import {
 } from '../../organization/features/support/org-harness';
 import { AttendanceEntity } from '../entities/attendance.entity';
 import { HolidayEntity } from '../entities/holiday.entity';
+import { dayAnchorUtc, DEFAULT_TZ } from '../util/tz-day.util';
 
 const feature = loadFeature('./attendance.feature', { loadRelativePath: true });
 
@@ -305,6 +306,270 @@ defineFeature(feature, (test) => {
     });
     then('the request is rejected as forbidden', () => {
       expect(res.status).toBe(403);
+    });
+  });
+
+  test('the activity feed includes manual entries and can be filtered by person and date', ({
+    given,
+    when,
+    and,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    const DATE = '2026-08-20';
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when('the employee files a manual entry for a past day', async () => {
+      await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z`, reason: 'Forgot to clock in' })
+        .expect(201);
+    });
+    let feed: any[];
+    and('the owner opens the activity feed for that date range', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=timeline&startDate=2026-08-01&endDate=2026-08-31`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      feed = res.body.data;
+    });
+    then('the manual entry appears in the feed with its approval state', () => {
+      // A manual entry has no workSegments — it must still surface via the fallback.
+      const evt = feed.find((e) => e.employeeId === employee.userId && e.type === 'clock_in');
+      expect(evt).toBeTruthy();
+      expect(evt.entryType).toBe('manual');
+      expect(evt.approvalStatus).toBe('pending');
+    });
+    and('filtering the feed by a different person returns nothing', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=timeline&startDate=2026-08-01&endDate=2026-08-31&employeeId=000000000000000000000099`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      expect(res.body.data.length).toBe(0);
+    });
+  });
+
+  test('the daily activity view returns one consolidated row per day', ({ given, when, and, then }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    const DATE = '2026-08-21';
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when('the employee files a manual entry for a past day', async () => {
+      await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z`, reason: 'Forgot to clock in' })
+        .expect(201);
+    });
+    let rows: any[];
+    and('the owner opens the daily activity view for that date range', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=daily&startDate=2026-08-01&endDate=2026-08-31`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      rows = res.body.data;
+    });
+    then('there is a single row for that day with its clock-in and hours', () => {
+      const mine = rows.filter((r) => r.employeeId === employee.userId);
+      expect(mine.length).toBe(1); // one consolidated row, not two events
+      expect(mine[0].firstIn).toBeTruthy();
+      expect(mine[0].lastOut).toBeTruthy();
+      expect(mine[0].missedCheckout).toBe(false);
+      expect(Number(mine[0].effectiveHours)).toBeGreaterThan(0);
+    });
+  });
+
+  test('the single-day activity view lists members who never clocked in', ({ given, when, then }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    let rows: any[];
+    const DAY = '2026-08-12'; // a Wednesday, no records
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when('the owner opens the daily activity view for a single day with no records', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=daily&startDate=${DAY}&endDate=${DAY}`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      rows = res.body.data;
+    });
+    then('the employee appears on that day as not clocked in', () => {
+      const emp = rows.find((r) => r.employeeId === employee.userId);
+      expect(emp).toBeTruthy(); // present even though there's no attendance record
+      expect(emp.status).toBe('not_clocked_in');
+      expect(emp.sessions.length).toBe(0);
+      // The whole roster is present (the owner too), not just record-holders.
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  test('a clock-in is rejected when the day already has attendance covering that time', ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    let res: request.Response;
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    and('the employee already has a session recorded until later today', async () => {
+      const now = Date.now();
+      const anchor = dayAnchorUtc(new Date(now), DEFAULT_TZ);
+      const inAt = new Date(now - 60 * 60 * 1000); // 1h ago
+      const outAt = new Date(now + 3 * 60 * 60 * 1000); // 3h from now (future)
+      await attendance.save(
+        attendance.create({
+          organizationId: org.orgId,
+          employeeId: employee.userId,
+          date: anchor,
+          checkInTime: inAt,
+          checkOutTime: outAt,
+          status: 'present',
+          entryType: 'system',
+          workSegments: [{ checkInTime: inAt.toISOString(), checkOutTime: outAt.toISOString() }] as any,
+        }),
+      );
+    });
+    when('the employee tries to clock in now', async () => {
+      res = await h
+        .api()
+        .post(`${API}/attendance/check-in`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({});
+    });
+    then('the clock-in is rejected as a conflict', () => {
+      expect(res.status).toBe(409);
+      expect(String(res.body.message)).toMatch(/already have attendance recorded/i);
+    });
+  });
+
+  test('a manual entry and a clock-in on the same day fold into one daily card', ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    const DATE = '2026-08-19';
+    let rows: any[];
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    and('the employee has both a manual entry and a separate record on the same past day', async () => {
+      await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T07:30:00.000Z`, reason: 'Morning' })
+        .expect(201);
+      // A second (system) record for the same day — the partial unique index only
+      // covers system rows, so a manual + system pair can co-exist.
+      await attendance.save(
+        attendance.create({
+          organizationId: org.orgId,
+          employeeId: employee.userId,
+          date: new Date(`${DATE}T00:00:00.000Z`),
+          checkInTime: new Date(`${DATE}T09:00:00.000Z`),
+          checkOutTime: new Date(`${DATE}T12:30:00.000Z`),
+          status: 'present',
+          entryType: 'system',
+          workSegments: [{ checkInTime: `${DATE}T09:00:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z` }] as any,
+        }),
+      );
+    });
+    when('the owner opens the daily activity view for that date range', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=daily&startDate=2026-08-01&endDate=2026-08-31`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      rows = res.body.data.filter((r: any) => r.employeeId === employee.userId);
+    });
+    then('that day shows as a single consolidated row', () => {
+      expect(rows.length).toBe(1); // merged, not two cards
+      expect(rows[0].sessions.length).toBe(2); // both sessions kept for the bar
+    });
+  });
+
+  test('the owner sees the attendance setup status with the holiday gap flagged', ({ given, when, then }) => {
+    let org: CreatedOrg;
+    let body: any;
+
+    given('an organization with an employee', async () => {
+      ({ org } = await orgWithEmployee());
+    });
+    when('the owner reads the attendance setup status', async () => {
+      const res = await h.api().get(`${API}/attendance/setup-status`).set('Authorization', `Bearer ${org.ownerToken}`).expect(200);
+      body = res.body.data;
+    });
+    then('it reports the work schedule and flags that no holidays are configured', () => {
+      const byKey = Object.fromEntries((body.items as any[]).map((i) => [i.key, i]));
+      expect(byKey.schedule.status).toBe('ok');
+      expect(byKey.schedule.value).toMatch(/\d{2}:\d{2}/);
+      expect(byKey.holidays.status).toBe('attention');
+      expect(body.attentionCount).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  test('a plain employee cannot read the attendance setup status', ({ given, when, then }) => {
+    let employee: { token: string };
+    let status = 0;
+
+    given('an organization with an employee', async () => {
+      ({ employee } = await orgWithEmployee());
+    });
+    when('the employee requests the attendance setup status', async () => {
+      const res = await h.api().get(`${API}/attendance/setup-status`).set('Authorization', `Bearer ${employee.token}`);
+      status = res.status;
+    });
+    then('the request is forbidden', () => {
+      expect(status).toBe(403);
+    });
+  });
+
+  test('the daily roster lists every active member, not only those with a record', ({ given, when, then, and }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    let rows: any[];
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when("the owner reads today's roster", async () => {
+      const res = await h.api().get(`${API}/attendance/roster`).set('Authorization', `Bearer ${org.ownerToken}`).expect(200);
+      rows = res.body.data.rows;
+    });
+    then('both the owner and the employee appear on it', () => {
+      // The record list would show neither (no attendance yet); the roster shows all.
+      expect(rows.some((r) => r.userId === employee.userId)).toBe(true);
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+    });
+    and('the employee shows as not clocked in while the owner is not tracked', () => {
+      const emp = rows.find((r) => r.userId === employee.userId);
+      const owner = rows.find((r) => r.role === 'owner');
+      expect(emp.status).toBe('not_clocked_in');
+      expect(owner?.status).toBe('not_tracked');
     });
   });
 

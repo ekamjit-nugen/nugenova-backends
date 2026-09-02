@@ -135,15 +135,31 @@ export class AttendanceController {
   @Get('attendance/activity')
   @RequirePermission('attendance', 'view')
   async activity(
-    @Query() q: AttendanceQueryDto & { view?: 'timeline' | 'grouped' },
+    @Query() q: AttendanceQueryDto & { view?: 'timeline' | 'grouped' | 'daily' },
     @Req() req: any,
   ) {
+    const view = q.view === 'grouped' ? 'grouped' : q.view === 'daily' ? 'daily' : 'timeline';
     const data = await this.attendance.getActivityFeed(this.caller(req), {
-      view: q.view === 'grouped' ? 'grouped' : 'timeline',
+      view,
       startDate: q.startDate,
       endDate: q.endDate,
+      employeeId: q.employeeId,
     });
     return { success: true, ...data };
+  }
+
+  @Get('attendance/setup-status')
+  @RequirePermission('attendance', 'view')
+  async setupStatus(@Req() req: any) {
+    const data = await this.attendance.getSetupStatus(this.caller(req));
+    return { success: true, data };
+  }
+
+  @Get('attendance/roster')
+  @RequirePermission('attendance', 'view')
+  async roster(@Query('date') date: string, @Req() req: any) {
+    const data = await this.attendance.getDailyRoster(this.caller(req), date || undefined);
+    return { success: true, data };
   }
 
   @Get('attendance/pending-approvals')

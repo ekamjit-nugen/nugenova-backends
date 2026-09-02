@@ -492,6 +492,31 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('editing a salary keeps its effective date (no silent re-proration)', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization with an employee whose salary is effective from 2026-01-01', async () => {
+      ({ o, member } = await orgWithMember());
+      await setSalary(o, member.userId, 44000).expect(200); // effectiveFrom 2026-01-01
+    });
+    when('the owner edits the salary without giving an effective date', async () => {
+      await h
+        .api()
+        .put(`${API}/payroll/salary/${member.userId}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ monthlySalary: 44000, bankAccount: { accountNumber: '123456789012', ifsc: 'HDFC0001234' } })
+        .expect(200);
+    });
+    then("the salary's effective date is unchanged", async () => {
+      const res = await h
+        .api()
+        .get(`${API}/payroll/salary/${member.userId}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .expect(200);
+      expect(res.body.data.effectiveFrom.slice(0, 10)).toBe('2026-01-01');
+    });
+  });
+
   test('leave taken beyond the policy allowance is docked as loss of pay', ({ given, when, then }) => {
     let o: CreatedOrg;
     let member: Member;

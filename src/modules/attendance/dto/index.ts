@@ -156,6 +156,10 @@ export class AttendanceQueryDto {
   @IsOptional()
   @IsString()
   departmentId?: string;
+
+  @IsOptional()
+  @IsString()
+  employeeId?: string;
 }
 
 export class StatsQueryDto {

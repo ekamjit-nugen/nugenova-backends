@@ -77,6 +77,11 @@ Feature: Payroll (simple monthly payslips)
     When the owner generates payslips for that month
     Then the payslip withholds TDS and reports year-to-date figures
 
+  Scenario: editing a salary keeps its effective date (no silent re-proration)
+    Given an organization with an employee whose salary is effective from 2026-01-01
+    When the owner edits the salary without giving an effective date
+    Then the salary's effective date is unchanged
+
   Scenario: leave taken beyond the policy allowance is docked as loss of pay
     Given an organization where an employee took a full month of paid leave but the allowance is only 5 days
     When the owner generates payslips for that month

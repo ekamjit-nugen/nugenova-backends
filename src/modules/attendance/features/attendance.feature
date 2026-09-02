@@ -59,6 +59,53 @@ Feature: Attendance — clocking, scope, and tenant isolation
     When the employee submits a manual entry for another user id
     Then the request is rejected as forbidden
 
+  Scenario: the activity feed includes manual entries and can be filtered by person and date
+    Given an organization with an employee
+    When the employee files a manual entry for a past day
+    And the owner opens the activity feed for that date range
+    Then the manual entry appears in the feed with its approval state
+    And filtering the feed by a different person returns nothing
+
+  Scenario: the daily activity view returns one consolidated row per day
+    Given an organization with an employee
+    When the employee files a manual entry for a past day
+    And the owner opens the daily activity view for that date range
+    Then there is a single row for that day with its clock-in and hours
+
+  Scenario: a clock-in is rejected when the day already has attendance covering that time
+    Given an organization with an employee
+    And the employee already has a session recorded until later today
+    When the employee tries to clock in now
+    Then the clock-in is rejected as a conflict
+
+  Scenario: a manual entry and a clock-in on the same day fold into one daily card
+    Given an organization with an employee
+    And the employee has both a manual entry and a separate record on the same past day
+    When the owner opens the daily activity view for that date range
+    Then that day shows as a single consolidated row
+
+  Scenario: the single-day activity view lists members who never clocked in
+    Given an organization with an employee
+    When the owner opens the daily activity view for a single day with no records
+    Then the employee appears on that day as not clocked in
+
+  Scenario: the owner sees the attendance setup status with the holiday gap flagged
+    Given an organization with an employee
+    When the owner reads the attendance setup status
+    Then it reports the work schedule and flags that no holidays are configured
+
+  @security
+  Scenario: a plain employee cannot read the attendance setup status
+    Given an organization with an employee
+    When the employee requests the attendance setup status
+    Then the request is forbidden
+
+  Scenario: the daily roster lists every active member, not only those with a record
+    Given an organization with an employee
+    When the owner reads today's roster
+    Then both the owner and the employee appear on it
+    And the employee shows as not clocked in while the owner is not tracked
+
   Scenario: holidays are readable by all members but only writable by admins
     Given an organization with an employee
     When the owner adds a holiday

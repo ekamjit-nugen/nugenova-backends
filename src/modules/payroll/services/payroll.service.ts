@@ -109,7 +109,12 @@ export class PayrollService {
         taxInputs,
         statutoryIds,
         bankAccount,
-        effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
+        // Sticky: an explicit date wins; otherwise keep the prior salary's
+        // effective date so a later edit (bank/tax details) never silently
+        // re-prorates the month. Only a brand-new salary starts "now".
+        effectiveFrom: dto.effectiveFrom
+          ? new Date(dto.effectiveFrom)
+          : prior?.effectiveFrom ?? new Date(),
         supersedes: prior?.id ?? null,
         createdBy: actorId,
         isActive: true,

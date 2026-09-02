@@ -45,6 +45,7 @@ import { PayrollTds1787930000000 } from '../src/bootstrap/database/migrations/17
 import { TaxDeclaration1787940000000 } from '../src/bootstrap/database/migrations/1787940000000-TaxDeclaration';
 import { StatutoryIds1787950000000 } from '../src/bootstrap/database/migrations/1787950000000-StatutoryIds';
 import { BankAccount1787960000000 } from '../src/bootstrap/database/migrations/1787960000000-BankAccount';
+import { Timesheets1787970000000 } from '../src/bootstrap/database/migrations/1787970000000-Timesheets';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -60,6 +61,7 @@ import { PayrollRunEntity } from '../src/modules/payroll/entities/payroll-run.en
 import { TaxDeclarationEntity } from '../src/modules/payroll/entities/tax-declaration.entity';
 import { LeaveRequestEntity } from '../src/modules/leave/entities/leave-request.entity';
 import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.entity';
+import { TimesheetEntity } from '../src/modules/timesheet/entities/timesheet.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -114,6 +116,7 @@ module.exports = async function globalSetup(): Promise<void> {
       NotificationPreferenceEntity,
       LeaveRequestEntity,
       LeaveBalanceEntity,
+      TimesheetEntity,
       SalaryStructureEntity,
       PayslipEntity,
       PayrollRunEntity,
@@ -151,6 +154,7 @@ module.exports = async function globalSetup(): Promise<void> {
       TaxDeclaration1787940000000,
       StatutoryIds1787950000000,
       BankAccount1787960000000,
+      Timesheets1787970000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

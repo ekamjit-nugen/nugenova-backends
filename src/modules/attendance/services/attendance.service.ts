@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 
 import {
   AttendanceEntity,
@@ -18,11 +18,14 @@ import {
 import { HolidayEntity } from '../entities/holiday.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
+import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
 import { PolicyService } from '../../policy/policy.service';
 import { WfhRequestService } from './wfh-request.service';
 import {
   WorkLocationConfig,
   WfhConfig,
+  PolicyEntity,
+  TIMING_CATEGORIES,
 } from '../../policy/entities/policy.entity';
 import {
   DEFAULT_TZ,
@@ -115,6 +118,8 @@ export class AttendanceService {
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    @InjectRepository(LeaveRequestEntity)
+    private readonly leaves: Repository<LeaveRequestEntity>,
     private readonly policyService: PolicyService,
     private readonly wfhRequests: WfhRequestService,
   ) {}
@@ -433,7 +438,11 @@ export class AttendanceService {
       },
       order: { date: 'ASC' },
     });
-    return rows.find((r) => r.entryType !== 'manual') || null;
+    // Prefer a live clock (`system`) record to append to, but fall back to ANY
+    // record for the day — including an approved manual entry — so a clock-in
+    // never creates a SECOND row for a date that already has attendance. (The
+    // overlap guard in checkIn then rejects a clock-in inside that day's hours.)
+    return rows.find((r) => r.entryType !== 'manual') || rows[0] || null;
   }
 
   async checkIn(c: Caller, dto: CheckInDto): Promise<AttendanceEntity> {
@@ -468,9 +477,41 @@ export class AttendanceService {
           'You are already clocked in. Please clock out first.',
         );
       }
+      // A new session must start AFTER every earlier session that day ended — you
+      // can't clock in for a time already covered by a completed session (e.g. a
+      // 09:00–18:00 day already recorded, then a 16:06 clock-in).
+      const priorOuts = [
+        ...(record.workSegments || []).map((s) => (s.checkOutTime ? new Date(s.checkOutTime).getTime() : 0)),
+        record.checkOutTime ? new Date(record.checkOutTime).getTime() : 0,
+      ];
+      const latestOut = Math.max(0, ...priorOuts);
+      if (latestOut && now.getTime() <= latestOut) {
+        const until = new Date(latestOut).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: this.orgTimezone(),
+        });
+        throw new ConflictException(
+          `You already have attendance recorded until ${until} today — you can't clock in for an earlier time.`,
+        );
+      }
+      // A manual/imported entry keeps its window in the top-level check-in/out
+      // (no segments) — materialise it as a segment so appending a live session
+      // doesn't drop its hours on the next recompute.
+      const existingSegments =
+        record.workSegments && record.workSegments.length
+          ? record.workSegments
+          : record.checkInTime
+            ? [
+                {
+                  checkInTime: new Date(record.checkInTime).toISOString(),
+                  checkOutTime: record.checkOutTime ? new Date(record.checkOutTime).toISOString() : null,
+                },
+              ]
+            : [];
       // Reopen the existing day record with a fresh session segment.
       record.workSegments = [
-        ...(record.workSegments || []),
+        ...existingSegments,
         {
           checkInTime: now.toISOString(),
           checkOutTime: null,
@@ -571,6 +612,27 @@ export class AttendanceService {
     return saved;
   }
 
+  /**
+   * Auto-close a session that was left open past the end of the day. Closes the
+   * open segment (and top-level checkout) at `closeAt`, stamps the record as an
+   * auto/missed checkout, recomputes worked hours + status, and saves. Used by
+   * the missed-checkout reconcile cron — never by an interactive request.
+   */
+  async autoCloseStaleSession(record: AttendanceEntity, closeAt: Date): Promise<AttendanceEntity> {
+    const segments = (record.workSegments || []).map((s) => ({ ...s }));
+    const openSeg = segments.find((s) => !s.checkOutTime);
+    if (openSeg) {
+      openSeg.checkOutTime = closeAt.toISOString();
+      record.workSegments = segments;
+    }
+    record.checkOutTime = closeAt;
+    record.missedCheckout = true;
+    record.autoCheckedOut = true;
+    record.missedCheckoutAt = new Date();
+    await this.recomputeWorkedFields(record);
+    return this.repo.save(record);
+  }
+
   // ── read: today / my ────────────────────────────────────────────────────────
 
   async getTodayStatus(c: Caller) {
@@ -625,7 +687,8 @@ export class AttendanceService {
       where.date = Between(new Date(startDate), new Date(endDate));
     }
     const rows = await this.repo.find({ where, order: { date: 'DESC' } });
-    return this.attachEmployeeNames(rows);
+    const named = await this.attachEmployeeNames(rows);
+    return this.attachPolicyWindow(c.orgId, named);
   }
 
   // ── read: org-wide list + stats ─────────────────────────────────────────────
@@ -649,13 +712,10 @@ export class AttendanceService {
     });
     rows = await this.filterByDepartment(rows, c.orgId, q.departmentId);
     const named = await this.attachEmployeeNames(rows);
-    if (q.search) {
-      const needle = q.search.toLowerCase();
-      return named.filter((r: any) =>
-        (r.employeeName || '').toLowerCase().includes(needle),
-      );
-    }
-    return named;
+    const filtered = q.search
+      ? named.filter((r: any) => (r.employeeName || '').toLowerCase().includes(q.search!.toLowerCase()))
+      : named;
+    return this.attachPolicyWindow(c.orgId, filtered);
   }
 
   async getStats(c: Caller, startDate?: string, endDate?: string, scopeToSelf = false) {
@@ -757,6 +817,89 @@ export class AttendanceService {
       workingDays += 1;
     }
     return { workingDays, presentDays, halfDays };
+  }
+
+  /**
+   * Worked hours per calendar day (YYYY-MM-DD → hours) from the employee's
+   * attendance records in a range. Used to pre-fill timesheets. Prefers the
+   * effective working hours, falling back to total, else 0.
+   */
+  async hoursByDay(orgId: string, userId: string, start: Date, end: Date): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (end.getTime() < start.getTime()) return out;
+    const rows = await this.repo.find({
+      where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
+    });
+    for (const r of rows) {
+      // A manual entry is worked time only once it's approved — a pending or
+      // rejected backfill must not inflate the timesheet. Real clock-ins carry
+      // no approvalStatus (null) and always count.
+      if (this.isUnapprovedManual(r)) continue;
+      const key = r.date.toISOString().slice(0, 10);
+      const hours = r.effectiveWorkingHours ?? r.totalWorkingHours ?? 0;
+      out.set(key, Math.round((Number(hours) || 0) * 100) / 100);
+    }
+    return out;
+  }
+
+  /** A manual/backfilled entry that hasn't been approved yet (pending or rejected). */
+  private isUnapprovedManual(r: AttendanceEntity): boolean {
+    return r.approvalStatus === 'pending' || r.approvalStatus === 'rejected';
+  }
+
+  /**
+   * The raw clock trail per calendar day in a range — the actual check-in/out
+   * segments behind a timesheet, so an approver can see the underlying logs.
+   */
+  async logsByDay(
+    orgId: string,
+    userId: string,
+    start: Date,
+    end: Date,
+  ): Promise<
+    Array<{
+      date: string;
+      segments: Array<{ in: string | null; out: string | null }>;
+      firstIn: string | null;
+      lastOut: string | null;
+      clockedHours: number;
+      approvalStatus: 'pending' | 'approved' | 'rejected' | null;
+      entryType: string;
+      // Whether this day is counted toward the timesheet (an approved manual
+      // entry or an ordinary clock-in) — false for a pending/rejected backfill.
+      counted: boolean;
+    }>
+  > {
+    if (end.getTime() < start.getTime()) return [];
+    // Every day is returned — including days still pending approval — so the
+    // approver can see which logs are approved and which are not. Only the
+    // `counted` flag (and hoursByDay) reflect what actually reaches the total.
+    const rows = await this.repo.find({
+      where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
+      order: { date: 'ASC' },
+    });
+    return rows.map((r) => {
+      let segs = (r.workSegments || []).map((s) => ({
+        in: s.checkInTime ? new Date(s.checkInTime).toISOString() : null,
+        out: s.checkOutTime ? new Date(s.checkOutTime).toISOString() : null,
+      }));
+      const firstIn = r.checkInTime ? new Date(r.checkInTime).toISOString() : segs[0]?.in ?? null;
+      const lastOut = r.checkOutTime ? new Date(r.checkOutTime).toISOString() : segs[segs.length - 1]?.out ?? null;
+      // Manual/imported entries have no per-session segments — synthesise one
+      // from the record's own check-in/out so the trail is never blank.
+      if (segs.length === 0 && (firstIn || lastOut)) segs = [{ in: firstIn, out: lastOut }];
+      const hours = r.effectiveWorkingHours ?? r.totalWorkingHours ?? 0;
+      return {
+        date: r.date.toISOString().slice(0, 10),
+        segments: segs,
+        firstIn,
+        lastOut,
+        clockedHours: Math.round((Number(hours) || 0) * 100) / 100,
+        approvalStatus: (r.approvalStatus as 'pending' | 'approved' | 'rejected' | null) ?? null,
+        entryType: r.entryType,
+        counted: !this.isUnapprovedManual(r),
+      };
+    });
   }
 
   // ── manual entry + approval ─────────────────────────────────────────────────
@@ -955,6 +1098,238 @@ export class AttendanceService {
 
   // ── holidays ────────────────────────────────────────────────────────────────
 
+  /**
+   * A one-shot health check of the org's attendance configuration — what's set
+   * up and what still needs a decision — so managers see, on the attendance page
+   * itself, whether they must go configure something. Each item carries a status
+   * (ok / attention / info) and where to go fix it.
+   */
+  async getSetupStatus(c: Caller): Promise<{
+    items: Array<{
+      key: string;
+      label: string;
+      status: 'ok' | 'attention' | 'info';
+      value: string;
+      hint: string;
+      actionLabel: string;
+      actionUrl: string;
+    }>;
+    okCount: number;
+    attentionCount: number;
+  }> {
+    const orgId = c.orgId;
+    const policies: PolicyEntity[] = await this.policyService.list(orgId).catch(() => []);
+    const hasCoords = (o: any) => Number.isFinite(o?.latitude) && Number.isFinite(o?.longitude) && (o.latitude !== 0 || o.longitude !== 0);
+
+    // Work schedule (always resolves — the default is seeded per org).
+    const timingPolicy = policies.find(
+      (p) => TIMING_CATEGORIES.includes(p.category) && p.applicableTo === 'all' && p.workTiming?.startTime,
+    );
+    const wt = timingPolicy?.workTiming || DEFAULT_WORK_TIMING;
+    let hasCustomTiming = false;
+    try {
+      hasCustomTiming = !!(await this.policyService.getOwnerSummary(orgId))?.hasCustomPolicy;
+    } catch {
+      /* ignore */
+    }
+
+    // Geo-fence: only truly enforced when office mode + at least one geocoded office.
+    const officePolicy = policies.find(
+      (p) => p.workLocation?.mode === 'office' && (p.workLocation.offices || []).some(hasCoords),
+    );
+    const officeCount = officePolicy ? (officePolicy.workLocation!.offices || []).filter(hasCoords).length : 0;
+
+    // WFH policy (a configured allowance / allowed days).
+    const wfhPolicy = policies.find(
+      (p) => p.wfhConfig && ((p.wfhConfig.maxDaysPerMonth || 0) > 0 || (p.wfhConfig.allowedDays || []).length > 0),
+    );
+
+    const year = new Date().getFullYear();
+    const holidayCount = await this.holidays.count({ where: { organizationId: orgId, isDeleted: false, year } });
+
+    const timesheet = await this.policyService.getTimesheetConfig(orgId).catch(() => null);
+    const payroll = await this.policyService.getPayrollConfig(orgId).catch(() => null);
+
+    const items = [
+      {
+        key: 'schedule',
+        label: 'Work schedule',
+        status: 'ok' as const,
+        value: `${wt.startTime}–${wt.endTime} · ${wt.graceMinutes ?? 15}m grace`,
+        hint: hasCustomTiming ? 'A custom work-timing policy is set.' : 'Using the default 9-to-6 schedule — customise it if your hours differ.',
+        actionLabel: 'Work timing',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'geofence',
+        label: 'Location tracking',
+        status: 'info' as const,
+        value: officePolicy ? `Geo-fenced · ${officeCount} office${officeCount === 1 ? '' : 's'}` : 'Clock-in from anywhere',
+        hint: officePolicy
+          ? `Clock-in requires being within ${officePolicy.workLocation!.geoFenceRadiusKm ?? 2}km of an office.`
+          : 'No office geo-fence — add offices in a policy to require on-site clock-in.',
+        actionLabel: 'Work location',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'wfh',
+        label: 'Work from home',
+        status: 'info' as const,
+        value: wfhPolicy ? `Up to ${wfhPolicy.wfhConfig!.maxDaysPerMonth || '∞'} days/mo` : 'Not configured',
+        hint: wfhPolicy ? 'A WFH allowance is defined.' : 'No WFH allowance set — employees can still raise WFH requests.',
+        actionLabel: 'WFH policy',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'holidays',
+        label: `Holidays (${year})`,
+        status: (holidayCount === 0 ? 'attention' : 'ok') as 'ok' | 'attention',
+        value: holidayCount === 0 ? 'None added' : `${holidayCount} holiday${holidayCount === 1 ? '' : 's'}`,
+        hint: holidayCount === 0 ? `No holidays for ${year} — days off will count as working days.` : 'Holiday calendar is set for this year.',
+        actionLabel: 'Add holidays',
+        actionUrl: '/attendance',
+      },
+      {
+        key: 'timesheet',
+        label: 'Timesheets',
+        status: 'info' as const,
+        value: timesheet?.enabled ? `Required · ${timesheet.cadence}` : 'Off',
+        hint: timesheet?.enabled ? 'Employees submit timesheets for approval.' : 'Employees do not submit timesheets.',
+        actionLabel: 'Timesheet policy',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'payroll',
+        label: 'Attendance → pay',
+        status: 'info' as const,
+        value: payroll?.lopFromAttendance ? 'Absences dock pay' : 'No pay impact',
+        hint: payroll?.lopFromAttendance
+          ? 'Unaccounted/absent days are deducted as loss-of-pay in payroll.'
+          : 'Attendance does not affect payroll — turn on in Payroll setup to dock absences.',
+        actionLabel: 'Payroll setup',
+        actionUrl: '/payroll/setup',
+      },
+    ];
+
+    return {
+      items,
+      okCount: items.filter((i) => i.status === 'ok').length,
+      attentionCount: items.filter((i) => i.status === 'attention').length,
+    };
+  }
+
+  /**
+   * The daily attendance ROSTER — every active member and their status for one
+   * day, so a manager sees the WHOLE team, not just those who happened to clock
+   * in (the record list hides the rest). Status is the record's status when one
+   * exists, else derived: on approved leave, org holiday, week-off, or simply
+   * not-clocked-in. Department-scoped leads see only their team.
+   */
+  async getDailyRoster(
+    c: Caller,
+    dateStr?: string,
+  ): Promise<{
+    date: string;
+    rows: Array<{
+      userId: string;
+      name: string;
+      email: string | null;
+      role: string;
+      status: string;
+      checkInTime: string | null;
+      checkOutTime: string | null;
+      totalHours: number | null;
+      isLateArrival: boolean;
+      lateByMinutes: number;
+      missedCheckout: boolean;
+    }>;
+    summary: { total: number; clockedIn: number; notClockedIn: number; onLeave: number; absent: number };
+  }> {
+    const tz = this.orgTimezone();
+    const ref = dateStr ? new Date(dateStr) : new Date();
+    const { start, end, anchor } = dayBoundsUtc(ref, tz, 0);
+    const dayKey = anchor.toISOString().slice(0, 10);
+    const weekend = anchor.getUTCDay() === 0 || anchor.getUTCDay() === 6;
+
+    // Active roster (department-narrowed for a scoped lead).
+    const scope = await this.departmentScopeIds(c);
+    const members = (await this.memberships.find({ where: { organizationId: c.orgId, status: 'active' } }))
+      .filter((m) => m.userId && (!scope || scope.has(m.userId)));
+    const ids = members.map((m) => m.userId as string);
+    if (!ids.length) {
+      return { date: dayKey, rows: [], summary: { total: 0, clockedIn: 0, notClockedIn: 0, onLeave: 0, absent: 0 } };
+    }
+
+    const [users, records, holidayCount, leaveRows] = await Promise.all([
+      this.users.find({ where: { id: In(ids) } }),
+      this.repo.find({ where: { organizationId: c.orgId, employeeId: In(ids), date: Between(start, end), isDeleted: false } }),
+      this.holidays.count({ where: { organizationId: c.orgId, isDeleted: false, date: Between(start, end) } }),
+      this.leaves.find({
+        where: { organizationId: c.orgId, userId: In(ids), status: 'approved', startDate: LessThanOrEqual(end), endDate: MoreThanOrEqual(start) },
+      }),
+    ]);
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const recByEmp = new Map(records.map((r) => [r.employeeId, r]));
+    const onLeave = new Set(leaveRows.map((l) => l.userId));
+    const isHoliday = holidayCount > 0;
+
+    let clockedIn = 0;
+    let notClockedIn = 0;
+    let onLeaveCount = 0;
+    let absentCount = 0;
+
+    const rows = members.map((m) => {
+      const uid = m.userId as string;
+      const u = userById.get(uid);
+      const name = `${u?.firstName ?? ''} ${u?.lastName ?? ''}`.trim() || u?.email || 'Member';
+      const rec = recByEmp.get(uid);
+      let status: string;
+      let checkInTime: string | null = null;
+      let checkOutTime: string | null = null;
+      let totalHours: number | null = null;
+      let isLateArrival = false;
+      let lateByMinutes = 0;
+      let missedCheckout = false;
+
+      if (rec) {
+        status = rec.status;
+        checkInTime = rec.checkInTime ? new Date(rec.checkInTime).toISOString() : null;
+        checkOutTime = rec.checkOutTime ? new Date(rec.checkOutTime).toISOString() : null;
+        totalHours = rec.totalWorkingHours ?? null;
+        isLateArrival = !!rec.isLateArrival;
+        lateByMinutes = rec.lateByMinutes || 0;
+        missedCheckout = !!rec.missedCheckout;
+        if (rec.status === 'absent') absentCount++;
+        else clockedIn++;
+      } else if (onLeave.has(uid)) {
+        status = 'leave';
+        onLeaveCount++;
+      } else if (['owner', 'admin', 'super_admin'].includes((m.role || '').toLowerCase())) {
+        // The employer/admins don't clock in — not a gap.
+        status = 'not_tracked';
+      } else if (isHoliday) {
+        status = 'holiday';
+      } else if (weekend) {
+        status = 'weekoff';
+      } else {
+        status = 'not_clocked_in';
+        notClockedIn++;
+      }
+
+      return { userId: uid, name, email: u?.email ?? null, role: m.role, status, checkInTime, checkOutTime, totalHours, isLateArrival, lateByMinutes, missedCheckout };
+    });
+
+    // Clocked-in first, then not-clocked-in, then the rest; by name within.
+    const rank = (s: string) => (['present', 'late', 'half_day', 'wfh'].includes(s) ? 0 : s === 'not_clocked_in' ? 1 : 2);
+    rows.sort((a, b) => rank(a.status) - rank(b.status) || a.name.localeCompare(b.name));
+
+    return {
+      date: dayKey,
+      rows,
+      summary: { total: rows.length, clockedIn, notClockedIn, onLeave: onLeaveCount, absent: absentCount },
+    };
+  }
+
   async listHolidays(c: Caller, year?: number): Promise<HolidayEntity[]> {
     const where: any = { organizationId: c.orgId, isDeleted: false };
     if (year) where.year = year;
@@ -996,7 +1371,12 @@ export class AttendanceService {
 
   async getActivityFeed(
     c: Caller,
-    opts: { view?: 'timeline' | 'grouped'; startDate?: string; endDate?: string },
+    opts: {
+      view?: 'timeline' | 'grouped' | 'daily';
+      startDate?: string;
+      endDate?: string;
+      employeeId?: string;
+    },
   ) {
     const where: any = { organizationId: c.orgId, isDeleted: false };
     if (opts.startDate && opts.endDate) {
@@ -1010,39 +1390,46 @@ export class AttendanceService {
       const { start, end } = this.getTodayDateRange();
       where.date = Between(start, end);
     }
+    // Department-scoped roles are narrowed to their team; a person filter narrows
+    // further (and must stay inside the caller's scope).
     const scope = await this.departmentScopeIds(c);
     if (scope) where.employeeId = In([...scope]);
+    if (opts.employeeId && (!scope || scope.has(opts.employeeId))) {
+      where.employeeId = opts.employeeId;
+    }
     const rows = await this.attachEmployeeNames(
       await this.repo.find({ where, order: { date: 'DESC' }, take: MAX_LIST_ROWS }),
     );
 
+    // The clock sessions behind a record: real clock-ins carry per-session
+    // `workSegments`; a manual/imported entry has none, so fall back to its own
+    // top-level check-in/out. Without this fallback every manual entry — a large
+    // share of a backfilled month — would vanish from the activity feed.
+    const sessionsOf = (r: any): Array<{ checkInTime: string; checkOutTime?: string | null }> => {
+      if (r.workSegments && r.workSegments.length) return r.workSegments;
+      if (r.checkInTime) return [{ checkInTime: r.checkInTime, checkOutTime: r.checkOutTime ?? null }];
+      return [];
+    };
+
     const events: any[] = [];
     for (const r of rows as any[]) {
-      for (const seg of r.workSegments || []) {
+      const meta = { entryType: r.entryType, approvalStatus: r.approvalStatus ?? null, status: r.status };
+      for (const seg of sessionsOf(r)) {
         events.push({
-          employeeId: r.employeeId,
-          employeeName: r.employeeName,
-          type: 'clock_in',
-          at: seg.checkInTime,
-          date: r.date,
+          employeeId: r.employeeId, employeeName: r.employeeName,
+          type: 'clock_in', at: seg.checkInTime, date: r.date, ...meta,
         });
         if (seg.checkOutTime) {
           events.push({
-            employeeId: r.employeeId,
-            employeeName: r.employeeName,
-            type: 'clock_out',
-            at: seg.checkOutTime,
-            date: r.date,
+            employeeId: r.employeeId, employeeName: r.employeeName,
+            type: 'clock_out', at: seg.checkOutTime, date: r.date, ...meta,
           });
         }
       }
       if (r.status === 'absent') {
         events.push({
-          employeeId: r.employeeId,
-          employeeName: r.employeeName,
-          type: 'absent',
-          at: r.date,
-          date: r.date,
+          employeeId: r.employeeId, employeeName: r.employeeName,
+          type: 'absent', at: r.date, date: r.date, ...meta,
         });
       }
     }
@@ -1051,16 +1438,184 @@ export class AttendanceService {
     if (opts.view === 'grouped') {
       const byPerson = new Map<string, any>();
       for (const r of rows as any[]) {
-        byPerson.set(r.employeeId, {
-          employeeId: r.employeeId,
-          employeeName: r.employeeName,
-          status: r.status,
-          totalHours: r.totalWorkingHours || 0,
-          sessions: r.workSegments || [],
-        });
+        const g = byPerson.get(r.employeeId) || {
+          employeeId: r.employeeId, employeeName: r.employeeName,
+          status: r.status, totalHours: 0, days: 0, sessions: [] as any[],
+        };
+        g.totalHours = Math.round((g.totalHours + (Number(r.totalWorkingHours) || 0)) * 100) / 100;
+        g.days += 1;
+        g.sessions.push(...sessionsOf(r));
+        byPerson.set(r.employeeId, g);
       }
       return { view: 'grouped', data: [...byPerson.values()] };
     }
+
+    if (opts.view === 'daily') {
+      // ONE consolidated card per employee per day. A day may span several
+      // records (e.g. an approved manual entry plus a live clock-in) or several
+      // sessions in one record — all fold into a single row whose sessions the
+      // UI draws as bar segments from clock-in to clock-out.
+      const byDay = new Map<string, any>();
+      for (const r of rows as any[]) {
+        const sessions = sessionsOf(r).map((s) => ({
+          in: s.checkInTime ? new Date(s.checkInTime).toISOString() : null,
+          out: s.checkOutTime ? new Date(s.checkOutTime).toISOString() : null,
+        }));
+        const dateKey = new Date(r.date).toISOString().slice(0, 10);
+        const key = `${r.employeeId}|${dateKey}`;
+        const prev = byDay.get(key);
+        const merged = prev || {
+          employeeId: r.employeeId,
+          employeeName: r.employeeName,
+          date: r.date,
+          sessions: [] as Array<{ in: string | null; out: string | null }>,
+          totalHours: 0,
+          effectiveHours: 0,
+          status: r.status,
+          isLateArrival: false,
+          lateByMinutes: 0,
+          missedCheckout: false,
+          autoCheckedOut: false,
+          approvalStatus: null as string | null,
+          entryType: r.entryType,
+          _hoursOfMain: -1,
+        };
+        merged.sessions.push(...sessions);
+        merged.totalHours += Number(r.totalWorkingHours) || 0;
+        merged.effectiveHours += Number(r.effectiveWorkingHours) || 0;
+        merged.isLateArrival = merged.isLateArrival || !!r.isLateArrival;
+        merged.lateByMinutes = Math.max(merged.lateByMinutes, r.lateByMinutes || 0);
+        merged.missedCheckout = merged.missedCheckout || !!r.missedCheckout;
+        merged.autoCheckedOut = merged.autoCheckedOut || !!r.autoCheckedOut;
+        if (r.approvalStatus === 'pending') merged.approvalStatus = 'pending';
+        else if (!merged.approvalStatus) merged.approvalStatus = r.approvalStatus ?? null;
+        // Headline status comes from the record with the most worked hours
+        // (the substantive session), so a 0-hour stub doesn't override a full day.
+        const hrs = Number(r.effectiveWorkingHours) || 0;
+        if (hrs > merged._hoursOfMain) { merged.status = r.status; merged._hoursOfMain = hrs; }
+        if (r.entryType !== 'manual') merged.entryType = r.entryType;
+        byDay.set(key, merged);
+      }
+      // The bar scales to each employee's work-timing policy (e.g. 09:00–18:00) —
+      // resolve it once per person so a late clock-in reads correctly against the
+      // policy start, not a fixed clock face.
+      const hhmmToMin = (s?: string | null): number | null => {
+        if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return null;
+        const [h, mm] = s.split(':').map(Number);
+        return h * 60 + mm;
+      };
+      const uniqueEmployees = [...new Set([...byDay.values()].map((m) => m.employeeId))];
+      const windowByEmp = new Map<string, { startMin: number; endMin: number }>();
+      await Promise.all(
+        uniqueEmployees.map(async (uid) => {
+          let startMin = 540; // 09:00 fallback (DEFAULT_WORK_TIMING)
+          let endMin = 1080; // 18:00
+          try {
+            const { wt } = await this.resolveContext(uid, c.orgId);
+            const s = hhmmToMin(wt.startTime);
+            const e = hhmmToMin(wt.endTime);
+            if (s !== null) startMin = s;
+            if (e !== null && e > s!) endMin = e;
+          } catch {
+            /* fall back to default window */
+          }
+          windowByEmp.set(uid, { startMin, endMin });
+        }),
+      );
+
+      const days = [...byDay.values()].map((m) => {
+        m.sessions.sort((a: any, b: any) => (a.in || '').localeCompare(b.in || ''));
+        const firstIn = m.sessions.find((s: any) => s.in)?.in ?? null;
+        const outs = m.sessions.filter((s: any) => s.out).map((s: any) => s.out);
+        const openSession = m.sessions.some((s: any) => s.in && !s.out);
+        const lastOut = outs.length ? outs[outs.length - 1] : null;
+        const win = windowByEmp.get(m.employeeId) || { startMin: 540, endMin: 1080 };
+        const { _hoursOfMain, ...rest } = m;
+        return {
+          ...rest,
+          firstIn,
+          lastOut,
+          openSession,
+          missedCheckout: m.missedCheckout || openSession,
+          totalHours: Math.round(m.totalHours * 100) / 100,
+          effectiveHours: Math.round(m.effectiveHours * 100) / 100,
+          policyStartMin: win.startMin,
+          policyEndMin: win.endMin,
+        };
+      });
+      // For a SINGLE day, include the whole team — even people who never clocked
+      // in — so the view is a roster, not just those with a record. (A multi-day
+      // range stays record-based; showing every member × every day is noise.)
+      if (opts.startDate && opts.startDate === opts.endDate) {
+        const tz = this.orgTimezone();
+        const { start, end, anchor } = dayBoundsUtc(new Date(opts.startDate), tz, 0);
+        const weekend = anchor.getUTCDay() === 0 || anchor.getUTCDay() === 6;
+        const scopeSet = await this.departmentScopeIds(c);
+        let roster = (await this.memberships.find({ where: { organizationId: c.orgId, status: 'active' } }))
+          .filter((m) => m.userId && (!scopeSet || scopeSet.has(m.userId as string)));
+        if (opts.employeeId) roster = roster.filter((m) => m.userId === opts.employeeId);
+        const present = new Set(days.map((d) => d.employeeId));
+        const missing = roster.filter((m) => !present.has(m.userId as string));
+        if (missing.length) {
+          const missIds = missing.map((m) => m.userId as string);
+          const [users, holidayCount, leaveRows, wins] = await Promise.all([
+            this.users.find({ where: { id: In(missIds) } }),
+            this.holidays.count({ where: { organizationId: c.orgId, isDeleted: false, date: Between(start, end) } }),
+            this.leaves.find({ where: { organizationId: c.orgId, userId: In(missIds), status: 'approved', startDate: LessThanOrEqual(end), endDate: MoreThanOrEqual(start) } }),
+            this.resolveWorkWindows(c.orgId, missIds),
+          ]);
+          const uById = new Map(users.map((u) => [u.id, u]));
+          const onLeave = new Set(leaveRows.map((l) => l.userId));
+          for (const m of missing) {
+            const uid = m.userId as string;
+            const u = uById.get(uid);
+            const role = (m.role || '').toLowerCase();
+            const status = onLeave.has(uid)
+              ? 'leave'
+              : ['owner', 'admin', 'super_admin'].includes(role)
+                ? 'not_tracked'
+                : holidayCount > 0
+                  ? 'holiday'
+                  : weekend
+                    ? 'weekoff'
+                    : 'not_clocked_in';
+            const win = wins.get(uid) || { startMin: 540, endMin: 1080 };
+            days.push({
+              employeeId: uid,
+              employeeName: `${u?.firstName ?? ''} ${u?.lastName ?? ''}`.trim() || u?.email || 'Member',
+              date: anchor,
+              sessions: [],
+              firstIn: null,
+              lastOut: null,
+              openSession: false,
+              missedCheckout: false,
+              autoCheckedOut: false,
+              totalHours: 0,
+              effectiveHours: 0,
+              status,
+              isLateArrival: false,
+              lateByMinutes: 0,
+              approvalStatus: null,
+              entryType: 'system',
+              policyStartMin: win.startMin,
+              policyEndMin: win.endMin,
+            } as (typeof days)[number]);
+          }
+        }
+      }
+
+      // Worked first, then not-clocked-in, then off-states; newest day, then name.
+      const statusRank = (s: string) =>
+        ['present', 'late', 'half_day', 'wfh'].includes(s) ? 0 : s === 'not_clocked_in' ? 1 : s === 'absent' ? 2 : 3;
+      days.sort(
+        (a, b) =>
+          String(b.date).localeCompare(String(a.date)) ||
+          statusRank(a.status) - statusRank(b.status) ||
+          String(a.employeeName || '').localeCompare(String(b.employeeName || '')),
+      );
+      return { view: 'daily', data: days };
+    }
+
     return { view: 'timeline', data: events };
   }
 
@@ -1080,6 +1635,50 @@ export class AttendanceService {
       ...r,
       employeeName: nameById.get(r.employeeId) || 'Unknown',
     })) as any;
+  }
+
+  /**
+   * The work-timing policy window (minutes since midnight) per employee — the
+   * scale the clock bar draws against. Resolved once per unique employee, with
+   * the DEFAULT_WORK_TIMING (09:00–18:00) fallback.
+   */
+  private async resolveWorkWindows(
+    orgId: string,
+    userIds: string[],
+  ): Promise<Map<string, { startMin: number; endMin: number }>> {
+    const hhmm = (s?: string | null): number | null =>
+      s && /^\d{1,2}:\d{2}$/.test(s) ? Number(s.split(':')[0]) * 60 + Number(s.split(':')[1]) : null;
+    const out = new Map<string, { startMin: number; endMin: number }>();
+    await Promise.all(
+      [...new Set(userIds)].map(async (uid) => {
+        let startMin = 540;
+        let endMin = 1080;
+        try {
+          const { wt } = await this.resolveContext(uid, orgId);
+          const s = hhmm(wt.startTime);
+          const e = hhmm(wt.endTime);
+          if (s !== null) startMin = s;
+          if (e !== null && e > s!) endMin = e;
+        } catch {
+          /* default window */
+        }
+        out.set(uid, { startMin, endMin });
+      }),
+    );
+    return out;
+  }
+
+  /** Attach the resolved policy window to attendance rows (for the bar UI). */
+  private async attachPolicyWindow<T extends { employeeId: string }>(
+    orgId: string,
+    rows: T[],
+  ): Promise<Array<T & { policyStartMin: number; policyEndMin: number }>> {
+    if (!rows.length) return rows as any;
+    const win = await this.resolveWorkWindows(orgId, rows.map((r) => r.employeeId));
+    return rows.map((r) => {
+      const w = win.get(r.employeeId) || { startMin: 540, endMin: 1080 };
+      return { ...r, policyStartMin: w.startMin, policyEndMin: w.endMin };
+    }) as any;
   }
 
   /** Filter rows to employees in a given department (via org membership). */

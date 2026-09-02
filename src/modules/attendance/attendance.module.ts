@@ -10,8 +10,11 @@ import { WfhRequestEntity } from './entities/wfh-request.entity';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { LeaveRequestEntity } from '../leave/entities/leave-request.entity';
+import { MemberOnboardingEntity } from '../onboarding/entities/member-onboarding.entity';
 
 import { AttendanceService } from './services/attendance.service';
+import { AttendanceCronService } from './services/attendance-cron.service';
 import { WfhRequestService } from './services/wfh-request.service';
 import { AttendanceAccessGuard } from './guards/attendance-access.guard';
 import { AttendanceController } from './attendance.controller';
@@ -37,10 +40,12 @@ import { AttendanceController } from './attendance.controller';
       OrganizationEntity,
       OrgMembershipEntity,
       UserEntity,
+      LeaveRequestEntity,
+      MemberOnboardingEntity,
     ]),
   ],
   controllers: [AttendanceController],
-  providers: [AttendanceService, WfhRequestService, AttendanceAccessGuard],
-  exports: [AttendanceService],
+  providers: [AttendanceService, AttendanceCronService, WfhRequestService, AttendanceAccessGuard],
+  exports: [AttendanceService, AttendanceCronService],
 })
 export class AttendanceModule {}

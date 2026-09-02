@@ -23,7 +23,7 @@ defineFeature(feature, (test) => {
 
   const api = () => request(h.app.getHttpServer());
 
-  test('send-otp always reports success for a known account', ({
+  test('send-otp reports success for a known account', ({
     given,
     when,
     then,
@@ -44,26 +44,25 @@ defineFeature(feature, (test) => {
     });
   });
 
-  test('send-otp reports success for an unknown email (no enumeration)', ({
-    when,
-    then,
-  }) => {
+  test('send-otp rejects an email with no account', ({ when, then, and }) => {
     let res: request.Response;
     const email = randomEmail('nobody');
 
     when('an OTP is requested for an email that has no account', async () => {
-      // Track the auto-provisioned pending user so it gets cleaned up.
       res = await api().post('/api/v1/auth/send-otp').send({ email });
-      const created = await h.users.findOne({ where: { email } });
-      if (created) h.track(created);
     });
-    then('the response is 200 and reports success', () => {
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
+    then('the response is 404 with error code "NO_ACCOUNT"', () => {
+      expect(res.status).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('NO_ACCOUNT');
+    });
+    and('no account is created for that email', async () => {
+      const created = await h.users.findOne({ where: { email } });
+      expect(created).toBeNull();
     });
   });
 
-  test('verifying the dev-bypass code logs a brand-new user in', ({
+  test("an invited user's first sign-in is flagged as a new user", ({
     given,
     when,
     then,
@@ -72,15 +71,14 @@ defineFeature(feature, (test) => {
     let email: string;
     let res: request.Response;
 
-    given('a fresh email that has never logged in', () => {
-      email = randomEmail('fresh');
+    given('an invited user who has never logged in', async () => {
+      const user = await createUser(h, { isActive: false, setupStage: 'invited' });
+      email = user.email;
     });
     when(
       'they request an OTP and verify the dev-bypass code',
       async () => {
         await api().post('/api/v1/auth/send-otp').send({ email });
-        const created = await h.users.findOne({ where: { email } });
-        if (created) h.track(created);
         res = await api()
           .post('/api/v1/auth/verify-otp')
           .send({ email, otp: DEV_OTP });

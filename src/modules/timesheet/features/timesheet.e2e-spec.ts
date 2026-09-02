@@ -1,0 +1,246 @@
+import { defineFeature, loadFeature } from 'jest-cucumber';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
+
+import { bootOrgTestApp, OrgTestHarness, CreatedOrg } from '../../organization/features/support/org-harness';
+import { TimesheetEntity } from '../entities/timesheet.entity';
+
+const feature = loadFeature('./timesheet.feature', { loadRelativePath: true });
+const API = '/api/v1';
+const REF = '2026-09-15'; // a Tuesday → week Mon 14th … Sun 20th
+
+interface Member { email: string; userId: string; token: string }
+
+defineFeature(feature, (test) => {
+  let h: OrgTestHarness;
+  let sheets: Repository<TimesheetEntity>;
+  const orgIds = new Set<string>();
+
+  beforeAll(async () => {
+    h = await bootOrgTestApp();
+    sheets = h.app.get(getRepositoryToken(TimesheetEntity));
+  });
+  afterAll(async () => {
+    const ids = [...orgIds];
+    if (ids.length) await sheets.delete({ organizationId: In(ids) }).catch(() => undefined);
+    await h.cleanup();
+  });
+
+  const setup = async (enabled: boolean): Promise<{ o: CreatedOrg; member: Member }> => {
+    const o = await h.createOrg();
+    orgIds.add(o.orgId);
+    const member = await h.createEmployeeMember(o);
+    await h
+      .api()
+      .put(`${API}/policies/timesheet-config`)
+      .set('Authorization', `Bearer ${o.ownerToken}`)
+      .send({ enabled, cadence: 'weekly' })
+      .expect(200);
+    return { o, member };
+  };
+
+  const submit = (m: Member) =>
+    h
+      .api()
+      .post(`${API}/timesheets/me/submit?ref=${REF}`)
+      .set('Authorization', `Bearer ${m.token}`)
+      .send({ entries: [{ date: '2026-09-15', hours: 8, note: 'Worked' }] });
+
+  test('an employee submits a weekly timesheet and the owner approves it', ({ given, when, and, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let sheetId: string;
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o, member } = await setup(true));
+    });
+    when('the employee submits their timesheet for the week', async () => {
+      const res = await submit(member).expect(200);
+      expect(res.body.data.status).toBe('submitted');
+      expect(res.body.data.totalHours).toBe(8);
+      expect(res.body.data.cadence).toBe('weekly');
+    });
+    and('the owner approves the timesheet', async () => {
+      const queue = await h.api().get(`${API}/timesheets?status=submitted`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      sheetId = queue.body.data[0].id;
+      expect(sheetId).toBeTruthy();
+      await h
+        .api()
+        .post(`${API}/timesheets/${sheetId}/review`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ action: 'approve' })
+        .expect(200);
+    });
+    then("the employee's timesheet is approved and locked", async () => {
+      const res = await h.api().get(`${API}/timesheets/me?ref=${REF}`).set('Authorization', `Bearer ${member.token}`).expect(200);
+      expect(res.body.data.timesheet.status).toBe('approved');
+      expect(res.body.data.timesheet.editable).toBe(false);
+    });
+  });
+
+  test('a plain employee cannot open the timesheet review queue', ({ given, when, then }) => {
+    let member: Member;
+    let status = 0;
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ member } = await setup(true));
+    });
+    when('the employee requests the review queue', async () => {
+      const res = await h.api().get(`${API}/timesheets`).set('Authorization', `Bearer ${member.token}`);
+      status = res.status;
+    });
+    then('the request is forbidden', () => {
+      expect(status).toBe(403);
+    });
+  });
+
+  test('the owner filters team timesheets by month and employee', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let member: Member;
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o, member } = await setup(true));
+    });
+    when('the employee submits their timesheet for the week', async () => {
+      await submit(member).expect(200);
+    });
+    then('filtering the review by that month returns the timesheet', async () => {
+      const res = await h.api().get(`${API}/timesheets?year=2026&month=9`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.data[0].employee.email).toBe(member.email);
+    });
+    and('filtering by a different month returns nothing', async () => {
+      const res = await h.api().get(`${API}/timesheets?year=2026&month=3`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      expect(res.body.data.length).toBe(0);
+    });
+    and('filtering by that employee returns the timesheet', async () => {
+      const res = await h.api().get(`${API}/timesheets?userId=${member.userId}`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.data.every((t: any) => t.userId === member.userId)).toBe(true);
+    });
+  });
+
+  test("the owner opens a timesheet's full day-by-day detail", ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o, member } = await setup(true));
+    });
+    when('the employee submits their timesheet for the week', async () => {
+      await submit(member).expect(200);
+    });
+    then('the owner can open the timesheet detail and see its day entries', async () => {
+      const queue = await h.api().get(`${API}/timesheets?status=submitted`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      const id = queue.body.data[0].id;
+      const res = await h.api().get(`${API}/timesheets/${id}`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      expect(res.body.data.entries.length).toBeGreaterThan(0);
+      expect(res.body.data.entries[0].date).toBe('2026-09-15');
+      expect(Array.isArray(res.body.data.logs)).toBe(true);
+      expect(res.body.data.employee.email).toBe(member.email);
+    });
+  });
+
+  test('the timesheet policy is configured on its own, not as a policy card', ({ given, then }) => {
+    let o: CreatedOrg;
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o } = await setup(true));
+    });
+    then("the timesheet config is not listed among the org's policies", async () => {
+      const res = await h.api().get(`${API}/policies`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      const list = res.body.data as Array<{ category: string }>;
+      expect(list.some((p) => p.category === 'timesheet')).toBe(false);
+    });
+  });
+
+  test('the timesheet detail marks which days are approved and which are pending', ({ given, when, and, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    const PENDING_DAY = '2026-09-19'; // a Saturday inside the REF week (Mon 14 – Sun 20)
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o, member } = await setup(true));
+    });
+    when('the employee submits their timesheet for the week', async () => {
+      await submit(member).expect(200);
+    });
+    and('the employee files a pending manual entry for another day that week', async () => {
+      const res = await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .send({ date: PENDING_DAY, checkInTime: `${PENDING_DAY}T04:30:00.000Z`, checkOutTime: `${PENDING_DAY}T09:30:00.000Z`, reason: 'Saturday overtime' })
+        .expect(201);
+      expect(res.body.data.approvalStatus).toBe('pending');
+    });
+    then("the owner's timesheet detail shows that day as pending and not counted", async () => {
+      const queue = await h.api().get(`${API}/timesheets?status=submitted`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      const id = queue.body.data[0].id;
+      const res = await h.api().get(`${API}/timesheets/${id}`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      const logs = res.body.data.logs as Array<{ date: string; counted: boolean; approvalStatus: string | null }>;
+      const pending = logs.find((l) => l.date === PENDING_DAY);
+      expect(pending).toBeTruthy();
+      expect(pending!.counted).toBe(false);
+      expect(pending!.approvalStatus).toBe('pending');
+      // the pending day is surfaced in the logs but excluded from the counted entries
+      expect((res.body.data.entries as Array<{ date: string }>).some((e) => e.date === PENDING_DAY)).toBe(false);
+    });
+  });
+
+  test('a pending manual attendance entry does not count until approved', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let entryId: string;
+    const DATE = '2026-09-16'; // a Wednesday inside the REF week (Mon 14 – Sun 20)
+
+    const myEntries = async () => {
+      const res = await h.api().get(`${API}/timesheets/me?ref=${REF}`).set('Authorization', `Bearer ${member.token}`).expect(200);
+      return (res.body.data.timesheet.entries || []) as Array<{ date: string; hours: number }>;
+    };
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o, member } = await setup(true));
+    });
+    when('the employee files a manual attendance entry for a day in the week', async () => {
+      const res = await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z`, reason: 'Forgot to clock in' })
+        .expect(201);
+      entryId = res.body.data.id;
+      expect(res.body.data.approvalStatus).toBe('pending');
+    });
+    then('that day does not yet appear on their timesheet', async () => {
+      expect((await myEntries()).some((e) => e.date === DATE)).toBe(false);
+    });
+    when('the owner approves the manual attendance entry', async () => {
+      await h
+        .api()
+        .put(`${API}/attendance/${entryId}/approve`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ approved: true })
+        .expect(200);
+    });
+    then('that day now appears on their timesheet with its hours', async () => {
+      const row = (await myEntries()).find((e) => e.date === DATE);
+      expect(row).toBeTruthy();
+      expect(row!.hours).toBeGreaterThan(0);
+    });
+  });
+
+  test('timesheets cannot be submitted when the policy is off', ({ given, when, then }) => {
+    let member: Member;
+    let status = 0;
+    given('an organization with timesheets turned off and an employee member', async () => {
+      ({ member } = await setup(false));
+    });
+    when('the employee tries to submit a timesheet', async () => {
+      const res = await submit(member);
+      status = res.status;
+    });
+    then('the submission is rejected', () => {
+      expect(status).toBe(400);
+    });
+  });
+});

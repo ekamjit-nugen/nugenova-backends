@@ -64,6 +64,7 @@ export const POLICY_CATEGORIES = [
   'reimbursement',
   'payroll_override',
   'payroll',
+  'timesheet',
   'holiday',
   'probation',
   'onboarding',

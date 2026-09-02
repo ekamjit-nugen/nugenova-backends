@@ -307,6 +307,125 @@ export function onboardingWelcomeEmail(params: {
 }
 
 /** Daily nudge to a hire with outstanding onboarding items. */
+/** Attendance: an employee was marked absent for a day with no record. */
+export function attendanceAbsentEmail(params: {
+  employeeName?: string | null;
+  orgName: string;
+  dateLabel: string;
+  attendanceUrl: string;
+}): { subject: string; html: string } {
+  const greeting = params.employeeName ? `Hi ${esc(params.employeeName)},` : 'Hello,';
+  const bodyHtml = `
+    <p style="margin:0 0 12px;">${greeting}</p>
+    <p style="margin:0 0 12px;">We didn't record any attendance for you on
+      <strong style="color:#111827;">${esc(params.dateLabel)}</strong> at
+      <strong style="color:#111827;">${esc(params.orgName)}</strong>, so the day was marked
+      <strong style="color:#B91C1C;">absent</strong>.</p>
+    <p style="margin:0 0 12px;">If you did work that day, file a manual entry for approval and it will be corrected.</p>`;
+  return {
+    subject: `You were marked absent for ${params.dateLabel}`,
+    html: renderBrandedEmail({
+      eyebrow: 'Attendance',
+      title: 'Marked absent',
+      bodyHtml,
+      ctaText: 'Open attendance',
+      ctaUrl: params.attendanceUrl,
+      accent: '#DC2626',
+    }),
+  };
+}
+
+/** Attendance: a session was auto-closed because the employee didn't clock out. */
+export function attendanceMissedCheckoutEmail(params: {
+  employeeName?: string | null;
+  orgName: string;
+  dateLabel: string;
+  hours: number;
+  attendanceUrl: string;
+}): { subject: string; html: string } {
+  const greeting = params.employeeName ? `Hi ${esc(params.employeeName)},` : 'Hello,';
+  const bodyHtml = `
+    <p style="margin:0 0 12px;">${greeting}</p>
+    <p style="margin:0 0 12px;">You didn't clock out on
+      <strong style="color:#111827;">${esc(params.dateLabel)}</strong>, so we closed the session
+      automatically and recorded <strong style="color:#111827;">${esc(params.hours)}h</strong>.</p>
+    <p style="margin:0 0 12px;">If that's not right, request an edit on the record and a manager will review it.</p>`;
+  return {
+    subject: `We closed a session you left open on ${params.dateLabel}`,
+    html: renderBrandedEmail({
+      eyebrow: 'Attendance',
+      title: 'Missed clock-out',
+      bodyHtml,
+      ctaText: 'Review the record',
+      ctaUrl: params.attendanceUrl,
+      accent: '#F59E0B',
+    }),
+  };
+}
+
+/** Attendance: a nudge to an employee who hasn't clocked in yet today. */
+export function attendanceNotClockedInEmail(params: {
+  employeeName?: string | null;
+  orgName: string;
+  attendanceUrl: string;
+}): { subject: string; html: string } {
+  const greeting = params.employeeName ? `Hi ${esc(params.employeeName)},` : 'Hello,';
+  const bodyHtml = `
+    <p style="margin:0 0 12px;">${greeting}</p>
+    <p style="margin:0 0 12px;">It's past your start time and we don't have a clock-in from you today at
+      <strong style="color:#111827;">${esc(params.orgName)}</strong>.</p>
+    <p style="margin:0 0 12px;">If you're working, please clock in so your day is recorded.</p>`;
+  return {
+    subject: `Reminder: you haven't clocked in yet`,
+    html: renderBrandedEmail({
+      eyebrow: 'Attendance',
+      title: "You haven't clocked in yet",
+      bodyHtml,
+      ctaText: 'Clock in',
+      ctaUrl: params.attendanceUrl,
+      accent: '#2E86C1',
+    }),
+  };
+}
+
+/** Attendance: the daily exception roll-up to org admins/approvers. */
+export function attendanceDigestEmail(params: {
+  orgName: string;
+  dateLabel: string;
+  absent: number;
+  late: number;
+  halfDay: number;
+  missed: number;
+  activityUrl: string;
+}): { subject: string; html: string } {
+  const row = (label: string, n: number, color: string) =>
+    `<tr>
+       <td style="padding:8px 0;font-size:14px;color:#4B5563;">${esc(label)}</td>
+       <td style="padding:8px 0;font-size:14px;font-weight:700;color:${color};text-align:right;">${esc(n)}</td>
+     </tr>`;
+  const bodyHtml = `
+    <p style="margin:0 0 12px;">Attendance exceptions for
+      <strong style="color:#111827;">${esc(params.orgName)}</strong> on
+      <strong style="color:#111827;">${esc(params.dateLabel)}</strong>:</p>
+    <table cellpadding="0" cellspacing="0" width="100%" style="border-top:1px solid #F3F4F6;border-bottom:1px solid #F3F4F6;">
+      ${row('Absent', params.absent, '#B91C1C')}
+      ${row('Late arrivals', params.late, '#B45309')}
+      ${row('Half days', params.halfDay, '#C2410C')}
+      ${row('Missed checkouts', params.missed, '#6D28D9')}
+    </table>`;
+  return {
+    subject: `Attendance summary — ${params.dateLabel}`,
+    html: renderBrandedEmail({
+      eyebrow: 'Attendance digest',
+      title: `Yesterday's exceptions`,
+      bodyHtml,
+      ctaText: 'Open activity',
+      ctaUrl: params.activityUrl,
+      accent: '#2E86C1',
+    }),
+  };
+}
+
 export function onboardingReminderEmail(params: {
   employeeName?: string | null;
   orgName: string;
