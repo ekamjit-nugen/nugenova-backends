@@ -521,6 +521,31 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the daily roster lists every active member, not only those with a record', ({ given, when, then, and }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    let rows: any[];
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when("the owner reads today's roster", async () => {
+      const res = await h.api().get(`${API}/attendance/roster`).set('Authorization', `Bearer ${org.ownerToken}`).expect(200);
+      rows = res.body.data.rows;
+    });
+    then('both the owner and the employee appear on it', () => {
+      // The record list would show neither (no attendance yet); the roster shows all.
+      expect(rows.some((r) => r.userId === employee.userId)).toBe(true);
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+    });
+    and('the employee shows as not clocked in while the owner is not tracked', () => {
+      const emp = rows.find((r) => r.userId === employee.userId);
+      const owner = rows.find((r) => r.role === 'owner');
+      expect(emp.status).toBe('not_clocked_in');
+      expect(owner?.status).toBe('not_tracked');
+    });
+  });
+
   // ── holidays ────────────────────────────────────────────────────────────────
 
   test('holidays are readable by all members but only writable by admins', ({

@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 
 import {
   AttendanceEntity,
@@ -18,6 +18,7 @@ import {
 import { HolidayEntity } from '../entities/holiday.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
+import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
 import { PolicyService } from '../../policy/policy.service';
 import { WfhRequestService } from './wfh-request.service';
 import {
@@ -117,6 +118,8 @@ export class AttendanceService {
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    @InjectRepository(LeaveRequestEntity)
+    private readonly leaves: Repository<LeaveRequestEntity>,
     private readonly policyService: PolicyService,
     private readonly wfhRequests: WfhRequestService,
   ) {}
@@ -1212,6 +1215,118 @@ export class AttendanceService {
       items,
       okCount: items.filter((i) => i.status === 'ok').length,
       attentionCount: items.filter((i) => i.status === 'attention').length,
+    };
+  }
+
+  /**
+   * The daily attendance ROSTER — every active member and their status for one
+   * day, so a manager sees the WHOLE team, not just those who happened to clock
+   * in (the record list hides the rest). Status is the record's status when one
+   * exists, else derived: on approved leave, org holiday, week-off, or simply
+   * not-clocked-in. Department-scoped leads see only their team.
+   */
+  async getDailyRoster(
+    c: Caller,
+    dateStr?: string,
+  ): Promise<{
+    date: string;
+    rows: Array<{
+      userId: string;
+      name: string;
+      email: string | null;
+      role: string;
+      status: string;
+      checkInTime: string | null;
+      checkOutTime: string | null;
+      totalHours: number | null;
+      isLateArrival: boolean;
+      lateByMinutes: number;
+      missedCheckout: boolean;
+    }>;
+    summary: { total: number; clockedIn: number; notClockedIn: number; onLeave: number; absent: number };
+  }> {
+    const tz = this.orgTimezone();
+    const ref = dateStr ? new Date(dateStr) : new Date();
+    const { start, end, anchor } = dayBoundsUtc(ref, tz, 0);
+    const dayKey = anchor.toISOString().slice(0, 10);
+    const weekend = anchor.getUTCDay() === 0 || anchor.getUTCDay() === 6;
+
+    // Active roster (department-narrowed for a scoped lead).
+    const scope = await this.departmentScopeIds(c);
+    const members = (await this.memberships.find({ where: { organizationId: c.orgId, status: 'active' } }))
+      .filter((m) => m.userId && (!scope || scope.has(m.userId)));
+    const ids = members.map((m) => m.userId as string);
+    if (!ids.length) {
+      return { date: dayKey, rows: [], summary: { total: 0, clockedIn: 0, notClockedIn: 0, onLeave: 0, absent: 0 } };
+    }
+
+    const [users, records, holidayCount, leaveRows] = await Promise.all([
+      this.users.find({ where: { id: In(ids) } }),
+      this.repo.find({ where: { organizationId: c.orgId, employeeId: In(ids), date: Between(start, end), isDeleted: false } }),
+      this.holidays.count({ where: { organizationId: c.orgId, isDeleted: false, date: Between(start, end) } }),
+      this.leaves.find({
+        where: { organizationId: c.orgId, userId: In(ids), status: 'approved', startDate: LessThanOrEqual(end), endDate: MoreThanOrEqual(start) },
+      }),
+    ]);
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const recByEmp = new Map(records.map((r) => [r.employeeId, r]));
+    const onLeave = new Set(leaveRows.map((l) => l.userId));
+    const isHoliday = holidayCount > 0;
+
+    let clockedIn = 0;
+    let notClockedIn = 0;
+    let onLeaveCount = 0;
+    let absentCount = 0;
+
+    const rows = members.map((m) => {
+      const uid = m.userId as string;
+      const u = userById.get(uid);
+      const name = `${u?.firstName ?? ''} ${u?.lastName ?? ''}`.trim() || u?.email || 'Member';
+      const rec = recByEmp.get(uid);
+      let status: string;
+      let checkInTime: string | null = null;
+      let checkOutTime: string | null = null;
+      let totalHours: number | null = null;
+      let isLateArrival = false;
+      let lateByMinutes = 0;
+      let missedCheckout = false;
+
+      if (rec) {
+        status = rec.status;
+        checkInTime = rec.checkInTime ? new Date(rec.checkInTime).toISOString() : null;
+        checkOutTime = rec.checkOutTime ? new Date(rec.checkOutTime).toISOString() : null;
+        totalHours = rec.totalWorkingHours ?? null;
+        isLateArrival = !!rec.isLateArrival;
+        lateByMinutes = rec.lateByMinutes || 0;
+        missedCheckout = !!rec.missedCheckout;
+        if (rec.status === 'absent') absentCount++;
+        else clockedIn++;
+      } else if (onLeave.has(uid)) {
+        status = 'leave';
+        onLeaveCount++;
+      } else if (['owner', 'admin', 'super_admin'].includes((m.role || '').toLowerCase())) {
+        // The employer/admins don't clock in — not a gap.
+        status = 'not_tracked';
+      } else if (isHoliday) {
+        status = 'holiday';
+      } else if (weekend) {
+        status = 'weekoff';
+      } else {
+        status = 'not_clocked_in';
+        notClockedIn++;
+      }
+
+      return { userId: uid, name, email: u?.email ?? null, role: m.role, status, checkInTime, checkOutTime, totalHours, isLateArrival, lateByMinutes, missedCheckout };
+    });
+
+    // Clocked-in first, then not-clocked-in, then the rest; by name within.
+    const rank = (s: string) => (['present', 'late', 'half_day', 'wfh'].includes(s) ? 0 : s === 'not_clocked_in' ? 1 : 2);
+    rows.sort((a, b) => rank(a.status) - rank(b.status) || a.name.localeCompare(b.name));
+
+    return {
+      date: dayKey,
+      rows,
+      summary: { total: rows.length, clockedIn, notClockedIn, onLeave: onLeaveCount, absent: absentCount },
     };
   }
 

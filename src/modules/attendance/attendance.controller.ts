@@ -155,6 +155,13 @@ export class AttendanceController {
     return { success: true, data };
   }
 
+  @Get('attendance/roster')
+  @RequirePermission('attendance', 'view')
+  async roster(@Query('date') date: string, @Req() req: any) {
+    const data = await this.attendance.getDailyRoster(this.caller(req), date || undefined);
+    return { success: true, data };
+  }
+
   @Get('attendance/pending-approvals')
   @RequirePermission('attendance', 'view')
   async pendingApprovals(@Req() req: any) {
