@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 
 import {
   PolicyEntity,
@@ -75,6 +75,13 @@ export interface ResolvedWorkContext {
 
 const byUpdatedAtDesc = (a: PolicyEntity, b: PolicyEntity) =>
   (b.updatedAt?.getTime() || 0) - (a.updatedAt?.getTime() || 0);
+
+/**
+ * Categories that exist only to carry an `extraConfig` singleton (timesheet
+ * cadence, payroll rules, onboarding requirements). They are configured through
+ * dedicated setup screens and must never appear in the policy CRUD grid.
+ */
+const CONFIG_ONLY_CATEGORIES = ['timesheet', 'payroll', 'onboarding'];
 
 /**
  * The org OWNER is never a subject of the org's own policies — they author and
@@ -244,6 +251,10 @@ export class PolicyService {
   async list(orgId: string, q: PolicyQueryDto = {}): Promise<PolicyEntity[]> {
     const where: any = { organizationId: orgId, isDeleted: false };
     if (q.category) where.category = q.category;
+    // Config-singleton policies (timesheet/payroll/onboarding) carry an
+    // `extraConfig` blob and are managed through dedicated setup screens — they
+    // must not surface as editable cards in the policy CRUD grid.
+    else where.category = Not(In(CONFIG_ONLY_CATEGORIES));
     if (typeof q.isActive === 'boolean') where.isActive = q.isActive;
     return this.repo.find({ where, order: { createdAt: 'DESC' } });
   }

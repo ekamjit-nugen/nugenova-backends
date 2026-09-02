@@ -30,3 +30,7 @@ Feature: Timesheets
     Given an organization with weekly timesheets enabled and an employee member
     When the employee submits their timesheet for the week
     Then the owner can open the timesheet detail and see its day entries
+
+  Scenario: the timesheet policy is configured on its own, not as a policy card
+    Given an organization with weekly timesheets enabled and an employee member
+    Then the timesheet config is not listed among the org's policies

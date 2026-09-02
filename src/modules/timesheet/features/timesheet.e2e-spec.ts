@@ -140,6 +140,19 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the timesheet policy is configured on its own, not as a policy card', ({ given, then }) => {
+    let o: CreatedOrg;
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o } = await setup(true));
+    });
+    then("the timesheet config is not listed among the org's policies", async () => {
+      const res = await h.api().get(`${API}/policies`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      const list = res.body.data as Array<{ category: string }>;
+      expect(list.some((p) => p.category === 'timesheet')).toBe(false);
+    });
+  });
+
   test('timesheets cannot be submitted when the policy is off', ({ given, when, then }) => {
     let member: Member;
     let status = 0;
