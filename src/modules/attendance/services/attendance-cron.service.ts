@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, IsNull, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
@@ -13,9 +14,18 @@ import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
 import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
 import { PolicyService } from '../../policy/policy.service';
 import { NotifierService } from '../../notification/notifier.service';
+import { MailService } from '../../../bootstrap/mail/mail.service';
+import {
+  attendanceAbsentEmail,
+  attendanceMissedCheckoutEmail,
+  attendanceNotClockedInEmail,
+  attendanceDigestEmail,
+} from '../../../bootstrap/mail/email-layout';
 import { AttendanceService } from './attendance.service';
 import { DEFAULT_TZ, dayAnchorUtc, dayBoundsUtc } from '../util/tz-day.util';
 import { DEFAULT_WORK_TIMING } from '../util/status-compute';
+
+interface Person { name: string; email: string | null }
 
 const HOUR_MS = 3_600_000;
 // A session still open this long after its clock-in is treated as a forgotten
@@ -59,6 +69,8 @@ export class AttendanceCronService {
     @InjectRepository(MemberOnboardingEntity) private readonly onboardings: Repository<MemberOnboardingEntity>,
     private readonly policy: PolicyService,
     private readonly notifier: NotifierService,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
     private readonly attendanceService: AttendanceService,
   ) {}
 
@@ -118,19 +130,34 @@ export class AttendanceCronService {
       try {
         const saved = await this.attendanceService.autoCloseStaleSession(rec, closeAt);
         closed += 1;
+        const who = await this.userInfo(saved.employeeId);
+        const orgId = saved.organizationId as string;
+        const hours = saved.effectiveWorkingHours ?? 0;
         await this.notifier.notify({
-          organizationId: saved.organizationId as string,
+          organizationId: orgId,
           userId: saved.employeeId,
           type: 'attendance_missed_checkout',
           title: 'We closed a session you left open',
-          body: `You didn't clock out on ${this.dayLabel(saved.date)} — we recorded ${saved.effectiveWorkingHours ?? 0}h. Fix it with an edit request if that's wrong.`,
+          body: `You didn't clock out on ${this.dayLabel(saved.date)} — we recorded ${hours}h. Fix it with an edit request if that's wrong.`,
           data: { actionUrl: '/attendance', attendanceId: saved.id },
           priority: 'normal',
         });
-        await this.escalate(saved.organizationId as string, saved.employeeId, {
+        await this.email(
+          orgId,
+          who.email,
+          attendanceMissedCheckoutEmail({
+            employeeName: who.name,
+            orgName: await this.orgNameFor(orgId),
+            dateLabel: this.dayLabel(saved.date),
+            hours,
+            attendanceUrl: `${this.frontendUrl()}/attendance`,
+          }),
+          'attendance.missed_checkout',
+        );
+        await this.escalate(orgId, saved.employeeId, {
           type: 'attendance_missed_checkout',
           title: 'A team member forgot to clock out',
-          body: `${await this.userName(saved.employeeId)} left a session open on ${this.dayLabel(saved.date)} — auto-closed at ${saved.effectiveWorkingHours ?? 0}h.`,
+          body: `${who.name} left a session open on ${this.dayLabel(saved.date)} — auto-closed at ${hours}h.`,
           actionUrl: '/attendance',
         });
       } catch (err) {
@@ -171,6 +198,7 @@ export class AttendanceCronService {
           });
           await this.attendance.save(row);
           marked += 1;
+          const who = await this.userInfo(uid);
           await this.notifier.notify({
             organizationId: org.id,
             userId: uid,
@@ -180,10 +208,21 @@ export class AttendanceCronService {
             data: { actionUrl: '/attendance', date: this.dayKey(anchor) },
             priority: 'high',
           });
+          await this.email(
+            org.id,
+            who.email,
+            attendanceAbsentEmail({
+              employeeName: who.name,
+              orgName: await this.orgNameFor(org.id),
+              dateLabel: this.dayLabel(anchor),
+              attendanceUrl: `${this.frontendUrl()}/attendance`,
+            }),
+            'attendance.absent',
+          );
           await this.escalate(org.id, uid, {
             type: 'attendance_absent',
             title: 'A team member was marked absent',
-            body: `${await this.userName(uid)} had no attendance on ${this.dayLabel(anchor)} and was marked absent.`,
+            body: `${who.name} had no attendance on ${this.dayLabel(anchor)} and was marked absent.`,
             actionUrl: '/attendance',
           });
         } catch (err) {
@@ -215,6 +254,7 @@ export class AttendanceCronService {
         if (await this.onApprovedLeave(org.id, uid, start, end)) continue;
         if (await this.onApprovedWfh(org.id, uid, start, end)) continue;
         missing.push(uid);
+        const who = await this.userInfo(uid);
         await this.notifier.notify({
           organizationId: org.id,
           userId: uid,
@@ -224,10 +264,20 @@ export class AttendanceCronService {
           data: { actionUrl: '/attendance' },
           priority: 'normal',
         });
+        await this.email(
+          org.id,
+          who.email,
+          attendanceNotClockedInEmail({
+            employeeName: who.name,
+            orgName: await this.orgNameFor(org.id),
+            attendanceUrl: `${this.frontendUrl()}/attendance`,
+          }),
+          'attendance.not_clocked_in',
+        );
         await this.escalate(org.id, uid, {
           type: 'attendance_not_clocked_in',
           title: 'A team member has not clocked in',
-          body: `${await this.userName(uid)} has not clocked in today.`,
+          body: `${who.name} has not clocked in today.`,
           actionUrl: '/attendance',
         });
         nudged += 1;
@@ -269,16 +319,34 @@ export class AttendanceCronService {
       const missed = rows.filter((r) => r.missedCheckout).length;
       const total = absent + late + halfDay + missed;
       if (total === 0) continue;
+      const dateLabel = this.dayLabel(dayAnchorUtc(now, tz, -1));
       await this.notifier.notifyManagers({
         organizationId: org.id,
         resource: 'attendance',
         action: 'view',
         type: 'attendance_daily_digest',
-        title: `Attendance summary — ${this.dayLabel(dayAnchorUtc(now, tz, -1))}`,
+        title: `Attendance summary — ${dateLabel}`,
         body: `${absent} absent · ${late} late · ${halfDay} half-day · ${missed} missed checkout.`,
         data: { actionUrl: '/attendance/activity', absent, late, halfDay, missed },
         priority: 'low',
       });
+      // Email the same roll-up to each approver.
+      const approvers = await this.notifier.resolveManagers(org.id, 'attendance', 'view');
+      if (approvers.length) {
+        const built = attendanceDigestEmail({
+          orgName: await this.orgNameFor(org.id),
+          dateLabel,
+          absent,
+          late,
+          halfDay,
+          missed,
+          activityUrl: `${this.frontendUrl()}/attendance/activity`,
+        });
+        for (const uid of approvers) {
+          const info = await this.userInfo(uid);
+          await this.email(org.id, info.email, built, 'attendance.daily_digest');
+        }
+      }
       sent += 1;
     }
     return sent;
@@ -405,10 +473,29 @@ export class AttendanceCronService {
     });
   }
 
-  private async userName(userId: string): Promise<string> {
+  private async userInfo(userId: string): Promise<Person> {
     const u = await this.users.findOne({ where: { id: userId } });
-    if (!u) return 'A team member';
-    return `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email || 'A team member';
+    if (!u) return { name: 'A team member', email: null };
+    return { name: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email || 'A team member', email: u.email ?? null };
+  }
+
+  private async userName(userId: string): Promise<string> {
+    return (await this.userInfo(userId)).name;
+  }
+
+  private frontendUrl(): string {
+    return (this.config.get<string>('FRONTEND_URL') || 'http://localhost:3111').replace(/\/$/, '');
+  }
+
+  private async orgNameFor(orgId: string): Promise<string> {
+    const org = await this.orgs.findOne({ where: { id: orgId } });
+    return org?.name || 'your team';
+  }
+
+  /** Best-effort email send — never throws (MailService already swallows). */
+  private async email(orgId: string, to: string | null, built: { subject: string; html: string }, category: string): Promise<void> {
+    if (!to) return;
+    await this.mail.send({ to, subject: built.subject, html: built.html, category, organizationId: orgId });
   }
 
   private dayKey(anchor: Date): string {

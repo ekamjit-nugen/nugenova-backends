@@ -6,6 +6,7 @@ import { bootOrgTestApp, OrgTestHarness, CreatedOrg } from '../../organization/f
 import { AttendanceEntity } from '../entities/attendance.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
+import { EmailOutboxEntity } from '../../../bootstrap/mail/email-outbox.entity';
 import { AttendanceCronService } from '../services/attendance-cron.service';
 
 const feature = loadFeature('./attendance-cron.feature', { loadRelativePath: true });
@@ -23,6 +24,7 @@ defineFeature(feature, (test) => {
   let attendance: Repository<AttendanceEntity>;
   let memberships: Repository<OrgMembershipEntity>;
   let leaves: Repository<LeaveRequestEntity>;
+  let outbox: Repository<EmailOutboxEntity>;
   const orgIds = new Set<string>();
 
   beforeAll(async () => {
@@ -31,12 +33,14 @@ defineFeature(feature, (test) => {
     attendance = h.app.get(getRepositoryToken(AttendanceEntity));
     memberships = h.app.get(getRepositoryToken(OrgMembershipEntity));
     leaves = h.app.get(getRepositoryToken(LeaveRequestEntity));
+    outbox = h.app.get(getRepositoryToken(EmailOutboxEntity));
   });
   afterAll(async () => {
     const ids = [...orgIds];
     if (ids.length) {
       await attendance.delete({ organizationId: In(ids) }).catch(() => undefined);
       await leaves.delete({ organizationId: In(ids) }).catch(() => undefined);
+      await outbox.delete({ organizationId: In(ids) }).catch(() => undefined);
     }
     await h.cleanup();
   });
@@ -84,6 +88,10 @@ defineFeature(feature, (test) => {
       const res = await h.api().get(`${API}/notifications`).set('Authorization', `Bearer ${member.token}`).expect(200);
       const items = (res.body.items || []) as Array<{ type: string }>;
       expect(items.some((n) => n.type === 'attendance_absent')).toBe(true);
+      // …and an absence email is queued to their address.
+      const mails = await outbox.find({ where: { organizationId: o.orgId, category: 'attendance.absent' } });
+      expect(mails.length).toBe(1);
+      expect(mails[0].to).toContain(member.email);
     });
   });
 
@@ -188,6 +196,9 @@ defineFeature(feature, (test) => {
       const res = await h.api().get(`${API}/notifications`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
       const items = (res.body.items || []) as Array<{ type: string }>;
       expect(items.some((n) => n.type === 'attendance_daily_digest')).toBe(true);
+      // …and a digest email is queued to the org's approvers.
+      const mails = await outbox.find({ where: { organizationId: o.orgId, category: 'attendance.daily_digest' } });
+      expect(mails.length).toBeGreaterThanOrEqual(1);
     });
   });
 });
