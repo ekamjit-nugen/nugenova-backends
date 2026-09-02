@@ -391,6 +391,33 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the single-day activity view lists members who never clocked in', ({ given, when, then }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    let rows: any[];
+    const DAY = '2026-08-12'; // a Wednesday, no records
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when('the owner opens the daily activity view for a single day with no records', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=daily&startDate=${DAY}&endDate=${DAY}`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      rows = res.body.data;
+    });
+    then('the employee appears on that day as not clocked in', () => {
+      const emp = rows.find((r) => r.employeeId === employee.userId);
+      expect(emp).toBeTruthy(); // present even though there's no attendance record
+      expect(emp.status).toBe('not_clocked_in');
+      expect(emp.sessions.length).toBe(0);
+      // The whole roster is present (the owner too), not just record-holders.
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   test('a clock-in is rejected when the day already has attendance covering that time', ({
     given,
     and,

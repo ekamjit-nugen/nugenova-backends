@@ -1543,8 +1543,76 @@ export class AttendanceService {
           policyEndMin: win.endMin,
         };
       });
-      // Newest day first, then by name.
-      days.sort((a, b) => (String(b.date).localeCompare(String(a.date))) || String(a.employeeName || '').localeCompare(String(b.employeeName || '')));
+      // For a SINGLE day, include the whole team — even people who never clocked
+      // in — so the view is a roster, not just those with a record. (A multi-day
+      // range stays record-based; showing every member × every day is noise.)
+      if (opts.startDate && opts.startDate === opts.endDate) {
+        const tz = this.orgTimezone();
+        const { start, end, anchor } = dayBoundsUtc(new Date(opts.startDate), tz, 0);
+        const weekend = anchor.getUTCDay() === 0 || anchor.getUTCDay() === 6;
+        const scopeSet = await this.departmentScopeIds(c);
+        let roster = (await this.memberships.find({ where: { organizationId: c.orgId, status: 'active' } }))
+          .filter((m) => m.userId && (!scopeSet || scopeSet.has(m.userId as string)));
+        if (opts.employeeId) roster = roster.filter((m) => m.userId === opts.employeeId);
+        const present = new Set(days.map((d) => d.employeeId));
+        const missing = roster.filter((m) => !present.has(m.userId as string));
+        if (missing.length) {
+          const missIds = missing.map((m) => m.userId as string);
+          const [users, holidayCount, leaveRows, wins] = await Promise.all([
+            this.users.find({ where: { id: In(missIds) } }),
+            this.holidays.count({ where: { organizationId: c.orgId, isDeleted: false, date: Between(start, end) } }),
+            this.leaves.find({ where: { organizationId: c.orgId, userId: In(missIds), status: 'approved', startDate: LessThanOrEqual(end), endDate: MoreThanOrEqual(start) } }),
+            this.resolveWorkWindows(c.orgId, missIds),
+          ]);
+          const uById = new Map(users.map((u) => [u.id, u]));
+          const onLeave = new Set(leaveRows.map((l) => l.userId));
+          for (const m of missing) {
+            const uid = m.userId as string;
+            const u = uById.get(uid);
+            const role = (m.role || '').toLowerCase();
+            const status = onLeave.has(uid)
+              ? 'leave'
+              : ['owner', 'admin', 'super_admin'].includes(role)
+                ? 'not_tracked'
+                : holidayCount > 0
+                  ? 'holiday'
+                  : weekend
+                    ? 'weekoff'
+                    : 'not_clocked_in';
+            const win = wins.get(uid) || { startMin: 540, endMin: 1080 };
+            days.push({
+              employeeId: uid,
+              employeeName: `${u?.firstName ?? ''} ${u?.lastName ?? ''}`.trim() || u?.email || 'Member',
+              date: anchor,
+              sessions: [],
+              firstIn: null,
+              lastOut: null,
+              openSession: false,
+              missedCheckout: false,
+              autoCheckedOut: false,
+              totalHours: 0,
+              effectiveHours: 0,
+              status,
+              isLateArrival: false,
+              lateByMinutes: 0,
+              approvalStatus: null,
+              entryType: 'system',
+              policyStartMin: win.startMin,
+              policyEndMin: win.endMin,
+            } as (typeof days)[number]);
+          }
+        }
+      }
+
+      // Worked first, then not-clocked-in, then off-states; newest day, then name.
+      const statusRank = (s: string) =>
+        ['present', 'late', 'half_day', 'wfh'].includes(s) ? 0 : s === 'not_clocked_in' ? 1 : s === 'absent' ? 2 : 3;
+      days.sort(
+        (a, b) =>
+          String(b.date).localeCompare(String(a.date)) ||
+          statusRank(a.status) - statusRank(b.status) ||
+          String(a.employeeName || '').localeCompare(String(b.employeeName || '')),
+      );
       return { view: 'daily', data: days };
     }
 

@@ -84,6 +84,11 @@ Feature: Attendance — clocking, scope, and tenant isolation
     When the owner opens the daily activity view for that date range
     Then that day shows as a single consolidated row
 
+  Scenario: the single-day activity view lists members who never clocked in
+    Given an organization with an employee
+    When the owner opens the daily activity view for a single day with no records
+    Then the employee appears on that day as not clocked in
+
   Scenario: the owner sees the attendance setup status with the holiday gap flagged
     Given an organization with an employee
     When the owner reads the attendance setup status
