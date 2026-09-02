@@ -59,6 +59,13 @@ Feature: Attendance — clocking, scope, and tenant isolation
     When the employee submits a manual entry for another user id
     Then the request is rejected as forbidden
 
+  Scenario: the activity feed includes manual entries and can be filtered by person and date
+    Given an organization with an employee
+    When the employee files a manual entry for a past day
+    And the owner opens the activity feed for that date range
+    Then the manual entry appears in the feed with its approval state
+    And filtering the feed by a different person returns nothing
+
   Scenario: holidays are readable by all members but only writable by admins
     Given an organization with an employee
     When the owner adds a holiday

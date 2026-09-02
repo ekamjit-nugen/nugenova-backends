@@ -1079,7 +1079,12 @@ export class AttendanceService {
 
   async getActivityFeed(
     c: Caller,
-    opts: { view?: 'timeline' | 'grouped'; startDate?: string; endDate?: string },
+    opts: {
+      view?: 'timeline' | 'grouped';
+      startDate?: string;
+      endDate?: string;
+      employeeId?: string;
+    },
   ) {
     const where: any = { organizationId: c.orgId, isDeleted: false };
     if (opts.startDate && opts.endDate) {
@@ -1093,39 +1098,46 @@ export class AttendanceService {
       const { start, end } = this.getTodayDateRange();
       where.date = Between(start, end);
     }
+    // Department-scoped roles are narrowed to their team; a person filter narrows
+    // further (and must stay inside the caller's scope).
     const scope = await this.departmentScopeIds(c);
     if (scope) where.employeeId = In([...scope]);
+    if (opts.employeeId && (!scope || scope.has(opts.employeeId))) {
+      where.employeeId = opts.employeeId;
+    }
     const rows = await this.attachEmployeeNames(
       await this.repo.find({ where, order: { date: 'DESC' }, take: MAX_LIST_ROWS }),
     );
 
+    // The clock sessions behind a record: real clock-ins carry per-session
+    // `workSegments`; a manual/imported entry has none, so fall back to its own
+    // top-level check-in/out. Without this fallback every manual entry — a large
+    // share of a backfilled month — would vanish from the activity feed.
+    const sessionsOf = (r: any): Array<{ checkInTime: string; checkOutTime?: string | null }> => {
+      if (r.workSegments && r.workSegments.length) return r.workSegments;
+      if (r.checkInTime) return [{ checkInTime: r.checkInTime, checkOutTime: r.checkOutTime ?? null }];
+      return [];
+    };
+
     const events: any[] = [];
     for (const r of rows as any[]) {
-      for (const seg of r.workSegments || []) {
+      const meta = { entryType: r.entryType, approvalStatus: r.approvalStatus ?? null, status: r.status };
+      for (const seg of sessionsOf(r)) {
         events.push({
-          employeeId: r.employeeId,
-          employeeName: r.employeeName,
-          type: 'clock_in',
-          at: seg.checkInTime,
-          date: r.date,
+          employeeId: r.employeeId, employeeName: r.employeeName,
+          type: 'clock_in', at: seg.checkInTime, date: r.date, ...meta,
         });
         if (seg.checkOutTime) {
           events.push({
-            employeeId: r.employeeId,
-            employeeName: r.employeeName,
-            type: 'clock_out',
-            at: seg.checkOutTime,
-            date: r.date,
+            employeeId: r.employeeId, employeeName: r.employeeName,
+            type: 'clock_out', at: seg.checkOutTime, date: r.date, ...meta,
           });
         }
       }
       if (r.status === 'absent') {
         events.push({
-          employeeId: r.employeeId,
-          employeeName: r.employeeName,
-          type: 'absent',
-          at: r.date,
-          date: r.date,
+          employeeId: r.employeeId, employeeName: r.employeeName,
+          type: 'absent', at: r.date, date: r.date, ...meta,
         });
       }
     }
@@ -1134,13 +1146,14 @@ export class AttendanceService {
     if (opts.view === 'grouped') {
       const byPerson = new Map<string, any>();
       for (const r of rows as any[]) {
-        byPerson.set(r.employeeId, {
-          employeeId: r.employeeId,
-          employeeName: r.employeeName,
-          status: r.status,
-          totalHours: r.totalWorkingHours || 0,
-          sessions: r.workSegments || [],
-        });
+        const g = byPerson.get(r.employeeId) || {
+          employeeId: r.employeeId, employeeName: r.employeeName,
+          status: r.status, totalHours: 0, days: 0, sessions: [] as any[],
+        };
+        g.totalHours = Math.round((g.totalHours + (Number(r.totalWorkingHours) || 0)) * 100) / 100;
+        g.days += 1;
+        g.sessions.push(...sessionsOf(r));
+        byPerson.set(r.employeeId, g);
       }
       return { view: 'grouped', data: [...byPerson.values()] };
     }

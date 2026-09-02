@@ -308,6 +308,53 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the activity feed includes manual entries and can be filtered by person and date', ({
+    given,
+    when,
+    and,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    const DATE = '2026-08-20';
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when('the employee files a manual entry for a past day', async () => {
+      await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z`, reason: 'Forgot to clock in' })
+        .expect(201);
+    });
+    let feed: any[];
+    and('the owner opens the activity feed for that date range', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=timeline&startDate=2026-08-01&endDate=2026-08-31`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      feed = res.body.data;
+    });
+    then('the manual entry appears in the feed with its approval state', () => {
+      // A manual entry has no workSegments — it must still surface via the fallback.
+      const evt = feed.find((e) => e.employeeId === employee.userId && e.type === 'clock_in');
+      expect(evt).toBeTruthy();
+      expect(evt.entryType).toBe('manual');
+      expect(evt.approvalStatus).toBe('pending');
+    });
+    and('filtering the feed by a different person returns nothing', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=timeline&startDate=2026-08-01&endDate=2026-08-31&employeeId=000000000000000000000099`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      expect(res.body.data.length).toBe(0);
+    });
+  });
+
   // ── holidays ────────────────────────────────────────────────────────────────
 
   test('holidays are readable by all members but only writable by admins', ({

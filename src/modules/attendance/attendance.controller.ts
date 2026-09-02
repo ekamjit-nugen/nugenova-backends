@@ -142,6 +142,7 @@ export class AttendanceController {
       view: q.view === 'grouped' ? 'grouped' : 'timeline',
       startDate: q.startDate,
       endDate: q.endDate,
+      employeeId: q.employeeId,
     });
     return { success: true, ...data };
   }
