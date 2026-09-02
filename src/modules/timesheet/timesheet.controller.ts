@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -33,6 +34,13 @@ export class TimesheetController {
     return id;
   }
 
+  /** The owner is the employer — they approve timesheets, they don't file them. */
+  private assertNotOwner(req: any): void {
+    if ((req.user?.orgRole || '').toLowerCase() === 'owner') {
+      throw new ForbiddenException('Owners approve timesheets — they don’t submit their own.');
+    }
+  }
+
   // ── self-service ────────────────────────────────────────────────────────────
 
   @Get('me')
@@ -43,6 +51,7 @@ export class TimesheetController {
 
   @Put('me')
   async saveMine(@Query('ref') ref: string, @Body() dto: SaveTimesheetDto, @Req() req: any) {
+    this.assertNotOwner(req);
     const data = await this.service.saveMine(this.orgId(req), req.user.userId, ref || undefined, dto);
     return { success: true, message: 'Timesheet saved', data };
   }
@@ -50,6 +59,7 @@ export class TimesheetController {
   @Post('me/submit')
   @HttpCode(HttpStatus.OK)
   async submitMine(@Query('ref') ref: string, @Body() dto: SaveTimesheetDto, @Req() req: any) {
+    this.assertNotOwner(req);
     const data = await this.service.submitMine(this.orgId(req), req.user.userId, ref || undefined, dto);
     return { success: true, message: 'Timesheet submitted for approval', data };
   }

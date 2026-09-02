@@ -57,20 +57,16 @@ export class TimesheetService {
     return cadence === 'weekly' ? `${fmt(s)} → ${fmt(e)}` : s.toISOString().slice(0, 7);
   }
 
-  /** Build the default entries for a period, pre-filled from attendance. */
+  /**
+   * The period's entries — built ONLY from days the employee actually logged
+   * time (from attendance clock-ins). No manufactured empty rows; the employee
+   * edits the hours the clock captured, then submits for approval.
+   */
   private async buildEntries(orgId: string, userId: string, start: Date, end: Date): Promise<TimesheetEntry[]> {
     const hours = await this.attendance.hoursByDay(orgId, userId, start, end);
-    const out: TimesheetEntry[] = [];
-    for (let t = start.getTime(); t <= end.getTime(); t += DAY_MS) {
-      const d = new Date(t);
-      const key = dayKey(d);
-      const h = hours.get(key) ?? 0;
-      const weekend = d.getUTCDay() === 0 || d.getUTCDay() === 6;
-      // Weekdays always appear; weekends only when time was actually logged.
-      if (weekend && h <= 0) continue;
-      out.push({ date: key, hours: r2(h), note: '' });
-    }
-    return out;
+    return [...hours.keys()]
+      .sort()
+      .map((date) => ({ date, hours: r2(hours.get(date) ?? 0), note: '' }));
   }
 
   private view(t: TimesheetEntity, cadence: TimesheetCadence) {
