@@ -34,6 +34,13 @@ export class StatutoryIdsDto {
   @IsOptional() @IsString() @MaxLength(24) esicNumber?: string | null;
 }
 
+export class BankAccountDto {
+  @IsOptional() @IsString() @MaxLength(120) accountHolder?: string | null;
+  @IsOptional() @IsString() @MaxLength(34) accountNumber?: string | null;
+  @IsOptional() @IsString() @MaxLength(15) ifsc?: string | null;
+  @IsOptional() @IsString() @MaxLength(80) bankName?: string | null;
+}
+
 export class RecurringDeductionDto {
   @IsString() @MaxLength(20) code: string;
   @IsString() @MaxLength(60) name: string;
@@ -74,6 +81,12 @@ export class SetSalaryDto {
   @ValidateNested()
   @Type(() => StatutoryIdsDto)
   statutoryIds?: StatutoryIdsDto;
+
+  /** Bank account for the salary payout file. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BankAccountDto)
+  bankAccount?: BankAccountDto;
 
   @IsOptional()
   @IsString()

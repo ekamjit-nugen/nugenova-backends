@@ -20,6 +20,14 @@ export interface TaxInputs {
   otherExemptions?: number;
 }
 
+/** Bank account for salary disbursement (sticky across salary revisions). */
+export interface BankAccount {
+  accountHolder?: string | null;
+  accountNumber?: string | null;
+  ifsc?: string | null;
+  bankName?: string | null;
+}
+
 /** Statutory identifiers for filings (kept sticky across salary revisions). */
 export interface StatutoryIds {
   /** Employee PAN — for Form 16 & the TDS (24Q) return. */
@@ -86,6 +94,10 @@ export class SalaryStructureEntity extends PgBaseEntity {
   /** PAN / UAN / ESIC identifiers used on registers & Form 16. */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   statutoryIds: StatutoryIds;
+
+  /** Bank account for the salary payout file. */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  bankAccount: BankAccount;
 
   @Column({ type: 'timestamptz' })
   effectiveFrom: Date;

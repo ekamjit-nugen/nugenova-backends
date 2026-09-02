@@ -204,6 +204,14 @@ export class PayrollController {
     return { success: true, data };
   }
 
+  /** Bank payout (NEFT) file for a finalized month. */
+  @Get('payout')
+  @RequirePermission('payroll', 'view')
+  async payout(@Query('month') month: string, @Query('year') year: string, @Req() req: any) {
+    const data = await this.payroll.generatePayout(this.orgId(req), Number(month), Number(year));
+    return { success: true, data };
+  }
+
   @Get('payslips')
   @RequirePermission('payroll', 'view')
   async listPayslips(

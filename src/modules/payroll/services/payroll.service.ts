@@ -24,6 +24,7 @@ import { resolveLop, computeSimplePayslip, rupeesInWords } from '../payroll-calc
 import { computeStatutory, PayrollStatutoryConfig } from '../statutory';
 import { computeMonthlyTds, regimeSpec } from '../tds';
 import { buildReturn, ReturnFile, ReturnRow, ReturnKind } from '../payroll-returns';
+import { buildPayoutFile, PayoutBeneficiary, PayoutFile } from '../bank-payout';
 import { buildForm16PartB, fyQuarter, Form16PartB } from '../form16';
 import { TaxDeclarationService } from './tax-declaration.service';
 import { TaxInputs } from '../entities/salary-structure.entity';
@@ -93,6 +94,9 @@ export class PayrollService {
     const statutoryIds = dto.statutoryIds
       ? this.normalizeStatutoryIds(dto.statutoryIds)
       : prior?.statutoryIds || {};
+    const bankAccount = dto.bankAccount
+      ? this.normalizeBank(dto.bankAccount)
+      : prior?.bankAccount || {};
     const saved = await this.salaries.save(
       this.salaries.create({
         organizationId: orgId,
@@ -104,6 +108,7 @@ export class PayrollService {
         recurringDeductions,
         taxInputs,
         statutoryIds,
+        bankAccount,
         effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
         supersedes: prior?.id ?? null,
         createdBy: actorId,
@@ -174,6 +179,17 @@ export class PayrollService {
     return { pan: clean(input.pan, 10), uan: clean(input.uan, 12), esicNumber: clean(input.esicNumber, 17) };
   }
 
+  /** Clean bank details — trim, upper-case IFSC, strip spaces from the account no. */
+  private normalizeBank(input: { accountHolder?: string | null; accountNumber?: string | null; ifsc?: string | null; bankName?: string | null }) {
+    const s = (v: unknown, max: number) => (String(v ?? '').trim().slice(0, max) || null);
+    return {
+      accountHolder: s(input.accountHolder, 120),
+      accountNumber: (String(input.accountNumber ?? '').replace(/\s+/g, '').slice(0, 34) || null),
+      ifsc: (String(input.ifsc ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11) || null),
+      bankName: s(input.bankName, 80),
+    };
+  }
+
   /** The Basic component amount that drives PF (else the whole salary is Basic). */
   private basicOf(salary: SalaryStructureEntity): number {
     const comps = salary.components || [];
@@ -228,6 +244,12 @@ export class PayrollService {
         pan: s.statutoryIds?.pan ?? null,
         uan: s.statutoryIds?.uan ?? null,
         esicNumber: s.statutoryIds?.esicNumber ?? null,
+      },
+      bankAccount: {
+        accountHolder: s.bankAccount?.accountHolder ?? null,
+        accountNumber: s.bankAccount?.accountNumber ?? null,
+        ifsc: s.bankAccount?.ifsc ?? null,
+        bankName: s.bankAccount?.bankName ?? null,
       },
       effectiveFrom: s.effectiveFrom,
     };
@@ -831,6 +853,32 @@ export class PayrollService {
     const idsByUser = new Map(salaries.map((s) => [s.userId, s.statutoryIds || {}]));
     const returnRows: ReturnRow[] = rows.map((p) => this.toReturnRow(p, idsByUser.get(p.userId)));
     return buildReturn(type, returnRows, month, year);
+  }
+
+  /** Bank payout (NEFT) file for a finalized month — net pay per employee. */
+  async generatePayout(orgId: string, month: number, year: number): Promise<PayoutFile> {
+    if (!month || month < 1 || month > 12) throw new BadRequestException('A valid month is required');
+    if (!year || year < 2000 || year > 2100) throw new BadRequestException('A valid year is required');
+    const slips = await this.payslips.find({
+      where: { organizationId: orgId, isDeleted: false, status: 'final', month, year },
+      order: { createdAt: 'ASC' },
+    });
+    const salaries = await this.salaries.find({
+      where: { organizationId: orgId, isActive: true, isDeleted: false },
+    });
+    const bankByUser = new Map(salaries.map((s) => [s.userId, s.bankAccount || {}]));
+    const beneficiaries: PayoutBeneficiary[] = slips.map((p) => {
+      const bank = bankByUser.get(p.userId) || {};
+      return {
+        name: p.employeeSnapshot?.name || p.employeeSnapshot?.email || 'Employee',
+        accountHolder: bank.accountHolder ?? null,
+        accountNumber: bank.accountNumber ?? null,
+        ifsc: bank.ifsc ?? null,
+        bankName: bank.bankName ?? null,
+        netPay: Number(p.netPay || 0),
+      };
+    });
+    return buildPayoutFile(beneficiaries, month, year);
   }
 
   /** Flatten one payslip to the register row shape (money read straight off the slip). */

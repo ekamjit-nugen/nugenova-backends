@@ -46,7 +46,12 @@ defineFeature(feature, (test) => {
       .api()
       .put(`${API}/payroll/salary/${member.userId}`)
       .set('Authorization', `Bearer ${o.ownerToken}`)
-      .send({ monthlySalary: 30000, effectiveFrom: '2026-01-01', statutoryIds: { uan: '100200300400' } })
+      .send({
+        monthlySalary: 30000,
+        effectiveFrom: '2026-01-01',
+        statutoryIds: { uan: '100200300400' },
+        bankAccount: { accountHolder: 'Bob Ray', accountNumber: '123456789012', ifsc: 'HDFC0001234' },
+      })
       .expect(200);
     await h
       .api()
@@ -99,6 +104,34 @@ defineFeature(feature, (test) => {
       // Basic 30000 → PF wage capped 15000 → employer 1800 = EPS 1250 + EPF 550.
       expect(pf.content).toContain('1250');
       expect(pf.content).toContain('550');
+    });
+  });
+
+  test('owner downloads the bank payout file', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let payout: any;
+
+    given('an organization that has finalized payroll with statutory deductions', async () => {
+      ({ o, member } = await setupFinalized());
+    });
+    when('the owner downloads the bank payout file', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/payroll/payout?month=${MONTH}&year=${YEAR}`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .expect(200);
+      payout = res.body.data;
+    });
+    then("the payout lists the employee's account, IFSC and net pay", () => {
+      expect(payout.count).toBe(1);
+      expect(payout.filename).toBe('salary-payout-2026-09.csv');
+      expect(payout.totalAmount).toBeGreaterThan(0);
+      expect(payout.content).toContain('123456789012');
+      expect(payout.content).toContain('HDFC0001234');
+      expect(payout.content).toContain('NEFT');
+      expect(payout.skipped).toEqual([]);
+      expect(member).toBeDefined();
     });
   });
 
