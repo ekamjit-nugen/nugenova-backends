@@ -72,6 +72,18 @@ Feature: Attendance — clocking, scope, and tenant isolation
     And the owner opens the daily activity view for that date range
     Then there is a single row for that day with its clock-in and hours
 
+  Scenario: a clock-in is rejected when the day already has attendance covering that time
+    Given an organization with an employee
+    And the employee already has a session recorded until later today
+    When the employee tries to clock in now
+    Then the clock-in is rejected as a conflict
+
+  Scenario: a manual entry and a clock-in on the same day fold into one daily card
+    Given an organization with an employee
+    And the employee has both a manual entry and a separate record on the same past day
+    When the owner opens the daily activity view for that date range
+    Then that day shows as a single consolidated row
+
   Scenario: holidays are readable by all members but only writable by admins
     Given an organization with an employee
     When the owner adds a holiday

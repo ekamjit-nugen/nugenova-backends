@@ -433,7 +433,11 @@ export class AttendanceService {
       },
       order: { date: 'ASC' },
     });
-    return rows.find((r) => r.entryType !== 'manual') || null;
+    // Prefer a live clock (`system`) record to append to, but fall back to ANY
+    // record for the day — including an approved manual entry — so a clock-in
+    // never creates a SECOND row for a date that already has attendance. (The
+    // overlap guard in checkIn then rejects a clock-in inside that day's hours.)
+    return rows.find((r) => r.entryType !== 'manual') || rows[0] || null;
   }
 
   async checkIn(c: Caller, dto: CheckInDto): Promise<AttendanceEntity> {
@@ -468,9 +472,41 @@ export class AttendanceService {
           'You are already clocked in. Please clock out first.',
         );
       }
+      // A new session must start AFTER every earlier session that day ended — you
+      // can't clock in for a time already covered by a completed session (e.g. a
+      // 09:00–18:00 day already recorded, then a 16:06 clock-in).
+      const priorOuts = [
+        ...(record.workSegments || []).map((s) => (s.checkOutTime ? new Date(s.checkOutTime).getTime() : 0)),
+        record.checkOutTime ? new Date(record.checkOutTime).getTime() : 0,
+      ];
+      const latestOut = Math.max(0, ...priorOuts);
+      if (latestOut && now.getTime() <= latestOut) {
+        const until = new Date(latestOut).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: this.orgTimezone(),
+        });
+        throw new ConflictException(
+          `You already have attendance recorded until ${until} today — you can't clock in for an earlier time.`,
+        );
+      }
+      // A manual/imported entry keeps its window in the top-level check-in/out
+      // (no segments) — materialise it as a segment so appending a live session
+      // doesn't drop its hours on the next recompute.
+      const existingSegments =
+        record.workSegments && record.workSegments.length
+          ? record.workSegments
+          : record.checkInTime
+            ? [
+                {
+                  checkInTime: new Date(record.checkInTime).toISOString(),
+                  checkOutTime: record.checkOutTime ? new Date(record.checkOutTime).toISOString() : null,
+                },
+              ]
+            : [];
       // Reopen the existing day record with a fresh session segment.
       record.workSegments = [
-        ...(record.workSegments || []),
+        ...existingSegments,
         {
           checkInTime: now.toISOString(),
           checkOutTime: null,
@@ -1180,41 +1216,70 @@ export class AttendanceService {
     }
 
     if (opts.view === 'daily') {
-      // One consolidated row per attendance record (per employee, per day) — the
-      // clock-in→clock-out span the UI draws as a bar, plus late / missed flags.
-      const days = (rows as any[]).map((r) => {
+      // ONE consolidated card per employee per day. A day may span several
+      // records (e.g. an approved manual entry plus a live clock-in) or several
+      // sessions in one record — all fold into a single row whose sessions the
+      // UI draws as bar segments from clock-in to clock-out.
+      const byDay = new Map<string, any>();
+      for (const r of rows as any[]) {
         const sessions = sessionsOf(r).map((s) => ({
           in: s.checkInTime ? new Date(s.checkInTime).toISOString() : null,
           out: s.checkOutTime ? new Date(s.checkOutTime).toISOString() : null,
         }));
-        const firstIn = r.checkInTime
-          ? new Date(r.checkInTime).toISOString()
-          : sessions[0]?.in ?? null;
-        const lastOut = r.checkOutTime
-          ? new Date(r.checkOutTime).toISOString()
-          : sessions[sessions.length - 1]?.out ?? null;
-        const openSession = sessions.length > 0 && !sessions[sessions.length - 1].out;
-        return {
+        const dateKey = new Date(r.date).toISOString().slice(0, 10);
+        const key = `${r.employeeId}|${dateKey}`;
+        const prev = byDay.get(key);
+        const merged = prev || {
           employeeId: r.employeeId,
           employeeName: r.employeeName,
           date: r.date,
-          sessions,
+          sessions: [] as Array<{ in: string | null; out: string | null }>,
+          totalHours: 0,
+          effectiveHours: 0,
+          status: r.status,
+          isLateArrival: false,
+          lateByMinutes: 0,
+          missedCheckout: false,
+          autoCheckedOut: false,
+          approvalStatus: null as string | null,
+          entryType: r.entryType,
+          _hoursOfMain: -1,
+        };
+        merged.sessions.push(...sessions);
+        merged.totalHours += Number(r.totalWorkingHours) || 0;
+        merged.effectiveHours += Number(r.effectiveWorkingHours) || 0;
+        merged.isLateArrival = merged.isLateArrival || !!r.isLateArrival;
+        merged.lateByMinutes = Math.max(merged.lateByMinutes, r.lateByMinutes || 0);
+        merged.missedCheckout = merged.missedCheckout || !!r.missedCheckout;
+        merged.autoCheckedOut = merged.autoCheckedOut || !!r.autoCheckedOut;
+        if (r.approvalStatus === 'pending') merged.approvalStatus = 'pending';
+        else if (!merged.approvalStatus) merged.approvalStatus = r.approvalStatus ?? null;
+        // Headline status comes from the record with the most worked hours
+        // (the substantive session), so a 0-hour stub doesn't override a full day.
+        const hrs = Number(r.effectiveWorkingHours) || 0;
+        if (hrs > merged._hoursOfMain) { merged.status = r.status; merged._hoursOfMain = hrs; }
+        if (r.entryType !== 'manual') merged.entryType = r.entryType;
+        byDay.set(key, merged);
+      }
+      const days = [...byDay.values()].map((m) => {
+        m.sessions.sort((a: any, b: any) => (a.in || '').localeCompare(b.in || ''));
+        const firstIn = m.sessions.find((s: any) => s.in)?.in ?? null;
+        const outs = m.sessions.filter((s: any) => s.out).map((s: any) => s.out);
+        const openSession = m.sessions.some((s: any) => s.in && !s.out);
+        const lastOut = outs.length ? outs[outs.length - 1] : null;
+        const { _hoursOfMain, ...rest } = m;
+        return {
+          ...rest,
           firstIn,
           lastOut,
-          totalHours: Number(r.totalWorkingHours) || 0,
-          effectiveHours: Number(r.effectiveWorkingHours) || 0,
-          status: r.status,
-          isLateArrival: !!r.isLateArrival,
-          lateByMinutes: r.lateByMinutes || 0,
-          // "No clock-out" = an open session, or a session the reconcile cron
-          // auto-closed after a forgotten checkout.
-          missedCheckout: !!r.missedCheckout || openSession,
-          autoCheckedOut: !!r.autoCheckedOut,
           openSession,
-          approvalStatus: r.approvalStatus ?? null,
-          entryType: r.entryType,
+          missedCheckout: m.missedCheckout || openSession,
+          totalHours: Math.round(m.totalHours * 100) / 100,
+          effectiveHours: Math.round(m.effectiveHours * 100) / 100,
         };
       });
+      // Newest day first, then by name.
+      days.sort((a, b) => (String(b.date).localeCompare(String(a.date))) || String(a.employeeName || '').localeCompare(String(b.employeeName || '')));
       return { view: 'daily', data: days };
     }
 

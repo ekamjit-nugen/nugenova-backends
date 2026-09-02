@@ -11,6 +11,7 @@ import {
 } from '../../organization/features/support/org-harness';
 import { AttendanceEntity } from '../entities/attendance.entity';
 import { HolidayEntity } from '../entities/holiday.entity';
+import { dayAnchorUtc, DEFAULT_TZ } from '../util/tz-day.util';
 
 const feature = loadFeature('./attendance.feature', { loadRelativePath: true });
 
@@ -387,6 +388,100 @@ defineFeature(feature, (test) => {
       expect(mine[0].lastOut).toBeTruthy();
       expect(mine[0].missedCheckout).toBe(false);
       expect(Number(mine[0].effectiveHours)).toBeGreaterThan(0);
+    });
+  });
+
+  test('a clock-in is rejected when the day already has attendance covering that time', ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    let res: request.Response;
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    and('the employee already has a session recorded until later today', async () => {
+      const now = Date.now();
+      const anchor = dayAnchorUtc(new Date(now), DEFAULT_TZ);
+      const inAt = new Date(now - 60 * 60 * 1000); // 1h ago
+      const outAt = new Date(now + 3 * 60 * 60 * 1000); // 3h from now (future)
+      await attendance.save(
+        attendance.create({
+          organizationId: org.orgId,
+          employeeId: employee.userId,
+          date: anchor,
+          checkInTime: inAt,
+          checkOutTime: outAt,
+          status: 'present',
+          entryType: 'system',
+          workSegments: [{ checkInTime: inAt.toISOString(), checkOutTime: outAt.toISOString() }] as any,
+        }),
+      );
+    });
+    when('the employee tries to clock in now', async () => {
+      res = await h
+        .api()
+        .post(`${API}/attendance/check-in`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({});
+    });
+    then('the clock-in is rejected as a conflict', () => {
+      expect(res.status).toBe(409);
+      expect(String(res.body.message)).toMatch(/already have attendance recorded/i);
+    });
+  });
+
+  test('a manual entry and a clock-in on the same day fold into one daily card', ({
+    given,
+    and,
+    when,
+    then,
+  }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    const DATE = '2026-08-19';
+    let rows: any[];
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    and('the employee has both a manual entry and a separate record on the same past day', async () => {
+      await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T07:30:00.000Z`, reason: 'Morning' })
+        .expect(201);
+      // A second (system) record for the same day — the partial unique index only
+      // covers system rows, so a manual + system pair can co-exist.
+      await attendance.save(
+        attendance.create({
+          organizationId: org.orgId,
+          employeeId: employee.userId,
+          date: new Date(`${DATE}T00:00:00.000Z`),
+          checkInTime: new Date(`${DATE}T09:00:00.000Z`),
+          checkOutTime: new Date(`${DATE}T12:30:00.000Z`),
+          status: 'present',
+          entryType: 'system',
+          workSegments: [{ checkInTime: `${DATE}T09:00:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z` }] as any,
+        }),
+      );
+    });
+    when('the owner opens the daily activity view for that date range', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=daily&startDate=2026-08-01&endDate=2026-08-31`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      rows = res.body.data.filter((r: any) => r.employeeId === employee.userId);
+    });
+    then('that day shows as a single consolidated row', () => {
+      expect(rows.length).toBe(1); // merged, not two cards
+      expect(rows[0].sessions.length).toBe(2); // both sessions kept for the bar
     });
   });
 
