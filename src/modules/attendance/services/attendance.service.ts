@@ -571,6 +571,27 @@ export class AttendanceService {
     return saved;
   }
 
+  /**
+   * Auto-close a session that was left open past the end of the day. Closes the
+   * open segment (and top-level checkout) at `closeAt`, stamps the record as an
+   * auto/missed checkout, recomputes worked hours + status, and saves. Used by
+   * the missed-checkout reconcile cron — never by an interactive request.
+   */
+  async autoCloseStaleSession(record: AttendanceEntity, closeAt: Date): Promise<AttendanceEntity> {
+    const segments = (record.workSegments || []).map((s) => ({ ...s }));
+    const openSeg = segments.find((s) => !s.checkOutTime);
+    if (openSeg) {
+      openSeg.checkOutTime = closeAt.toISOString();
+      record.workSegments = segments;
+    }
+    record.checkOutTime = closeAt;
+    record.missedCheckout = true;
+    record.autoCheckedOut = true;
+    record.missedCheckoutAt = new Date();
+    await this.recomputeWorkedFields(record);
+    return this.repo.save(record);
+  }
+
   // ── read: today / my ────────────────────────────────────────────────────────
 
   async getTodayStatus(c: Caller) {

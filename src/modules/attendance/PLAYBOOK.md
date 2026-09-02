@@ -202,15 +202,37 @@ the pending-approvals queue.
 
 - **Shift CRUD** — the resolver already honours `shift`-category timing policies;
   a dedicated shift-management surface lands later.
-- **Crons** — absence marking, missed-clock-in nudge, daily exception digest,
-  and missed-checkout reconciliation need **HR** (`listActiveEmployees`),
-  **Leave** (approved-leave exclusion) and **Notification**.
-- **Alerts & escalation** — late/early/overtime/geo-unverified alerts and
-  manager escalation need Notification.
 - **Payroll public-api** — `getDaysSummary` / `getWorkingDaysInMonth/Range`
   land when **Payroll** migrates (consumer).
 - **Approved-leave clock-in guard (G-C1)** and **vendor clock-in gating** —
   land with Leave and the vendor/HR surfaces.
+
+## Automation (crons) — SHIPPED
+
+`AttendanceCronService` runs four multi-tenant scheduled jobs (each scoped to
+one org for testing/manual re-run via an optional `orgId`):
+
+- **reconcileMissedCheckouts** (`0 */3 * * *`) — auto-closes any session left
+  open past `STALE_OPEN_HOURS` (18h) using a work-timing estimate; stamps
+  `missedCheckout`/`autoCheckedOut`/`missedCheckoutAt`; notifies the employee +
+  reporting manager.
+- **markAbsentees** (`0 8 * * *`, IST) — creates a `system` `absent` record for
+  every tracked employee (active, non owner/admin) with no record on the
+  previous working day; skips weekends, org holidays, pre-`joinedAt`, and anyone
+  on approved **leave** or **WFH**; notifies employee + escalates to the
+  reporting manager.
+- **nudgeMissedClockIns** (`0 11 * * *`, IST) — reminds tracked employees not yet
+  clocked in today (same exclusions); one aggregated summary to attendance
+  approvers.
+- **sendDailyExceptionDigest** (`30 8 * * *`, IST) — rolls up the prior day's
+  absent/late/half-day/missed-checkout counts to approvers (only when non-zero).
+
+Escalation is targeted at the subject's **reporting manager** (from onboarding),
+never fanned out per-employee to every approver, so a large roster can't storm
+the inbox. All wired to **Leave** (approved-leave exclusion), **WFH**,
+**Policy** (work timing), **Notification**, and org holidays — the HR-roster
+dependency is met by active org memberships. Covered by `attendance-cron.feature`
+(4 e2e).
 
 ### Known Phase-1 limitations (not regressions — bounded/documented)
 
