@@ -148,10 +148,28 @@ export class AuthService {
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
     const otpHash = await bcrypt.hash(otp, 10);
 
-    let user = await this.userRepo.findOne({
+    const user = await this.userRepo.findOne({
       where: { email: email.toLowerCase() },
     });
-    const isNewUser = !user;
+
+    // Invite-only sign-in: an email with no account is rejected outright (no
+    // pending account is created and no code is sent). Users are always invited
+    // or provisioned, so an unknown email is a genuine "no account" — we surface
+    // that plainly. (This deliberately trades the anti-enumeration posture for a
+    // clearer error, per product decision.)
+    if (!user) {
+      throw new HttpException(
+        {
+          success: false,
+          error: {
+            code: 'NO_ACCOUNT',
+            message: 'No account found for this email. Ask your admin to invite you.',
+          },
+        },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const isNewUser = false;
 
     // In dev, DEV_OTP_BYPASS makes the code always `000000`, so throttling the
     // send just gets in the way — skip the rate-limit + resend cooldown. NEVER
@@ -160,71 +178,54 @@ export class AuthService {
       process.env.DEV_OTP_BYPASS === 'true' &&
       process.env.NODE_ENV !== 'production';
 
-    if (user) {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      if (
-        !devOtpBypass &&
-        user.otpLastRequestedAt &&
-        user.otpLastRequestedAt > oneHourAgo &&
-        (user.otpRequestCount || 0) >= this.OTP_RATE_LIMIT_PER_HOUR
-      ) {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    if (
+      !devOtpBypass &&
+      user.otpLastRequestedAt &&
+      user.otpLastRequestedAt > oneHourAgo &&
+      (user.otpRequestCount || 0) >= this.OTP_RATE_LIMIT_PER_HOUR
+    ) {
+      throw new HttpException(
+        {
+          success: false,
+          error: {
+            code: 'RATE_LIMIT_OTP',
+            message: 'Too many OTP requests. Please try again later.',
+          },
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    if (!devOtpBypass && user.otpLastRequestedAt) {
+      const secondsSinceLast =
+        (Date.now() - user.otpLastRequestedAt.getTime()) / 1000;
+      if (secondsSinceLast < this.OTP_RESEND_COOLDOWN_SECONDS) {
         throw new HttpException(
           {
             success: false,
             error: {
-              code: 'RATE_LIMIT_OTP',
-              message: 'Too many OTP requests. Please try again later.',
+              code: 'OTP_COOLDOWN',
+              message: `Please wait ${Math.ceil(
+                this.OTP_RESEND_COOLDOWN_SECONDS - secondsSinceLast,
+              )} seconds before requesting a new OTP.`,
             },
           },
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-
-      if (!devOtpBypass && user.otpLastRequestedAt) {
-        const secondsSinceLast =
-          (Date.now() - user.otpLastRequestedAt.getTime()) / 1000;
-        if (secondsSinceLast < this.OTP_RESEND_COOLDOWN_SECONDS) {
-          throw new HttpException(
-            {
-              success: false,
-              error: {
-                code: 'OTP_COOLDOWN',
-                message: `Please wait ${Math.ceil(
-                  this.OTP_RESEND_COOLDOWN_SECONDS - secondsSinceLast,
-                )} seconds before requesting a new OTP.`,
-              },
-            },
-            HttpStatus.TOO_MANY_REQUESTS,
-          );
-        }
-      }
-
-      if (!user.otpLastRequestedAt || user.otpLastRequestedAt < oneHourAgo) {
-        user.otpRequestCount = 0;
-      }
-
-      user.otp = otpHash;
-      user.otpExpiresAt = otpExpiresAt;
-      user.otpAttempts = 0;
-      user.otpLastRequestedAt = new Date();
-      user.otpRequestCount = (user.otpRequestCount || 0) + 1;
-      await this.userRepo.save(user);
-    } else {
-      user = this.userRepo.create({
-        email: email.toLowerCase(),
-        password: 'pending-otp-' + randomUUID(),
-        firstName: 'Pending',
-        lastName: 'User',
-        otp: otpHash,
-        otpExpiresAt,
-        otpAttempts: 0,
-        otpLastRequestedAt: new Date(),
-        otpRequestCount: 1,
-        isActive: false,
-        setupStage: 'otp_verified',
-      });
-      await this.userRepo.save(user);
     }
+
+    if (!user.otpLastRequestedAt || user.otpLastRequestedAt < oneHourAgo) {
+      user.otpRequestCount = 0;
+    }
+
+    user.otp = otpHash;
+    user.otpExpiresAt = otpExpiresAt;
+    user.otpAttempts = 0;
+    user.otpLastRequestedAt = new Date();
+    user.otpRequestCount = (user.otpRequestCount || 0) + 1;
+    await this.userRepo.save(user);
 
     // Never print the OTP in production logs (that would leak a live login
     // code); only surface it for local/dev debugging.
