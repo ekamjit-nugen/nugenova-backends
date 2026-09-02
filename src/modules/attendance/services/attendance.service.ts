@@ -759,6 +759,25 @@ export class AttendanceService {
     return { workingDays, presentDays, halfDays };
   }
 
+  /**
+   * Worked hours per calendar day (YYYY-MM-DD → hours) from the employee's
+   * attendance records in a range. Used to pre-fill timesheets. Prefers the
+   * effective working hours, falling back to total, else 0.
+   */
+  async hoursByDay(orgId: string, userId: string, start: Date, end: Date): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (end.getTime() < start.getTime()) return out;
+    const rows = await this.repo.find({
+      where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
+    });
+    for (const r of rows) {
+      const key = r.date.toISOString().slice(0, 10);
+      const hours = r.effectiveWorkingHours ?? r.totalWorkingHours ?? 0;
+      out.set(key, Math.round((Number(hours) || 0) * 100) / 100);
+    }
+    return out;
+  }
+
   // ── manual entry + approval ─────────────────────────────────────────────────
 
   async createManualEntry(c: Caller, dto: ManualEntryDto): Promise<AttendanceEntity> {

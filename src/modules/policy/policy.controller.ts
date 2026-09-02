@@ -26,6 +26,7 @@ import {
   UpdateOnboardingConfigDto,
   UpdateLeaveConfigDto,
   UpdatePayrollConfigDto,
+  UpdateTimesheetConfigDto,
 } from './dto';
 
 class SetActiveDto {
@@ -229,6 +230,21 @@ export class PolicyController {
       req.user.userId,
     );
     return { success: true, message: 'Payroll configuration updated', data };
+  }
+
+  /** The org's timesheet policy (whether required + weekly/monthly cadence). */
+  @Get('timesheet-config')
+  @RequirePermission('policies', 'view')
+  async getTimesheetConfig(@Req() req: any) {
+    const data = await this.policies.getTimesheetConfig(this.orgId(req));
+    return { success: true, data };
+  }
+
+  @Put('timesheet-config')
+  @RequirePermission('policies', 'edit')
+  async updateTimesheetConfig(@Body() dto: UpdateTimesheetConfigDto, @Req() req: any) {
+    const data = await this.policies.upsertTimesheetConfig(this.orgId(req), dto, req.user.userId);
+    return { success: true, message: 'Timesheet policy updated', data };
   }
 
   @Get()

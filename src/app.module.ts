@@ -14,6 +14,7 @@ import { PolicyModule } from './modules/policy/policy.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LeaveModule } from './modules/leave/leave.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
+import { TimesheetModule } from './modules/timesheet/timesheet.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 
@@ -42,6 +43,7 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
     AttendanceModule,
     LeaveModule,
     PayrollModule,
+    TimesheetModule,
     NotificationModule,
     AdminPlatformModule,
   ],

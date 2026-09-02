@@ -56,6 +56,12 @@ import {
   deductionTemplates,
   PayrollConfigInput,
 } from './payroll-config';
+import {
+  TimesheetConfig,
+  TimesheetConfigInput,
+  resolveTimesheetConfig,
+  sanitizeTimesheetConfig,
+} from './timesheet-config';
 import { PayrollStatutoryConfig } from '../payroll/statutory';
 
 /** What attendance needs to govern a clock-in for one employee. */
@@ -594,6 +600,49 @@ export class PolicyService {
       });
     }
     policy.extraConfig = { ...(policy.extraConfig || {}), payroll: clean };
+    policy.updatedBy = userId;
+    await this.repo.save(policy);
+    return clean;
+  }
+
+  // ── timesheet config ──────────────────────────────────────────────────────────
+
+  private async findTimesheetPolicy(orgId: string): Promise<PolicyEntity | null> {
+    return this.repo.findOne({
+      where: { organizationId: orgId, category: 'timesheet', applicableTo: 'all', isDeleted: false },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  async getTimesheetConfig(orgId: string): Promise<TimesheetConfig> {
+    const policy = await this.findTimesheetPolicy(orgId);
+    return resolveTimesheetConfig((policy?.extraConfig?.timesheet as TimesheetConfigInput) || null);
+  }
+
+  async upsertTimesheetConfig(orgId: string, input: TimesheetConfigInput, userId: string): Promise<TimesheetConfig> {
+    const current = await this.getTimesheetConfig(orgId);
+    const clean = sanitizeTimesheetConfig({
+      enabled: input.enabled ?? current.enabled,
+      cadence: input.cadence ?? current.cadence,
+      allowEdits: input.allowEdits ?? current.allowEdits,
+    });
+    let policy = await this.findTimesheetPolicy(orgId);
+    if (!policy) {
+      policy = this.repo.create({
+        organizationId: orgId,
+        policyName: 'Timesheet Policy',
+        description: 'How often employees submit timesheets (weekly or monthly).',
+        category: 'timesheet',
+        applicableTo: 'all',
+        applicableIds: [],
+        excludedEmployeeIds: [],
+        isActive: true,
+        acknowledgementRequired: false,
+        createdBy: userId,
+        updatedBy: userId,
+      });
+    }
+    policy.extraConfig = { ...(policy.extraConfig || {}), timesheet: clean };
     policy.updatedBy = userId;
     await this.repo.save(policy);
     return clean;

@@ -230,6 +230,12 @@ export class EmployerIdsDto {
   @IsOptional() @IsString() @MaxLength(16) pan?: string | null;
 }
 
+export class UpdateTimesheetConfigDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsIn(['weekly', 'monthly']) cadence?: 'weekly' | 'monthly';
+  @IsOptional() @IsBoolean() allowEdits?: boolean;
+}
+
 export class UpdatePayrollConfigDto {
   @IsOptional()
   @ValidateNested()
