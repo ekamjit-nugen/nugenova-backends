@@ -1261,12 +1261,40 @@ export class AttendanceService {
         if (r.entryType !== 'manual') merged.entryType = r.entryType;
         byDay.set(key, merged);
       }
+      // The bar scales to each employee's work-timing policy (e.g. 09:00–18:00) —
+      // resolve it once per person so a late clock-in reads correctly against the
+      // policy start, not a fixed clock face.
+      const hhmmToMin = (s?: string | null): number | null => {
+        if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return null;
+        const [h, mm] = s.split(':').map(Number);
+        return h * 60 + mm;
+      };
+      const uniqueEmployees = [...new Set([...byDay.values()].map((m) => m.employeeId))];
+      const windowByEmp = new Map<string, { startMin: number; endMin: number }>();
+      await Promise.all(
+        uniqueEmployees.map(async (uid) => {
+          let startMin = 540; // 09:00 fallback (DEFAULT_WORK_TIMING)
+          let endMin = 1080; // 18:00
+          try {
+            const { wt } = await this.resolveContext(uid, c.orgId);
+            const s = hhmmToMin(wt.startTime);
+            const e = hhmmToMin(wt.endTime);
+            if (s !== null) startMin = s;
+            if (e !== null && e > s!) endMin = e;
+          } catch {
+            /* fall back to default window */
+          }
+          windowByEmp.set(uid, { startMin, endMin });
+        }),
+      );
+
       const days = [...byDay.values()].map((m) => {
         m.sessions.sort((a: any, b: any) => (a.in || '').localeCompare(b.in || ''));
         const firstIn = m.sessions.find((s: any) => s.in)?.in ?? null;
         const outs = m.sessions.filter((s: any) => s.out).map((s: any) => s.out);
         const openSession = m.sessions.some((s: any) => s.in && !s.out);
         const lastOut = outs.length ? outs[outs.length - 1] : null;
+        const win = windowByEmp.get(m.employeeId) || { startMin: 540, endMin: 1080 };
         const { _hoursOfMain, ...rest } = m;
         return {
           ...rest,
@@ -1276,6 +1304,8 @@ export class AttendanceService {
           missedCheckout: m.missedCheckout || openSession,
           totalHours: Math.round(m.totalHours * 100) / 100,
           effectiveHours: Math.round(m.effectiveHours * 100) / 100,
+          policyStartMin: win.startMin,
+          policyEndMin: win.endMin,
         };
       });
       // Newest day first, then by name.
