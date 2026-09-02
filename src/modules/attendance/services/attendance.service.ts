@@ -682,7 +682,8 @@ export class AttendanceService {
       where.date = Between(new Date(startDate), new Date(endDate));
     }
     const rows = await this.repo.find({ where, order: { date: 'DESC' } });
-    return this.attachEmployeeNames(rows);
+    const named = await this.attachEmployeeNames(rows);
+    return this.attachPolicyWindow(c.orgId, named);
   }
 
   // ── read: org-wide list + stats ─────────────────────────────────────────────
@@ -706,13 +707,10 @@ export class AttendanceService {
     });
     rows = await this.filterByDepartment(rows, c.orgId, q.departmentId);
     const named = await this.attachEmployeeNames(rows);
-    if (q.search) {
-      const needle = q.search.toLowerCase();
-      return named.filter((r: any) =>
-        (r.employeeName || '').toLowerCase().includes(needle),
-      );
-    }
-    return named;
+    const filtered = q.search
+      ? named.filter((r: any) => (r.employeeName || '').toLowerCase().includes(q.search!.toLowerCase()))
+      : named;
+    return this.attachPolicyWindow(c.orgId, filtered);
   }
 
   async getStats(c: Caller, startDate?: string, endDate?: string, scopeToSelf = false) {
@@ -1332,6 +1330,50 @@ export class AttendanceService {
       ...r,
       employeeName: nameById.get(r.employeeId) || 'Unknown',
     })) as any;
+  }
+
+  /**
+   * The work-timing policy window (minutes since midnight) per employee — the
+   * scale the clock bar draws against. Resolved once per unique employee, with
+   * the DEFAULT_WORK_TIMING (09:00–18:00) fallback.
+   */
+  private async resolveWorkWindows(
+    orgId: string,
+    userIds: string[],
+  ): Promise<Map<string, { startMin: number; endMin: number }>> {
+    const hhmm = (s?: string | null): number | null =>
+      s && /^\d{1,2}:\d{2}$/.test(s) ? Number(s.split(':')[0]) * 60 + Number(s.split(':')[1]) : null;
+    const out = new Map<string, { startMin: number; endMin: number }>();
+    await Promise.all(
+      [...new Set(userIds)].map(async (uid) => {
+        let startMin = 540;
+        let endMin = 1080;
+        try {
+          const { wt } = await this.resolveContext(uid, orgId);
+          const s = hhmm(wt.startTime);
+          const e = hhmm(wt.endTime);
+          if (s !== null) startMin = s;
+          if (e !== null && e > s!) endMin = e;
+        } catch {
+          /* default window */
+        }
+        out.set(uid, { startMin, endMin });
+      }),
+    );
+    return out;
+  }
+
+  /** Attach the resolved policy window to attendance rows (for the bar UI). */
+  private async attachPolicyWindow<T extends { employeeId: string }>(
+    orgId: string,
+    rows: T[],
+  ): Promise<Array<T & { policyStartMin: number; policyEndMin: number }>> {
+    if (!rows.length) return rows as any;
+    const win = await this.resolveWorkWindows(orgId, rows.map((r) => r.employeeId));
+    return rows.map((r) => {
+      const w = win.get(r.employeeId) || { startMin: 540, endMin: 1080 };
+      return { ...r, policyStartMin: w.startMin, policyEndMin: w.endMin };
+    }) as any;
   }
 
   /** Filter rows to employees in a given department (via org membership). */
