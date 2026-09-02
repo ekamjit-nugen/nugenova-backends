@@ -101,8 +101,48 @@ exports, not upload-ready government files. `GET /payroll/returns/types` +
 `GET /payroll/returns?type&month&year` (payroll:view) return `{filename, mimeType,
 content, rowCount}`; the FE downloads it as a Blob from a "Registers & returns"
 panel. Tests: `payroll-returns.spec` (11) + `payroll-returns.feature` e2e (register
-+ EPS/EPF split, @security employee-forbidden). Deferred: investment-declaration
-self-service + proofs, Form 16, PF-number/UAN/PAN capture for upload-ready files.
++ EPS/EPF split, @security employee-forbidden).
+
+### Investment declarations (self-service + verify)
+
+Employees self-declare old-regime investments for a financial year, payroll/HR
+verifies, and the **verified** figures drive that employee's TDS. `tax_declarations`
+(one row per org+user+FY-start) holds regime + the six declared lines (80C≤1.5L /
+80D / 80E / 24b≤2L / HRA / other) + **proofs** (references to `/media` files) +
+a `draft → submitted → verified|rejected` workflow. Migration
+`TaxDeclaration1787940000000`. Surface `/payroll/tax-declarations`: `GET/PUT /me`
++ `POST /me/submit` (self-service, any member — edit locked once submitted, a
+reject reopens to draft), `GET /` + `POST /:id/review` (payroll:view/edit — the
+manager queue). Review enforces **separation of duties** (reviewer ≠ declarant,
+owner exempt) and notifies (submit → managers; verify/reject → the employee). In
+`buildAndSavePayslip`, the TDS block calls `TaxDeclarationService.resolvedFor(org,
+user, fyStart)` — a verified declaration **wins over** the manager-set
+`salary.taxInputs`; no verified declaration falls back to those inputs. FE:
+`/payroll/declarations` (self-service form + proof upload via `uploadMedia` +
+manager review queue), linked from the payroll header. Tests: `tax-declaration.
+feature` e2e (3): declare→verify→TDS-applies, @security employee-can't-review,
+unverified-doesn't-change-TDS.
+
+### Form 16 (Part B)
+
+The employer's annual salary + tax computation for one employee in a financial
+year. Pure `form16.ts` (`buildForm16PartB`) built on the shared `tds.ts`
+breakdown (`computeTaxBreakdown` — now the single source for slab/rebate/
+surcharge/cess, with `computeAnnualTax` a thin wrapper). `generateForm16(org,
+user, fyStart)` aggregates the FY's finalized payslips → gross salary + TDS
+deducted + **quarter-wise** TDS (Q1 Apr-Jun … Q4 Jan-Mar), resolves regime +
+deductions (verified declaration ▸ salary inputs ▸ org default), and computes
+Part B: §10 exemptions, standard deduction, §24(b) housing-loan interest, Chapter
+VI-A (80C≤1.5L/80D/80E/other), taxable income, tax, and the balance vs TDS
+withheld. New regime zeroes §10/24b/VI-A. **Part A** (challan/deposit) is issued
+from TRACES, not here — the payload carries a note saying so + the tax we actually
+deducted. Endpoints `GET /payroll/form16/me?fy=` (self-service) + `GET
+/payroll/form16/:userId?fy=` (payroll:view). FE `/payroll/form16`: a formal Part-B
+document (FY selector, manager employee picker, **Print / Save PDF** via a
+print-one-element `@media print` block), linked from the payroll header. Tests:
+`form16.spec` (7 — old/new regime, caps, breakdown) + `form16.feature` e2e (2 —
+FY aggregation + quarterly sum, @security can't-read-another's). Deferred:
+PF-number/UAN/PAN capture for upload-ready ECR/24Q + TRACES Part A.
 
 ## LOP model (cleaner than legacy)
 

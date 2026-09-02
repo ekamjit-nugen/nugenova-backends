@@ -225,6 +225,11 @@ export class TdsConfigDto {
   @IsOptional() @IsIn(['new', 'old']) regime?: 'new' | 'old';
 }
 
+export class EmployerIdsDto {
+  @IsOptional() @IsString() @MaxLength(16) tan?: string | null;
+  @IsOptional() @IsString() @MaxLength(16) pan?: string | null;
+}
+
 export class UpdatePayrollConfigDto {
   @IsOptional()
   @ValidateNested()
@@ -255,4 +260,9 @@ export class UpdatePayrollConfigDto {
   @ValidateNested()
   @Type(() => TdsConfigDto)
   tds?: TdsConfigDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EmployerIdsDto)
+  employer?: EmployerIdsDto;
 }

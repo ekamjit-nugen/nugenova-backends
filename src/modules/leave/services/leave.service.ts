@@ -515,29 +515,74 @@ export class LeaveService {
    * partly before a mid-month salary `effectiveFrom`) is never counted in full in
    * two pay periods.
    */
+  /**
+   * Paid vs unpaid leave days within a pay period — what PAYROLL consumes to dock
+   * pay. Payroll is the authority: a paid leave type is only paid UP TO the
+   * employee's policy allowance for the leave-year (calendar year). Once the
+   * allowance is used up, further days of that type become UNPAID (LOP) — so an
+   * employee who takes more leave than policy has the extra deducted, even if a
+   * manager approved it or the allowance was later reduced. Work-from-home is
+   * never docked (the employee is working); LOP-type leave is always unpaid.
+   */
   async leaveSummaryForPeriod(
     orgId: string,
     userId: string,
     start: Date,
     end: Date,
-  ): Promise<{ paidLeaveDays: number; lopLeaveDays: number }> {
+  ): Promise<{ paidLeaveDays: number; lopLeaveDays: number; excessLeaveDays: number }> {
     const rows = await this.leaves.find({
       where: { organizationId: orgId, userId, status: 'approved', isDeleted: false },
     });
     const types = await this.resolvedTypes(orgId);
-    const holidays = await this.holidayKeys(orgId, start, end);
+    const year = start.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(year, 0, 1));
+    const dayBeforePeriod = new Date(start.getTime() - 86_400_000);
+    // Holidays across the whole leave-year-to-date, so prior usage counts correctly.
+    const holidays = await this.holidayKeys(orgId, yearStart, end);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    // Count a leave row's working days clipped to [from, to].
+    const countInWindow = (r: (typeof rows)[number], from: Date, to: Date): number => {
+      if (!rangesOverlap(from, to, r.startDate, r.endDate)) return 0;
+      const cs = r.startDate > from ? r.startDate : from;
+      const ce = r.endDate < to ? r.endDate : to;
+      return countLeaveDays({ start: cs, end: ce, halfDay: r.halfDay, holidays });
+    };
+
+    // Group approved leave rows by type.
+    const byType = new Map<string, (typeof rows)>();
+    for (const r of rows) {
+      const list = byType.get(r.leaveType);
+      if (list) list.push(r);
+      else byType.set(r.leaveType, [r]);
+    }
+
     let paidLeaveDays = 0;
     let lopLeaveDays = 0;
-    for (const r of rows) {
-      if (!rangesOverlap(start, end, r.startDate, r.endDate)) continue;
-      // Intersect the leave with the pay period, then count only those working days.
-      const clipStart = r.startDate > start ? r.startDate : start;
-      const clipEnd = r.endDate < end ? r.endDate : end;
-      const days = countLeaveDays({ start: clipStart, end: clipEnd, halfDay: r.halfDay, holidays });
-      if (days <= 0) continue;
-      if (types.get(r.leaveType)?.isLop) lopLeaveDays += days;
-      else paidLeaveDays += days;
+    let excessLeaveDays = 0;
+
+    for (const [type, rs] of byType) {
+      const def = types.get(type);
+      const periodDays = rs.reduce((s, r) => s + countInWindow(r, start, end), 0);
+      if (periodDays <= 0) continue;
+
+      // LOP-type leave is always unpaid.
+      if (def?.isLop) { lopLeaveDays += periodDays; continue; }
+
+      // Work-from-home is working — always paid, never counted as excess.
+      const capsApply = !!def?.balanceTracked && type !== 'wfh' && Number.isFinite(def?.annualAllocation);
+      if (!capsApply) { paidLeaveDays += periodDays; continue; }
+
+      // Paid up to the remaining allowance; the rest this period is unpaid excess.
+      const priorDays = rs.reduce((s, r) => s + countInWindow(r, yearStart, dayBeforePeriod), 0);
+      const paidRemaining = Math.max(0, (def!.annualAllocation as number) - priorDays);
+      const paidPart = Math.min(periodDays, paidRemaining);
+      const excessPart = Math.max(0, r2(periodDays - paidPart));
+      paidLeaveDays += paidPart;
+      excessLeaveDays += excessPart;
+      lopLeaveDays += excessPart;
     }
-    return { paidLeaveDays, lopLeaveDays };
+
+    return { paidLeaveDays: r2(paidLeaveDays), lopLeaveDays: r2(lopLeaveDays), excessLeaveDays: r2(excessLeaveDays) };
   }
 }

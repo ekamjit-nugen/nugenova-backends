@@ -492,6 +492,36 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('leave taken beyond the policy allowance is docked as loss of pay', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    given('an organization where an employee took a full month of paid leave but the allowance is only 5 days', async () => {
+      // Full month of casual leave approved (allowance 40), no statutory deductions.
+      ({ o, member } = await setupFullPaidMonth(44000, undefined, undefined, false));
+      // Now the policy allows only 5 casual days — the rest becomes unpaid.
+      await h
+        .api()
+        .put(`${API}/policies/leave-config`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ leaveTypes: [{ key: 'casual', annualAllocation: 5, enabled: true }] })
+        .expect(200);
+    });
+    when('the owner generates payslips for that month', async () => {
+      await generate(o).expect(200);
+    });
+    then('the payslip pays 5 days and docks the excess leave as loss of pay', async () => {
+      const slip = findSlip(await myPayslips(member).expect(200));
+      expect(slip).toBeDefined();
+      const d = slip.lopDetails;
+      expect(d.paidLeaveDays).toBe(5);
+      expect(d.excessLeaveDays).toBe(d.workingDays - 5);
+      expect(d.lopDays).toBe(d.excessLeaveDays);
+      expect(d.payableDays).toBe(5);
+      expect(slip.netPay).toBeLessThan(44000);
+      expect(slip.netPay).toBeGreaterThan(0);
+    });
+  });
+
   test("a member cannot read another member's payslip", ({ given, when, then }) => {
     let o: CreatedOrg;
     let a: Member;

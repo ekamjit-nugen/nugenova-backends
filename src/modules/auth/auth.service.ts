@@ -798,9 +798,9 @@ export class AuthService {
       jti: accessJti,
     };
 
-    // Access-token TTL. Default matches the monolith's effective runtime (6h);
-    // refresh token + session stay at 7d (below), same as the monolith.
-    const jwtExpiry = this.configService.get<string>('JWT_EXPIRY') || '6h';
+    // Access-token TTL (default 24h; override with JWT_EXPIRY).
+    // Refresh token + session stay at 7d (below).
+    const jwtExpiry = this.configService.get<string>('JWT_EXPIRY') || '24h';
     const accessToken = this.jwtService.sign(payload, {
       expiresIn: jwtExpiry as any,
     });

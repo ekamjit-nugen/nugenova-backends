@@ -89,15 +89,30 @@ function surcharge(baseTax: number, taxableIncome: number, spec: RegimeSpec): nu
   return baseTax * (rate / 100);
 }
 
+/** The line-by-line tax computation (for Form 16 Part B and any detailed view). */
+export interface TaxBreakdown {
+  /** Progressive slab tax before any rebate. */
+  slabTax: number;
+  /** §87A rebate applied (0 above the rebate limit). */
+  rebate: number;
+  /** Slab tax after the rebate (and new-regime marginal relief). */
+  taxAfterRebate: number;
+  surcharge: number;
+  cess: number;
+  /** Total tax = taxAfterRebate + surcharge + cess (rounded). */
+  totalTax: number;
+}
+
 /**
- * Total annual income tax on a TAXABLE income (after all deductions), for a regime:
+ * Line-by-line annual income tax on a TAXABLE income (after all deductions):
  * slab tax → §87A rebate (with new-regime marginal relief at the rebate boundary)
- * → surcharge → 4% cess.
+ * → surcharge → 4% cess. The single source of truth for the tax numbers.
  */
-export function computeAnnualTax(taxableIncome: number, regime: TaxRegime): number {
+export function computeTaxBreakdown(taxableIncome: number, regime: TaxRegime): TaxBreakdown {
   const spec = regimeSpec(regime);
   const income = Math.max(0, taxableIncome);
-  let tax = slabTax(income, spec.slabs);
+  const gross = slabTax(income, spec.slabs);
+  let tax = gross;
 
   if (income <= spec.rebateLimit) {
     // Rebate wipes the tax out entirely up to the limit.
@@ -111,7 +126,22 @@ export function computeAnnualTax(taxableIncome: number, regime: TaxRegime): numb
 
   const sur = surcharge(tax, income, spec);
   const cess = (tax + sur) * CESS_RATE;
-  return round0(tax + sur + cess);
+  return {
+    slabTax: round0(gross),
+    rebate: round0(gross - tax),
+    taxAfterRebate: round0(tax),
+    surcharge: round0(sur),
+    cess: round0(cess),
+    totalTax: round0(tax + sur + cess),
+  };
+}
+
+/**
+ * Total annual income tax on a TAXABLE income (after all deductions), for a regime.
+ * Thin wrapper over {@link computeTaxBreakdown}.
+ */
+export function computeAnnualTax(taxableIncome: number, regime: TaxRegime): number {
+  return computeTaxBreakdown(taxableIncome, regime).totalTax;
 }
 
 /** Financial-year month index: Apr = 1 … Mar = 12 (India FY). */

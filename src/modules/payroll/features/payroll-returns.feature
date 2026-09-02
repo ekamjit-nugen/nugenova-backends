@@ -8,6 +8,11 @@ Feature: Statutory registers & returns
     Then the register lists the employee with gross, PF and net columns
     And the PF register splits the employer contribution into EPS and EPF
 
+  Scenario: owner downloads the bank payout file
+    Given an organization that has finalized payroll with statutory deductions
+    When the owner downloads the bank payout file
+    Then the payout lists the employee's account, IFSC and net pay
+
   @security
   Scenario: a plain employee cannot download returns
     Given an organization that has finalized payroll with statutory deductions

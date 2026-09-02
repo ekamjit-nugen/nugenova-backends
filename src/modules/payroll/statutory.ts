@@ -42,6 +42,8 @@ export interface PayrollStatutoryConfig {
   lopFromAttendance: boolean;
   /** Income-tax (TDS): whether to withhold, and the default regime. */
   tds: { enabled: boolean; regime: 'new' | 'old' };
+  /** Employer statutory identifiers for filings (TAN / PAN). Not used in calc. */
+  employer: { tan: string | null; pan: string | null };
 }
 
 export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
@@ -52,6 +54,7 @@ export const DEFAULT_STATUTORY_CONFIG: PayrollStatutoryConfig = {
   customDeductions: [],
   lopFromAttendance: false,
   tds: { enabled: false, regime: 'new' },
+  employer: { tan: null, pan: null },
 };
 
 // ── PF ─────────────────────────────────────────────────────────────────────────

@@ -9,14 +9,17 @@ import { NotificationModule } from '../notification/notification.module';
 import { SalaryStructureEntity } from './entities/salary-structure.entity';
 import { PayslipEntity } from './entities/payslip.entity';
 import { PayrollRunEntity } from './entities/payroll-run.entity';
+import { TaxDeclarationEntity } from './entities/tax-declaration.entity';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { DepartmentEntity } from '../organization/entities/department.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 
 import { PayrollService } from './services/payroll.service';
+import { TaxDeclarationService } from './services/tax-declaration.service';
 import { PayrollAccessGuard } from './guards/payroll-access.guard';
 import { PayrollController } from './payroll.controller';
+import { TaxDeclarationController } from './tax-declaration.controller';
 
 /**
  * Payroll (Phase 1 — simple path): per-employee monthly salary → generate monthly
@@ -35,14 +38,15 @@ import { PayrollController } from './payroll.controller';
       SalaryStructureEntity,
       PayslipEntity,
       PayrollRunEntity,
+      TaxDeclarationEntity,
       OrganizationEntity,
       DepartmentEntity,
       OrgMembershipEntity,
       UserEntity,
     ]),
   ],
-  controllers: [PayrollController],
-  providers: [PayrollService, PayrollAccessGuard],
-  exports: [PayrollService],
+  controllers: [PayrollController, TaxDeclarationController],
+  providers: [PayrollService, TaxDeclarationService, PayrollAccessGuard],
+  exports: [PayrollService, TaxDeclarationService],
 })
 export class PayrollModule {}

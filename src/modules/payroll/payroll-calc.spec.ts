@@ -19,6 +19,14 @@ describe('resolveLop', () => {
     expect(r.lopDays).toBe(2); // only the lop-type leave
   });
 
+  it('over-policy leave (excess) is docked and surfaced', () => {
+    // 5 paid + 17 unpaid-excess = 22 accounted; the 17 excess docks pay.
+    const r = resolveLop({ workingDays: 22, presentDays: 0, halfDays: 0, paidLeaveDays: 5, lopLeaveDays: 17, excessLeaveDays: 17 });
+    expect(r.absentDays).toBe(0);
+    expect(r.lopDays).toBe(17);
+    expect(r.excessLeaveDays).toBe(17);
+  });
+
   it('half-days contribute half a LOP day each', () => {
     const r = resolveLop({ workingDays: 22, presentDays: 20, halfDays: 2, paidLeaveDays: 0, lopLeaveDays: 0 });
     // accounted 20 + 2 = 22 → absent 0; lop = 0 + 0 + 0.5*2 = 1

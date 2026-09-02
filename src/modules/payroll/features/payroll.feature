@@ -77,6 +77,11 @@ Feature: Payroll (simple monthly payslips)
     When the owner generates payslips for that month
     Then the payslip withholds TDS and reports year-to-date figures
 
+  Scenario: leave taken beyond the policy allowance is docked as loss of pay
+    Given an organization where an employee took a full month of paid leave but the allowance is only 5 days
+    When the owner generates payslips for that month
+    Then the payslip pays 5 days and docks the excess leave as loss of pay
+
   @security
   Scenario: a member cannot read another member's payslip
     Given an organization with two members who both have payslips

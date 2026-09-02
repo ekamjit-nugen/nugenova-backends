@@ -24,6 +24,9 @@ import { resolveLop, computeSimplePayslip, rupeesInWords } from '../payroll-calc
 import { computeStatutory, PayrollStatutoryConfig } from '../statutory';
 import { computeMonthlyTds, regimeSpec } from '../tds';
 import { buildReturn, ReturnFile, ReturnRow, ReturnKind } from '../payroll-returns';
+import { buildPayoutFile, PayoutBeneficiary, PayoutFile } from '../bank-payout';
+import { buildForm16PartB, fyQuarter, Form16PartB } from '../form16';
+import { TaxDeclarationService } from './tax-declaration.service';
 import { TaxInputs } from '../entities/salary-structure.entity';
 import { SetSalaryDto, GeneratePayslipsDto } from '../dto';
 
@@ -51,6 +54,7 @@ export class PayrollService {
     private readonly leave: LeaveService,
     private readonly policy: PolicyService,
     private readonly notifier: NotifierService,
+    private readonly taxDeclarations: TaxDeclarationService,
   ) {}
 
   // ── salary structures ───────────────────────────────────────────────────────
@@ -86,6 +90,13 @@ export class PayrollService {
     );
     const recurringDeductions = this.normalizeRecurring(dto.recurringDeductions);
     const taxInputs = this.normalizeTaxInputs(dto.taxInputs);
+    // Statutory IDs are sticky: keep the prior ones unless this save sends new ones.
+    const statutoryIds = dto.statutoryIds
+      ? this.normalizeStatutoryIds(dto.statutoryIds)
+      : prior?.statutoryIds || {};
+    const bankAccount = dto.bankAccount
+      ? this.normalizeBank(dto.bankAccount)
+      : prior?.bankAccount || {};
     const saved = await this.salaries.save(
       this.salaries.create({
         organizationId: orgId,
@@ -96,6 +107,8 @@ export class PayrollService {
         components,
         recurringDeductions,
         taxInputs,
+        statutoryIds,
+        bankAccount,
         effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
         supersedes: prior?.id ?? null,
         createdBy: actorId,
@@ -157,6 +170,26 @@ export class PayrollService {
     return out;
   }
 
+  /** Clean statutory IDs — upper-case alphanumerics, empty ⇒ omitted. */
+  private normalizeStatutoryIds(input: { pan?: string | null; uan?: string | null; esicNumber?: string | null }) {
+    const clean = (v: unknown, max: number) => {
+      const s = String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, max);
+      return s || null;
+    };
+    return { pan: clean(input.pan, 10), uan: clean(input.uan, 12), esicNumber: clean(input.esicNumber, 17) };
+  }
+
+  /** Clean bank details — trim, upper-case IFSC, strip spaces from the account no. */
+  private normalizeBank(input: { accountHolder?: string | null; accountNumber?: string | null; ifsc?: string | null; bankName?: string | null }) {
+    const s = (v: unknown, max: number) => (String(v ?? '').trim().slice(0, max) || null);
+    return {
+      accountHolder: s(input.accountHolder, 120),
+      accountNumber: (String(input.accountNumber ?? '').replace(/\s+/g, '').slice(0, 34) || null),
+      ifsc: (String(input.ifsc ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11) || null),
+      bankName: s(input.bankName, 80),
+    };
+  }
+
   /** The Basic component amount that drives PF (else the whole salary is Basic). */
   private basicOf(salary: SalaryStructureEntity): number {
     const comps = salary.components || [];
@@ -207,6 +240,17 @@ export class PayrollService {
         ...(r.total != null ? { total: Number(r.total) } : {}),
       })),
       taxInputs: s.taxInputs || {},
+      statutoryIds: {
+        pan: s.statutoryIds?.pan ?? null,
+        uan: s.statutoryIds?.uan ?? null,
+        esicNumber: s.statutoryIds?.esicNumber ?? null,
+      },
+      bankAccount: {
+        accountHolder: s.bankAccount?.accountHolder ?? null,
+        accountNumber: s.bankAccount?.accountNumber ?? null,
+        ifsc: s.bankAccount?.ifsc ?? null,
+        bankName: s.bankAccount?.bankName ?? null,
+      },
       effectiveFrom: s.effectiveFrom,
     };
   }
@@ -299,6 +343,7 @@ export class PayrollService {
       halfDays: att.halfDays,
       paidLeaveDays: lv.paidLeaveDays,
       lopLeaveDays: lv.lopLeaveDays,
+      excessLeaveDays: lv.excessLeaveDays,
       // Only dock unaccounted days when the org runs attendance-based payroll.
       dockUnaccounted: cfg.lopFromAttendance,
     });
@@ -397,10 +442,15 @@ export class PayrollService {
     let tdsDetail: import('../entities/payslip.entity').PayslipTds | Record<string, never> = {};
     let tdsMonthly = 0;
     if (cfg.tds.enabled) {
-      const regime: 'new' | 'old' = salary.taxInputs?.regime === 'old' ? 'old' : salary.taxInputs?.regime === 'new' ? 'new' : cfg.tds.regime;
+      // A VERIFIED investment declaration for this FY wins over the manager-set
+      // inputs on the salary structure (self-service → HR-verified → applied here).
+      const fyStart = this.fyStartYear(month, year);
+      const verified = await this.taxDeclarations.resolvedFor(orgId, salary.userId, fyStart);
+      const taxSource: TaxInputs = verified ?? salary.taxInputs ?? {};
+      const regime: 'new' | 'old' = taxSource.regime === 'old' ? 'old' : taxSource.regime === 'new' ? 'new' : cfg.tds.regime;
       const spec = regimeSpec(regime);
       const annualGross = comp.grossEarnings * 12; // simple projection from the current month
-      const exemptions = regime === 'old' ? this.oldRegimeExemptions(salary.taxInputs) : 0;
+      const exemptions = regime === 'old' ? this.oldRegimeExemptions(taxSource) : 0;
       const annualTaxable = Math.max(0, annualGross - spec.standardDeduction - exemptions);
       const tdsPaidYtd = fyRows.reduce((s, p) => s + this.lineAmount(p, 'TDS'), 0);
       const { annualTax, monthly } = computeMonthlyTds({ annualTaxable, regime, month, tdsPaidYtd });
@@ -450,6 +500,7 @@ export class PayrollService {
       halfDays: lop.halfDays,
       paidLeaveDays: lop.paidLeaveDays,
       lopLeaveDays: lop.lopLeaveDays,
+      excessLeaveDays: lop.excessLeaveDays,
       absentDays: lop.absentDays,
       lopDays: lop.lopDays,
       payableDays: comp.payableDays,
@@ -795,12 +846,43 @@ export class PayrollService {
       where: { organizationId: orgId, isDeleted: false, status: 'final', month, year },
       order: { createdAt: 'ASC' },
     });
-    const returnRows: ReturnRow[] = rows.map((p) => this.toReturnRow(p));
+    // Overlay each employee's statutory IDs (PAN/UAN/ESIC) from their active salary.
+    const salaries = await this.salaries.find({
+      where: { organizationId: orgId, isActive: true, isDeleted: false },
+    });
+    const idsByUser = new Map(salaries.map((s) => [s.userId, s.statutoryIds || {}]));
+    const returnRows: ReturnRow[] = rows.map((p) => this.toReturnRow(p, idsByUser.get(p.userId)));
     return buildReturn(type, returnRows, month, year);
   }
 
+  /** Bank payout (NEFT) file for a finalized month — net pay per employee. */
+  async generatePayout(orgId: string, month: number, year: number): Promise<PayoutFile> {
+    if (!month || month < 1 || month > 12) throw new BadRequestException('A valid month is required');
+    if (!year || year < 2000 || year > 2100) throw new BadRequestException('A valid year is required');
+    const slips = await this.payslips.find({
+      where: { organizationId: orgId, isDeleted: false, status: 'final', month, year },
+      order: { createdAt: 'ASC' },
+    });
+    const salaries = await this.salaries.find({
+      where: { organizationId: orgId, isActive: true, isDeleted: false },
+    });
+    const bankByUser = new Map(salaries.map((s) => [s.userId, s.bankAccount || {}]));
+    const beneficiaries: PayoutBeneficiary[] = slips.map((p) => {
+      const bank = bankByUser.get(p.userId) || {};
+      return {
+        name: p.employeeSnapshot?.name || p.employeeSnapshot?.email || 'Employee',
+        accountHolder: bank.accountHolder ?? null,
+        accountNumber: bank.accountNumber ?? null,
+        ifsc: bank.ifsc ?? null,
+        bankName: bank.bankName ?? null,
+        netPay: Number(p.netPay || 0),
+      };
+    });
+    return buildPayoutFile(beneficiaries, month, year);
+  }
+
   /** Flatten one payslip to the register row shape (money read straight off the slip). */
-  private toReturnRow(p: PayslipEntity): ReturnRow {
+  private toReturnRow(p: PayslipEntity, ids?: { pan?: string | null; uan?: string | null; esicNumber?: string | null }): ReturnRow {
     const s = p.statutory;
     const basic = (p.earnings || []).find((e) => e.code === 'BASIC')?.amount
       ?? (p.earnings || [])[0]?.amount
@@ -816,9 +898,9 @@ export class PayrollService {
     return {
       name: snap?.name || 'Employee',
       email: snap?.email || '',
-      pan: null,
-      uan: null,
-      esicNumber: null,
+      pan: ids?.pan ?? null,
+      uan: ids?.uan ?? null,
+      esicNumber: ids?.esicNumber ?? null,
       pfNumber: null,
       workingDays: Number(p.lopDetails?.workingDays || 0),
       payableDays: Number(p.lopDetails?.payableDays || 0),
@@ -839,6 +921,78 @@ export class PayrollService {
       otherDeductions,
       totalDeductions: Number(p.totalDeductions || 0),
       netPay: Number(p.netPay || 0),
+    };
+  }
+
+  /**
+   * Form 16 (Part B) — the annual salary + tax computation for one employee in a
+   * financial year, built from that FY's finalized payslips + the (verified)
+   * declaration. Part A (challan/deposit) comes from TRACES; here `tdsDeducted` is
+   * the tax we actually withheld across the year.
+   */
+  async generateForm16(orgId: string, userId: string, fyStart: number) {
+    const rows = await this.payslips.find({
+      where: { organizationId: orgId, userId, isDeleted: false, status: 'final' },
+    });
+    const fyRows = rows
+      .filter((p) => this.fyStartYear(p.month, p.year) === fyStart)
+      .sort((a, b) => a.year * 12 + a.month - (b.year * 12 + b.month));
+
+    const cfg = await this.policy.getPayrollConfig(orgId);
+    // Regime + declared deductions: a VERIFIED declaration wins, else the salary
+    // structure's manager-set inputs, else the org default regime with nothing declared.
+    const verified = await this.taxDeclarations.resolvedFor(orgId, userId, fyStart);
+    const salary = await this.activeSalary(orgId, userId);
+    const src = verified ?? salary?.taxInputs ?? {};
+    const regime: 'new' | 'old' = src.regime === 'old' ? 'old' : src.regime === 'new' ? 'new' : cfg.tds.regime;
+
+    const grossSalary = fyRows.reduce((s, p) => s + Number(p.grossEarnings || 0), 0);
+    const tdsDeducted = fyRows.reduce((s, p) => s + this.lineAmount(p, 'TDS'), 0);
+    const quarterlyTds = { q1: 0, q2: 0, q3: 0, q4: 0 };
+    for (const p of fyRows) quarterlyTds[fyQuarter(p.month)] += this.lineAmount(p, 'TDS');
+
+    const partB: Form16PartB = buildForm16PartB({
+      fyStart,
+      regime,
+      grossSalary,
+      section10Exemptions: (Number(src.hraExemptionAnnual) || 0) + (Number(src.otherExemptions) || 0),
+      homeLoanInterest: Number(src.homeLoanInterest) || 0,
+      chapterVIA: {
+        section80C: Number(src.section80C) || 0,
+        section80D: Number(src.section80D) || 0,
+        section80E: Number(src.section80E) || 0,
+        other: 0,
+      },
+      tdsDeducted,
+      quarterlyTds,
+    });
+
+    const [org, name] = await Promise.all([
+      this.orgs.findOne({ where: { id: orgId } }),
+      this.nameEmail(userId),
+    ]);
+    const last = fyRows[fyRows.length - 1];
+
+    return {
+      ...partB,
+      months: fyRows.length,
+      declarationVerified: !!verified,
+      employer: {
+        name: org?.name || null,
+        tan: cfg.employer?.tan || null,
+        pan: cfg.employer?.pan || null,
+      },
+      employee: {
+        userId,
+        name: name.name,
+        email: name.email,
+        pan: salary?.statutoryIds?.pan || null,
+        uan: salary?.statutoryIds?.uan || null,
+        department: last?.employeeSnapshot?.department || null,
+        designation: last?.employeeSnapshot?.designation || null,
+      },
+      // Part A (challan/deposit particulars) is issued from TRACES, not this system.
+      partANote: 'Part A (tax deposited / challan particulars) is issued from the TRACES portal after the quarterly TDS returns (Form 24Q) are filed.',
     };
   }
 
