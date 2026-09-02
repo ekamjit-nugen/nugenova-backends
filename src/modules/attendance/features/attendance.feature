@@ -66,6 +66,12 @@ Feature: Attendance — clocking, scope, and tenant isolation
     Then the manual entry appears in the feed with its approval state
     And filtering the feed by a different person returns nothing
 
+  Scenario: the daily activity view returns one consolidated row per day
+    Given an organization with an employee
+    When the employee files a manual entry for a past day
+    And the owner opens the daily activity view for that date range
+    Then there is a single row for that day with its clock-in and hours
+
   Scenario: holidays are readable by all members but only writable by admins
     Given an organization with an employee
     When the owner adds a holiday

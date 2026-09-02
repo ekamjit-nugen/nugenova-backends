@@ -355,6 +355,41 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the daily activity view returns one consolidated row per day', ({ given, when, and, then }) => {
+    let org: CreatedOrg;
+    let employee: { userId: string; token: string };
+    const DATE = '2026-08-21';
+
+    given('an organization with an employee', async () => {
+      ({ org, employee } = await orgWithEmployee());
+    });
+    when('the employee files a manual entry for a past day', async () => {
+      await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${employee.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z`, reason: 'Forgot to clock in' })
+        .expect(201);
+    });
+    let rows: any[];
+    and('the owner opens the daily activity view for that date range', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/attendance/activity?view=daily&startDate=2026-08-01&endDate=2026-08-31`)
+        .set('Authorization', `Bearer ${org.ownerToken}`)
+        .expect(200);
+      rows = res.body.data;
+    });
+    then('there is a single row for that day with its clock-in and hours', () => {
+      const mine = rows.filter((r) => r.employeeId === employee.userId);
+      expect(mine.length).toBe(1); // one consolidated row, not two events
+      expect(mine[0].firstIn).toBeTruthy();
+      expect(mine[0].lastOut).toBeTruthy();
+      expect(mine[0].missedCheckout).toBe(false);
+      expect(Number(mine[0].effectiveHours)).toBeGreaterThan(0);
+    });
+  });
+
   // ── holidays ────────────────────────────────────────────────────────────────
 
   test('holidays are readable by all members but only writable by admins', ({

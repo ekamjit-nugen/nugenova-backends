@@ -1101,7 +1101,7 @@ export class AttendanceService {
   async getActivityFeed(
     c: Caller,
     opts: {
-      view?: 'timeline' | 'grouped';
+      view?: 'timeline' | 'grouped' | 'daily';
       startDate?: string;
       endDate?: string;
       employeeId?: string;
@@ -1178,6 +1178,46 @@ export class AttendanceService {
       }
       return { view: 'grouped', data: [...byPerson.values()] };
     }
+
+    if (opts.view === 'daily') {
+      // One consolidated row per attendance record (per employee, per day) — the
+      // clock-in→clock-out span the UI draws as a bar, plus late / missed flags.
+      const days = (rows as any[]).map((r) => {
+        const sessions = sessionsOf(r).map((s) => ({
+          in: s.checkInTime ? new Date(s.checkInTime).toISOString() : null,
+          out: s.checkOutTime ? new Date(s.checkOutTime).toISOString() : null,
+        }));
+        const firstIn = r.checkInTime
+          ? new Date(r.checkInTime).toISOString()
+          : sessions[0]?.in ?? null;
+        const lastOut = r.checkOutTime
+          ? new Date(r.checkOutTime).toISOString()
+          : sessions[sessions.length - 1]?.out ?? null;
+        const openSession = sessions.length > 0 && !sessions[sessions.length - 1].out;
+        return {
+          employeeId: r.employeeId,
+          employeeName: r.employeeName,
+          date: r.date,
+          sessions,
+          firstIn,
+          lastOut,
+          totalHours: Number(r.totalWorkingHours) || 0,
+          effectiveHours: Number(r.effectiveWorkingHours) || 0,
+          status: r.status,
+          isLateArrival: !!r.isLateArrival,
+          lateByMinutes: r.lateByMinutes || 0,
+          // "No clock-out" = an open session, or a session the reconcile cron
+          // auto-closed after a forgotten checkout.
+          missedCheckout: !!r.missedCheckout || openSession,
+          autoCheckedOut: !!r.autoCheckedOut,
+          openSession,
+          approvalStatus: r.approvalStatus ?? null,
+          entryType: r.entryType,
+        };
+      });
+      return { view: 'daily', data: days };
+    }
+
     return { view: 'timeline', data: events };
   }
 

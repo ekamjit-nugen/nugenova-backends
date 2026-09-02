@@ -135,11 +135,12 @@ export class AttendanceController {
   @Get('attendance/activity')
   @RequirePermission('attendance', 'view')
   async activity(
-    @Query() q: AttendanceQueryDto & { view?: 'timeline' | 'grouped' },
+    @Query() q: AttendanceQueryDto & { view?: 'timeline' | 'grouped' | 'daily' },
     @Req() req: any,
   ) {
+    const view = q.view === 'grouped' ? 'grouped' : q.view === 'daily' ? 'daily' : 'timeline';
     const data = await this.attendance.getActivityFeed(this.caller(req), {
-      view: q.view === 'grouped' ? 'grouped' : 'timeline',
+      view,
       startDate: q.startDate,
       endDate: q.endDate,
       employeeId: q.employeeId,
