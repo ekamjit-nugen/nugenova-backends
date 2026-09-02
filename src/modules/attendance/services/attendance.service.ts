@@ -803,14 +803,22 @@ export class AttendanceService {
       firstIn: string | null;
       lastOut: string | null;
       clockedHours: number;
+      approvalStatus: 'pending' | 'approved' | 'rejected' | null;
+      entryType: string;
+      // Whether this day is counted toward the timesheet (an approved manual
+      // entry or an ordinary clock-in) — false for a pending/rejected backfill.
+      counted: boolean;
     }>
   > {
     if (end.getTime() < start.getTime()) return [];
+    // Every day is returned — including days still pending approval — so the
+    // approver can see which logs are approved and which are not. Only the
+    // `counted` flag (and hoursByDay) reflect what actually reaches the total.
     const rows = await this.repo.find({
       where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
       order: { date: 'ASC' },
     });
-    return rows.filter((r) => !this.isUnapprovedManual(r)).map((r) => {
+    return rows.map((r) => {
       let segs = (r.workSegments || []).map((s) => ({
         in: s.checkInTime ? new Date(s.checkInTime).toISOString() : null,
         out: s.checkOutTime ? new Date(s.checkOutTime).toISOString() : null,
@@ -827,6 +835,9 @@ export class AttendanceService {
         firstIn,
         lastOut,
         clockedHours: Math.round((Number(hours) || 0) * 100) / 100,
+        approvalStatus: (r.approvalStatus as 'pending' | 'approved' | 'rejected' | null) ?? null,
+        entryType: r.entryType,
+        counted: !this.isUnapprovedManual(r),
       };
     });
   }

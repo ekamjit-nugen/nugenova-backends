@@ -35,6 +35,12 @@ Feature: Timesheets
     Given an organization with weekly timesheets enabled and an employee member
     Then the timesheet config is not listed among the org's policies
 
+  Scenario: the timesheet detail marks which days are approved and which are pending
+    Given an organization with weekly timesheets enabled and an employee member
+    When the employee submits their timesheet for the week
+    And the employee files a pending manual entry for another day that week
+    Then the owner's timesheet detail shows that day as pending and not counted
+
   Scenario: a pending manual attendance entry does not count until approved
     Given an organization with weekly timesheets enabled and an employee member
     When the employee files a manual attendance entry for a day in the week

@@ -153,6 +153,40 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the timesheet detail marks which days are approved and which are pending', ({ given, when, and, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    const PENDING_DAY = '2026-09-19'; // a Saturday inside the REF week (Mon 14 – Sun 20)
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o, member } = await setup(true));
+    });
+    when('the employee submits their timesheet for the week', async () => {
+      await submit(member).expect(200);
+    });
+    and('the employee files a pending manual entry for another day that week', async () => {
+      const res = await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .send({ date: PENDING_DAY, checkInTime: `${PENDING_DAY}T04:30:00.000Z`, checkOutTime: `${PENDING_DAY}T09:30:00.000Z`, reason: 'Saturday overtime' })
+        .expect(201);
+      expect(res.body.data.approvalStatus).toBe('pending');
+    });
+    then("the owner's timesheet detail shows that day as pending and not counted", async () => {
+      const queue = await h.api().get(`${API}/timesheets?status=submitted`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      const id = queue.body.data[0].id;
+      const res = await h.api().get(`${API}/timesheets/${id}`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      const logs = res.body.data.logs as Array<{ date: string; counted: boolean; approvalStatus: string | null }>;
+      const pending = logs.find((l) => l.date === PENDING_DAY);
+      expect(pending).toBeTruthy();
+      expect(pending!.counted).toBe(false);
+      expect(pending!.approvalStatus).toBe('pending');
+      // the pending day is surfaced in the logs but excluded from the counted entries
+      expect((res.body.data.entries as Array<{ date: string }>).some((e) => e.date === PENDING_DAY)).toBe(false);
+    });
+  });
+
   test('a pending manual attendance entry does not count until approved', ({ given, when, then }) => {
     let o: CreatedOrg;
     let member: Member;
