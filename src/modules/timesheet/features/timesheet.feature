@@ -18,3 +18,15 @@ Feature: Timesheets
     Given an organization with timesheets turned off and an employee member
     When the employee tries to submit a timesheet
     Then the submission is rejected
+
+  Scenario: the owner filters team timesheets by month and employee
+    Given an organization with weekly timesheets enabled and an employee member
+    When the employee submits their timesheet for the week
+    Then filtering the review by that month returns the timesheet
+    And filtering by a different month returns nothing
+    And filtering by that employee returns the timesheet
+
+  Scenario: the owner opens a timesheet's full day-by-day detail
+    Given an organization with weekly timesheets enabled and an employee member
+    When the employee submits their timesheet for the week
+    Then the owner can open the timesheet detail and see its day entries

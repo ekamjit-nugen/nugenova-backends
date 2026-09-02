@@ -778,6 +778,50 @@ export class AttendanceService {
     return out;
   }
 
+  /**
+   * The raw clock trail per calendar day in a range — the actual check-in/out
+   * segments behind a timesheet, so an approver can see the underlying logs.
+   */
+  async logsByDay(
+    orgId: string,
+    userId: string,
+    start: Date,
+    end: Date,
+  ): Promise<
+    Array<{
+      date: string;
+      segments: Array<{ in: string | null; out: string | null }>;
+      firstIn: string | null;
+      lastOut: string | null;
+      clockedHours: number;
+    }>
+  > {
+    if (end.getTime() < start.getTime()) return [];
+    const rows = await this.repo.find({
+      where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
+      order: { date: 'ASC' },
+    });
+    return rows.map((r) => {
+      let segs = (r.workSegments || []).map((s) => ({
+        in: s.checkInTime ? new Date(s.checkInTime).toISOString() : null,
+        out: s.checkOutTime ? new Date(s.checkOutTime).toISOString() : null,
+      }));
+      const firstIn = r.checkInTime ? new Date(r.checkInTime).toISOString() : segs[0]?.in ?? null;
+      const lastOut = r.checkOutTime ? new Date(r.checkOutTime).toISOString() : segs[segs.length - 1]?.out ?? null;
+      // Manual/imported entries have no per-session segments — synthesise one
+      // from the record's own check-in/out so the trail is never blank.
+      if (segs.length === 0 && (firstIn || lastOut)) segs = [{ in: firstIn, out: lastOut }];
+      const hours = r.effectiveWorkingHours ?? r.totalWorkingHours ?? 0;
+      return {
+        date: r.date.toISOString().slice(0, 10),
+        segments: segs,
+        firstIn,
+        lastOut,
+        clockedHours: Math.round((Number(hours) || 0) * 100) / 100,
+      };
+    });
+  }
+
   // ── manual entry + approval ─────────────────────────────────────────────────
 
   async createManualEntry(c: Caller, dto: ManualEntryDto): Promise<AttendanceEntity> {

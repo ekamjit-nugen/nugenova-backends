@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 
 import { TimesheetEntity, TimesheetEntry, TimesheetCadence } from './entities/timesheet.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
@@ -194,14 +194,50 @@ export class TimesheetService {
     return this.view(saved, cfg.cadence);
   }
 
-  /** Manager review queue — submitted timesheets by default. */
-  async listForReview(orgId: string, opts: { status?: string } = {}) {
-    const cfg = await this.policy.getTimesheetConfig(orgId);
+  /**
+   * Manager/HR view of team timesheets. Owner & HR can slice by status, by
+   * calendar year, by a specific month, and by a single employee — the period
+   * is matched on `periodStart` falling inside the requested window.
+   */
+  async listForReview(
+    orgId: string,
+    opts: { status?: string; year?: number; month?: number; userId?: string } = {},
+  ) {
     const where: Record<string, unknown> = { organizationId: orgId, isDeleted: false };
     if (opts.status) where.status = opts.status;
-    const rows = await this.sheets.find({ where, order: { submittedAt: 'DESC', createdAt: 'DESC' } });
+    if (opts.userId) where.userId = opts.userId;
+    if (opts.year && opts.month) {
+      // A specific month: periodStart within [1st, last day].
+      const start = new Date(Date.UTC(opts.year, opts.month - 1, 1));
+      const end = new Date(Date.UTC(opts.year, opts.month, 0));
+      where.periodStart = Between(start, end);
+    } else if (opts.year) {
+      // A whole calendar year.
+      where.periodStart = Between(
+        new Date(Date.UTC(opts.year, 0, 1)),
+        new Date(Date.UTC(opts.year, 11, 31)),
+      );
+    }
+    const rows = await this.sheets.find({ where, order: { periodStart: 'DESC', submittedAt: 'DESC', createdAt: 'DESC' } });
     const names = await this.nameMap(orgId, rows.map((r) => r.userId));
     return rows.map((r) => ({ ...this.view(r, r.cadence as TimesheetCadence), employee: names.get(r.userId) || null }));
+  }
+
+  /**
+   * A single timesheet with its full day-by-day entries and the raw clock trail
+   * (check-in/out segments) behind each day — for owner/HR to inspect before
+   * approving. Manager surface (guarded at the controller).
+   */
+  async detailForReview(orgId: string, id: string) {
+    const row = await this.sheets.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
+    if (!row) throw new NotFoundException('Timesheet not found');
+    const employee = (await this.nameMap(orgId, [row.userId])).get(row.userId) || null;
+    const logs = await this.attendance.logsByDay(orgId, row.userId, row.periodStart, row.periodEnd);
+    return {
+      ...this.view(row, row.cadence as TimesheetCadence),
+      employee,
+      logs,
+    };
   }
 
   /** Approve or reject a submitted timesheet (reviewer ≠ owner-of-sheet, owner exempt). */

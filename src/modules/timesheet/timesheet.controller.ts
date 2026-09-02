@@ -68,8 +68,26 @@ export class TimesheetController {
 
   @Get()
   @RequirePermission('attendance', 'view')
-  async listForReview(@Query('status') status: string, @Req() req: any) {
-    const data = await this.service.listForReview(this.orgId(req), { status: status || undefined });
+  async listForReview(
+    @Query('status') status: string,
+    @Query('year') year: string,
+    @Query('month') month: string,
+    @Query('userId') userId: string,
+    @Req() req: any,
+  ) {
+    const data = await this.service.listForReview(this.orgId(req), {
+      status: status || undefined,
+      year: year ? Number(year) : undefined,
+      month: month ? Number(month) : undefined,
+      userId: userId || undefined,
+    });
+    return { success: true, data };
+  }
+
+  @Get(':id')
+  @RequirePermission('attendance', 'view')
+  async detailForReview(@Param('id') id: string, @Req() req: any) {
+    const data = await this.service.detailForReview(this.orgId(req), id);
     return { success: true, data };
   }
 
