@@ -22,8 +22,9 @@ export interface TimesheetConfigInput {
 }
 
 export function defaultTimesheetConfig(): TimesheetConfig {
-  // Off by default (opt-in), monthly when turned on.
-  return { enabled: false, cadence: 'monthly', allowEdits: true };
+  // Off by default (opt-in); weekly when turned on — a week is the natural unit
+  // for reviewing clocked time (managers catch gaps sooner than a month later).
+  return { enabled: false, cadence: 'weekly', allowEdits: true };
 }
 
 const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);

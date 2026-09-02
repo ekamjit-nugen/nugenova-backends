@@ -34,3 +34,10 @@ Feature: Timesheets
   Scenario: the timesheet policy is configured on its own, not as a policy card
     Given an organization with weekly timesheets enabled and an employee member
     Then the timesheet config is not listed among the org's policies
+
+  Scenario: a pending manual attendance entry does not count until approved
+    Given an organization with weekly timesheets enabled and an employee member
+    When the employee files a manual attendance entry for a day in the week
+    Then that day does not yet appear on their timesheet
+    When the owner approves the manual attendance entry
+    Then that day now appears on their timesheet with its hours

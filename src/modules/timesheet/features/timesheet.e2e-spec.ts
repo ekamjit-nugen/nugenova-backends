@@ -153,6 +153,48 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('a pending manual attendance entry does not count until approved', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let entryId: string;
+    const DATE = '2026-09-16'; // a Wednesday inside the REF week (Mon 14 – Sun 20)
+
+    const myEntries = async () => {
+      const res = await h.api().get(`${API}/timesheets/me?ref=${REF}`).set('Authorization', `Bearer ${member.token}`).expect(200);
+      return (res.body.data.timesheet.entries || []) as Array<{ date: string; hours: number }>;
+    };
+
+    given('an organization with weekly timesheets enabled and an employee member', async () => {
+      ({ o, member } = await setup(true));
+    });
+    when('the employee files a manual attendance entry for a day in the week', async () => {
+      const res = await h
+        .api()
+        .post(`${API}/attendance/manual-entry`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .send({ date: DATE, checkInTime: `${DATE}T03:30:00.000Z`, checkOutTime: `${DATE}T12:30:00.000Z`, reason: 'Forgot to clock in' })
+        .expect(201);
+      entryId = res.body.data.id;
+      expect(res.body.data.approvalStatus).toBe('pending');
+    });
+    then('that day does not yet appear on their timesheet', async () => {
+      expect((await myEntries()).some((e) => e.date === DATE)).toBe(false);
+    });
+    when('the owner approves the manual attendance entry', async () => {
+      await h
+        .api()
+        .put(`${API}/attendance/${entryId}/approve`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ approved: true })
+        .expect(200);
+    });
+    then('that day now appears on their timesheet with its hours', async () => {
+      const row = (await myEntries()).find((e) => e.date === DATE);
+      expect(row).toBeTruthy();
+      expect(row!.hours).toBeGreaterThan(0);
+    });
+  });
+
   test('timesheets cannot be submitted when the policy is off', ({ given, when, then }) => {
     let member: Member;
     let status = 0;

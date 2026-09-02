@@ -771,11 +771,20 @@ export class AttendanceService {
       where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
     });
     for (const r of rows) {
+      // A manual entry is worked time only once it's approved — a pending or
+      // rejected backfill must not inflate the timesheet. Real clock-ins carry
+      // no approvalStatus (null) and always count.
+      if (this.isUnapprovedManual(r)) continue;
       const key = r.date.toISOString().slice(0, 10);
       const hours = r.effectiveWorkingHours ?? r.totalWorkingHours ?? 0;
       out.set(key, Math.round((Number(hours) || 0) * 100) / 100);
     }
     return out;
+  }
+
+  /** A manual/backfilled entry that hasn't been approved yet (pending or rejected). */
+  private isUnapprovedManual(r: AttendanceEntity): boolean {
+    return r.approvalStatus === 'pending' || r.approvalStatus === 'rejected';
   }
 
   /**
@@ -801,7 +810,7 @@ export class AttendanceService {
       where: { organizationId: orgId, employeeId: userId, date: Between(start, end) },
       order: { date: 'ASC' },
     });
-    return rows.map((r) => {
+    return rows.filter((r) => !this.isUnapprovedManual(r)).map((r) => {
       let segs = (r.workSegments || []).map((s) => ({
         in: s.checkInTime ? new Date(s.checkInTime).toISOString() : null,
         out: s.checkOutTime ? new Date(s.checkOutTime).toISOString() : null,
