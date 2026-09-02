@@ -84,6 +84,17 @@ Feature: Attendance — clocking, scope, and tenant isolation
     When the owner opens the daily activity view for that date range
     Then that day shows as a single consolidated row
 
+  Scenario: the owner sees the attendance setup status with the holiday gap flagged
+    Given an organization with an employee
+    When the owner reads the attendance setup status
+    Then it reports the work schedule and flags that no holidays are configured
+
+  @security
+  Scenario: a plain employee cannot read the attendance setup status
+    Given an organization with an employee
+    When the employee requests the attendance setup status
+    Then the request is forbidden
+
   Scenario: holidays are readable by all members but only writable by admins
     Given an organization with an employee
     When the owner adds a holiday

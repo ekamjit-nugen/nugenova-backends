@@ -148,6 +148,13 @@ export class AttendanceController {
     return { success: true, ...data };
   }
 
+  @Get('attendance/setup-status')
+  @RequirePermission('attendance', 'view')
+  async setupStatus(@Req() req: any) {
+    const data = await this.attendance.getSetupStatus(this.caller(req));
+    return { success: true, data };
+  }
+
   @Get('attendance/pending-approvals')
   @RequirePermission('attendance', 'view')
   async pendingApprovals(@Req() req: any) {

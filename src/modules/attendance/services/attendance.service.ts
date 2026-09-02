@@ -23,6 +23,8 @@ import { WfhRequestService } from './wfh-request.service';
 import {
   WorkLocationConfig,
   WfhConfig,
+  PolicyEntity,
+  TIMING_CATEGORIES,
 } from '../../policy/entities/policy.entity';
 import {
   DEFAULT_TZ,
@@ -1092,6 +1094,126 @@ export class AttendanceService {
   }
 
   // ── holidays ────────────────────────────────────────────────────────────────
+
+  /**
+   * A one-shot health check of the org's attendance configuration — what's set
+   * up and what still needs a decision — so managers see, on the attendance page
+   * itself, whether they must go configure something. Each item carries a status
+   * (ok / attention / info) and where to go fix it.
+   */
+  async getSetupStatus(c: Caller): Promise<{
+    items: Array<{
+      key: string;
+      label: string;
+      status: 'ok' | 'attention' | 'info';
+      value: string;
+      hint: string;
+      actionLabel: string;
+      actionUrl: string;
+    }>;
+    okCount: number;
+    attentionCount: number;
+  }> {
+    const orgId = c.orgId;
+    const policies: PolicyEntity[] = await this.policyService.list(orgId).catch(() => []);
+    const hasCoords = (o: any) => Number.isFinite(o?.latitude) && Number.isFinite(o?.longitude) && (o.latitude !== 0 || o.longitude !== 0);
+
+    // Work schedule (always resolves — the default is seeded per org).
+    const timingPolicy = policies.find(
+      (p) => TIMING_CATEGORIES.includes(p.category) && p.applicableTo === 'all' && p.workTiming?.startTime,
+    );
+    const wt = timingPolicy?.workTiming || DEFAULT_WORK_TIMING;
+    let hasCustomTiming = false;
+    try {
+      hasCustomTiming = !!(await this.policyService.getOwnerSummary(orgId))?.hasCustomPolicy;
+    } catch {
+      /* ignore */
+    }
+
+    // Geo-fence: only truly enforced when office mode + at least one geocoded office.
+    const officePolicy = policies.find(
+      (p) => p.workLocation?.mode === 'office' && (p.workLocation.offices || []).some(hasCoords),
+    );
+    const officeCount = officePolicy ? (officePolicy.workLocation!.offices || []).filter(hasCoords).length : 0;
+
+    // WFH policy (a configured allowance / allowed days).
+    const wfhPolicy = policies.find(
+      (p) => p.wfhConfig && ((p.wfhConfig.maxDaysPerMonth || 0) > 0 || (p.wfhConfig.allowedDays || []).length > 0),
+    );
+
+    const year = new Date().getFullYear();
+    const holidayCount = await this.holidays.count({ where: { organizationId: orgId, isDeleted: false, year } });
+
+    const timesheet = await this.policyService.getTimesheetConfig(orgId).catch(() => null);
+    const payroll = await this.policyService.getPayrollConfig(orgId).catch(() => null);
+
+    const items = [
+      {
+        key: 'schedule',
+        label: 'Work schedule',
+        status: 'ok' as const,
+        value: `${wt.startTime}–${wt.endTime} · ${wt.graceMinutes ?? 15}m grace`,
+        hint: hasCustomTiming ? 'A custom work-timing policy is set.' : 'Using the default 9-to-6 schedule — customise it if your hours differ.',
+        actionLabel: 'Work timing',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'geofence',
+        label: 'Location tracking',
+        status: 'info' as const,
+        value: officePolicy ? `Geo-fenced · ${officeCount} office${officeCount === 1 ? '' : 's'}` : 'Clock-in from anywhere',
+        hint: officePolicy
+          ? `Clock-in requires being within ${officePolicy.workLocation!.geoFenceRadiusKm ?? 2}km of an office.`
+          : 'No office geo-fence — add offices in a policy to require on-site clock-in.',
+        actionLabel: 'Work location',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'wfh',
+        label: 'Work from home',
+        status: 'info' as const,
+        value: wfhPolicy ? `Up to ${wfhPolicy.wfhConfig!.maxDaysPerMonth || '∞'} days/mo` : 'Not configured',
+        hint: wfhPolicy ? 'A WFH allowance is defined.' : 'No WFH allowance set — employees can still raise WFH requests.',
+        actionLabel: 'WFH policy',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'holidays',
+        label: `Holidays (${year})`,
+        status: (holidayCount === 0 ? 'attention' : 'ok') as 'ok' | 'attention',
+        value: holidayCount === 0 ? 'None added' : `${holidayCount} holiday${holidayCount === 1 ? '' : 's'}`,
+        hint: holidayCount === 0 ? `No holidays for ${year} — days off will count as working days.` : 'Holiday calendar is set for this year.',
+        actionLabel: 'Add holidays',
+        actionUrl: '/attendance',
+      },
+      {
+        key: 'timesheet',
+        label: 'Timesheets',
+        status: 'info' as const,
+        value: timesheet?.enabled ? `Required · ${timesheet.cadence}` : 'Off',
+        hint: timesheet?.enabled ? 'Employees submit timesheets for approval.' : 'Employees do not submit timesheets.',
+        actionLabel: 'Timesheet policy',
+        actionUrl: '/policies',
+      },
+      {
+        key: 'payroll',
+        label: 'Attendance → pay',
+        status: 'info' as const,
+        value: payroll?.lopFromAttendance ? 'Absences dock pay' : 'No pay impact',
+        hint: payroll?.lopFromAttendance
+          ? 'Unaccounted/absent days are deducted as loss-of-pay in payroll.'
+          : 'Attendance does not affect payroll — turn on in Payroll setup to dock absences.',
+        actionLabel: 'Payroll setup',
+        actionUrl: '/payroll/setup',
+      },
+    ];
+
+    return {
+      items,
+      okCount: items.filter((i) => i.status === 'ok').length,
+      attentionCount: items.filter((i) => i.status === 'attention').length,
+    };
+  }
 
   async listHolidays(c: Caller, year?: number): Promise<HolidayEntity[]> {
     const where: any = { organizationId: c.orgId, isDeleted: false };

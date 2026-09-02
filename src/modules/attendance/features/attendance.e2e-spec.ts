@@ -485,6 +485,42 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('the owner sees the attendance setup status with the holiday gap flagged', ({ given, when, then }) => {
+    let org: CreatedOrg;
+    let body: any;
+
+    given('an organization with an employee', async () => {
+      ({ org } = await orgWithEmployee());
+    });
+    when('the owner reads the attendance setup status', async () => {
+      const res = await h.api().get(`${API}/attendance/setup-status`).set('Authorization', `Bearer ${org.ownerToken}`).expect(200);
+      body = res.body.data;
+    });
+    then('it reports the work schedule and flags that no holidays are configured', () => {
+      const byKey = Object.fromEntries((body.items as any[]).map((i) => [i.key, i]));
+      expect(byKey.schedule.status).toBe('ok');
+      expect(byKey.schedule.value).toMatch(/\d{2}:\d{2}/);
+      expect(byKey.holidays.status).toBe('attention');
+      expect(body.attentionCount).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  test('a plain employee cannot read the attendance setup status', ({ given, when, then }) => {
+    let employee: { token: string };
+    let status = 0;
+
+    given('an organization with an employee', async () => {
+      ({ employee } = await orgWithEmployee());
+    });
+    when('the employee requests the attendance setup status', async () => {
+      const res = await h.api().get(`${API}/attendance/setup-status`).set('Authorization', `Bearer ${employee.token}`);
+      status = res.status;
+    });
+    then('the request is forbidden', () => {
+      expect(status).toBe(403);
+    });
+  });
+
   // ── holidays ────────────────────────────────────────────────────────────────
 
   test('holidays are readable by all members but only writable by admins', ({
