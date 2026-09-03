@@ -18,6 +18,7 @@ import { TimesheetModule } from './modules/timesheet/timesheet.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 import { AcademicModule } from './modules/academic/academic.module';
+import { LmsModule } from './modules/lms/lms.module';
 
 /**
  * Nugenova backend root module.
@@ -48,6 +49,7 @@ import { AcademicModule } from './modules/academic/academic.module';
     NotificationModule,
     AdminPlatformModule,
     AcademicModule,
+    LmsModule,
   ],
 })
 export class AppModule {}

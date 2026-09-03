@@ -52,6 +52,7 @@ import { OrgNotificationSettings1788000000000 } from '../src/bootstrap/database/
 import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/migrations/1788010000000-OrgNotificationTypes';
 import { MembershipPersonType1788030000000 } from '../src/bootstrap/database/migrations/1788030000000-MembershipPersonType';
 import { Academic1788031000000 } from '../src/bootstrap/database/migrations/1788031000000-Academic';
+import { Lms1788032000000 } from '../src/bootstrap/database/migrations/1788032000000-Lms';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -71,6 +72,9 @@ import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.
 import { TimesheetEntity } from '../src/modules/timesheet/entities/timesheet.entity';
 import { AcademicYearEntity } from '../src/modules/academic/entities/academic-year.entity';
 import { TermEntity } from '../src/modules/academic/entities/term.entity';
+import { CourseEntity } from '../src/modules/lms/entities/course.entity';
+import { ClassSectionEntity } from '../src/modules/lms/entities/class-section.entity';
+import { EnrolmentEntity } from '../src/modules/lms/entities/enrolment.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -132,6 +136,9 @@ module.exports = async function globalSetup(): Promise<void> {
       TaxDeclarationEntity,
       AcademicYearEntity,
       TermEntity,
+      CourseEntity,
+      ClassSectionEntity,
+      EnrolmentEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -172,6 +179,7 @@ module.exports = async function globalSetup(): Promise<void> {
       OrgNotificationTypes1788010000000,
       MembershipPersonType1788030000000,
       Academic1788031000000,
+      Lms1788032000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
