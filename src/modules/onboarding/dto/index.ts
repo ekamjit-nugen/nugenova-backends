@@ -122,6 +122,22 @@ export class RequestDocumentsDto {
   notify?: boolean;
 }
 
+/** HR requesting one ad-hoc document from an employee (Directory / Onboarding). */
+export class RequestEmployeeDocumentDto {
+  @IsString()
+  @MaxLength(120)
+  title: string;
+
+  @IsOptional()
+  @IsBoolean()
+  required?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+}
+
 export class CreateTemplateDto {
   @IsString()
   @MinLength(2)

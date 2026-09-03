@@ -26,7 +26,7 @@ describe('AuthService (unit, no DB)', () => {
   let service: AuthService;
   let membershipRepo: { find: jest.Mock };
   let orgRepo: { findOne: jest.Mock };
-  let terms: { needsConsent: jest.Mock };
+  let terms: { needsConsent: jest.Mock; needsConsentActive: jest.Mock };
   let currentTermsVersion: number;
 
   const asUser = (u: Partial<UserEntity>): UserEntity =>
@@ -44,14 +44,14 @@ describe('AuthService (unit, no DB)', () => {
         onboardingCompleted: true,
       }),
     };
-    // Model the real TermsService.needsConsent(termsId, consent): stale when
-    // the accepted version is below the assigned doc's current version.
+    // Model the real TermsService.needsConsentActive(consent): stale when the
+    // accepted version is below the ACTIVE platform T&C's current version.
     currentTermsVersion = 1;
+    const stale = (consent: any) =>
+      !consent || (consent?.version ?? 0) < currentTermsVersion;
     terms = {
-      needsConsent: jest.fn(
-        (_termsId: any, consent: any) =>
-          !consent || (consent?.version ?? 0) < currentTermsVersion,
-      ),
+      needsConsent: jest.fn((_termsId: any, consent: any) => stale(consent)),
+      needsConsentActive: jest.fn((consent: any) => stale(consent)),
     };
 
     const moduleRef = await Test.createTestingModule({

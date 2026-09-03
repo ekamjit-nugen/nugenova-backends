@@ -83,3 +83,9 @@ Feature: Employee onboarding lifecycle (HR)
     Given an organization with an onboarding for a member
     When the member tries to mark the IT accounts task done via the HR endpoint
     Then the task update is rejected as forbidden
+
+  Scenario: HR requests an extra document and the employee provides it via My Onboarding
+    Given an organization with an onboarding for a member
+    When the owner requests an extra "Signed NDA" document from that member
+    Then the member sees the requested document as pending in My Onboarding
+    And the member can upload the requested document

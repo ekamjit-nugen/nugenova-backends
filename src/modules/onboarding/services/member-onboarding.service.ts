@@ -361,6 +361,120 @@ export class OnboardingLifecycleService {
     return this.toView(r);
   }
 
+  /**
+   * HR requests an additional (ad-hoc) document FROM an employee. Appends a new
+   * document slot to their onboarding record; the employee sees it in "My
+   * Onboarding" and uploads it, HR verifies it with the same flow as a policy
+   * document. Reachable from the Onboarding page (by record id).
+   */
+  async requestDocument(
+    orgId: string,
+    id: string,
+    input: { title: string; required?: boolean; description?: string | null },
+    actorUserId: string,
+  ): Promise<OnboardingView> {
+    const r = await this.getRecord(orgId, id);
+    this.appendAdhocDocument(r, input, actorUserId);
+    if (r.status === 'pending') r.status = 'in_progress';
+    await this.repo.save(r);
+    await this.notifyDocumentRequested(orgId, r, input.title, actorUserId);
+    return this.toView(r);
+  }
+
+  /**
+   * HR requests a document from an employee by MEMBERSHIP (from the Directory,
+   * where the caller has a person, not an onboarding record). Appends to the
+   * member's active onboarding, or opens a lightweight document-request record
+   * so it still surfaces in their "My Onboarding".
+   */
+  async requestDocumentForMembership(
+    orgId: string,
+    membershipId: string,
+    input: { title: string; required?: boolean; description?: string | null },
+    actorUserId: string,
+  ): Promise<OnboardingView> {
+    const m = await this.resolveMembership(orgId, membershipId);
+    let r = m.userId ? await this.myRecord(orgId, m.userId) : null;
+    if (!r) {
+      // No active onboarding — open a minimal record that only carries the
+      // requested document(s), so the employee gets a "documents to provide"
+      // view without re-running their whole onboarding checklist.
+      r = this.repo.create({
+        organizationId: orgId,
+        membershipId: m.id,
+        userId: m.userId ?? null,
+        employeeEmail: m.email ?? null,
+        employeeName: await this.memberName(m),
+        status: 'in_progress',
+        roleId: m.roleId ?? null,
+        role: m.role ?? null,
+        departmentId: (m as any).departmentId ?? null,
+        documents: [],
+        checklist: [],
+        initiatedBy: actorUserId,
+      });
+    }
+    this.appendAdhocDocument(r, input, actorUserId);
+    if (r.status === 'pending') r.status = 'in_progress';
+    await this.repo.save(r);
+    await this.notifyDocumentRequested(orgId, r, input.title, actorUserId);
+    return this.toView(r);
+  }
+
+  /** Append an ad-hoc document slot with a unique, human-derived key. */
+  private appendAdhocDocument(
+    r: MemberOnboardingEntity,
+    input: { title: string; required?: boolean; description?: string | null },
+    actorUserId: string,
+  ): void {
+    const title = (input.title ?? '').trim();
+    if (!title) throw new BadRequestException('A document title is required');
+    const base =
+      'adhoc_' +
+      (title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 30) || 'document');
+    const used = new Set(r.documents.map((d) => d.key));
+    let key = base;
+    let n = 2;
+    while (used.has(key)) key = `${base}_${n++}`;
+    r.documents = [
+      ...r.documents,
+      {
+        key,
+        title,
+        required: input.required !== false,
+        status: 'pending',
+        fileId: null,
+        adhoc: true,
+        description: input.description?.trim() || null,
+        requestedBy: actorUserId,
+        requestedAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  private async notifyDocumentRequested(
+    orgId: string,
+    r: MemberOnboardingEntity,
+    title: string,
+    actorUserId: string,
+  ): Promise<void> {
+    if (!r.userId) return;
+    await this.notifier.notify({
+      organizationId: orgId,
+      userId: r.userId,
+      actorId: actorUserId,
+      type: 'onboarding_document_requested',
+      title: 'A document was requested from you',
+      body: `Please provide "${title}" in My Onboarding.`,
+      data: { actionUrl: '/onboarding/me', onboardingId: r.id },
+      priority: 'high',
+    });
+  }
+
   async complete(orgId: string, id: string): Promise<OnboardingView> {
     const r = await this.getRecord(orgId, id);
     if (r.status === 'completed') return this.toView(r);
@@ -508,12 +622,15 @@ export class OnboardingLifecycleService {
         changed = true;
       }
     }
-    // Keep any already-submitted doc that the policy dropped (never lose work).
+    // Keep any already-submitted doc that the policy dropped (never lose work),
+    // and ALWAYS keep ad-hoc requests (an HR-requested doc that isn't in the
+    // policy) even while still pending — those aren't policy noise to prune.
     for (const slot of r.documents) {
-      if (!cfgKeys.has(slot.key) && slot.status !== 'pending') {
+      if (cfgKeys.has(slot.key)) continue; // already carried over above
+      if (slot.adhoc || slot.status !== 'pending') {
         next.push(slot);
-      } else if (!cfgKeys.has(slot.key) && slot.status === 'pending') {
-        changed = true; // a pending doc the policy removed → drop it
+      } else {
+        changed = true; // a pending policy doc the policy removed → drop it
       }
     }
     // Auto-complete the "Complete your profile" self task once the member has

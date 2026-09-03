@@ -124,6 +124,12 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
   const userIds = new Set<string>();
   const orgIds = new Set<string>();
   const termsIds = new Set<string>();
+  // Terms are now single-active platform-wide: exactly one T&C gates every org,
+  // and every org accepts THAT SAME document (as in production). Creating a new
+  // T&C activates it and deactivates the previous, which would stale an already-
+  // consented org — so the harness mints ONE shared active T&C and reuses it for
+  // every org in the suite, instead of one per org.
+  let sharedTermsId: string | null = null;
 
   const api = () => request(app.getHttpServer());
 
@@ -170,6 +176,9 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
     },
 
     async createTerms(saToken: string, title = `Test Terms ${newObjectId()}`) {
+      // Reuse the one shared active T&C so every org gates on (and accepts) the
+      // same document — provisioning a second org must not stale the first.
+      if (sharedTermsId) return sharedTermsId;
       const res = await api()
         .post('/api/v1/admin/terms')
         .set('Authorization', `Bearer ${saToken}`)
@@ -180,6 +189,7 @@ export async function bootOrgTestApp(): Promise<OrgTestHarness> {
         .expect(201);
       const id = res.body.data.id;
       termsIds.add(id);
+      sharedTermsId = id;
       return id;
     },
 

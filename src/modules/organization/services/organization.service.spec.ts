@@ -68,8 +68,15 @@ describe('OrganizationService (unit, no DB)', () => {
           useValue: {
             exists: jest.fn().mockResolvedValue(true),
             getVersion: jest.fn().mockReturnValue(1),
+            getActive: jest.fn().mockReturnValue({ id: 't1', version: 1 }),
             needsConsent: jest.fn().mockReturnValue(true),
-            get: jest.fn(),
+            needsConsentActive: jest.fn().mockReturnValue(true),
+            getActiveForConsent: jest.fn().mockResolvedValue({
+              id: 't1', title: 'Terms', version: 1, kind: 'html', text: 'x', fileId: null, isActive: true, updatedAt: new Date(),
+            }),
+            get: jest.fn().mockResolvedValue({
+              id: 't1', title: 'Terms', version: 1, kind: 'html', text: 'x', fileId: null, isActive: true, updatedAt: new Date(),
+            }),
           },
         },
         { provide: MailService, useValue: { send: mailSend } },
@@ -234,7 +241,9 @@ describe('OrganizationService (unit, no DB)', () => {
     const termsSvc = () =>
       (service as any).terms as {
         getVersion: jest.Mock;
+        getActive: jest.Mock;
         needsConsent: jest.Mock;
+        needsConsentActive: jest.Mock;
       };
 
     const base = () =>
@@ -252,7 +261,7 @@ describe('OrganizationService (unit, no DB)', () => {
       }) as any;
 
     it('suspended → lifecycle "suspended" regardless of consent/setup', () => {
-      termsSvc().needsConsent.mockReturnValue(false);
+      termsSvc().needsConsentActive.mockReturnValue(false);
       const pub = service.toPublic({
         ...base(),
         status: 'suspended',
@@ -262,13 +271,13 @@ describe('OrganizationService (unit, no DB)', () => {
     });
 
     it('never consented → "awaiting_consent"', () => {
-      termsSvc().needsConsent.mockReturnValue(true);
+      termsSvc().needsConsentActive.mockReturnValue(true);
       const pub = service.toPublic(base());
       expect(pub.lifecycle).toBe('awaiting_consent');
     });
 
     it('accepted before but terms bumped → "reconsent"', () => {
-      termsSvc().needsConsent.mockReturnValue(true);
+      termsSvc().needsConsentActive.mockReturnValue(true);
       const pub = service.toPublic({
         ...base(),
         consent: { version: 1 } as any,
@@ -277,7 +286,7 @@ describe('OrganizationService (unit, no DB)', () => {
     });
 
     it('consented but wizard unfinished → "setting_up" (with step)', () => {
-      termsSvc().needsConsent.mockReturnValue(false);
+      termsSvc().needsConsentActive.mockReturnValue(false);
       const pub = service.toPublic({
         ...base(),
         consent: { version: 2 } as any,
@@ -289,7 +298,7 @@ describe('OrganizationService (unit, no DB)', () => {
     });
 
     it('consented and setup finished → "active"', () => {
-      termsSvc().needsConsent.mockReturnValue(false);
+      termsSvc().needsConsentActive.mockReturnValue(false);
       const pub = service.toPublic({
         ...base(),
         consent: { version: 2 } as any,

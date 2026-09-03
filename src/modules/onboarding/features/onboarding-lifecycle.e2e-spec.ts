@@ -520,4 +520,50 @@ defineFeature(feature, (test) => {
       expect(res.status).toBe(403);
     });
   });
+
+  test('HR requests an extra document and the employee provides it via My Onboarding', ({
+    given,
+    when,
+    then,
+    and,
+  }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let recordId: string;
+    let docKey: string;
+
+    given('an organization with an onboarding for a member', async () => {
+      ({ o, member } = await orgWithMember());
+      const created = await initiate(o, member.userId).expect(201);
+      recordId = created.body.data.id;
+    });
+    when('the owner requests an extra "Signed NDA" document from that member', async () => {
+      const res = await h
+        .api()
+        .post(`${API}/onboarding/lifecycle/${recordId}/request-document`)
+        .set('Authorization', `Bearer ${o.ownerToken}`)
+        .send({ title: 'Signed NDA', required: true, description: 'Sign page 3' })
+        .expect(200);
+      const doc = res.body.data.documents.find((d: any) => d.title === 'Signed NDA');
+      expect(doc).toBeTruthy();
+      expect(doc.adhoc).toBe(true);
+      docKey = doc.key;
+    });
+    then('the member sees the requested document as pending in My Onboarding', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/onboarding/me`)
+        .set('Authorization', `Bearer ${member.token}`)
+        .expect(200);
+      const doc = res.body.data.documents.find((d: any) => d.key === docKey);
+      expect(doc).toBeTruthy();
+      expect(doc.status).toBe('pending');
+      expect(doc.description).toBe('Sign page 3');
+    });
+    and('the member can upload the requested document', async () => {
+      const res = await uploadAsMember(member, docKey).expect(200);
+      const doc = res.body.data.documents.find((d: any) => d.key === docKey);
+      expect(doc.status).toBe('uploaded');
+    });
+  });
 });

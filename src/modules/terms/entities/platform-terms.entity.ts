@@ -25,6 +25,16 @@ export class PlatformTermsEntity extends PgBaseEntity {
   @Column({ type: 'int', default: 1 })
   version: number;
 
+  /**
+   * Whether this is THE active platform Terms & Conditions. Exactly one row is
+   * active at a time (enforced by a partial unique index). Every organization —
+   * active or not — must accept the active document at its current `version`;
+   * editing it (a new version) or activating a different document makes every
+   * org's consent stale and re-gates them at login.
+   */
+  @Column({ type: 'boolean', default: false })
+  isActive: boolean;
+
   /** html | pdf */
   @Column({ type: 'varchar', default: 'html' })
   kind: string;

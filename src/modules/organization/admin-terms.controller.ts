@@ -91,6 +91,18 @@ export class AdminTermsController {
     return { success: true, data: await this.terms.get(id) };
   }
 
+  /** Make this document THE active platform T&C — every org must re-accept it. */
+  @Post(':id/activate')
+  @HttpCode(HttpStatus.OK)
+  async activate(@Param('id') id: string) {
+    const doc = await this.terms.activate(id);
+    return {
+      success: true,
+      message: 'Now the active Terms & Conditions — all organizations must accept it',
+      data: doc,
+    };
+  }
+
   /** Edit an HTML T&C — bumps its version; assigned orgs must re-accept. */
   @Put(':id')
   async update(
@@ -105,7 +117,7 @@ export class AdminTermsController {
     );
     return {
       success: true,
-      message: `Terms updated to v${doc.version} — assigned organizations must re-accept`,
+      message: `Terms updated to v${doc.version} — all organizations must re-accept`,
       data: doc,
     };
   }
@@ -129,19 +141,18 @@ export class AdminTermsController {
     );
     return {
       success: true,
-      message: `Terms updated to v${doc.version} — assigned organizations must re-accept`,
+      message: `Terms updated to v${doc.version} — all organizations must re-accept`,
       data: doc,
     };
   }
 
-  /** Delete a T&C — refused while any org is still assigned it. */
+  /** Delete a T&C — refused for the active document (every org depends on it). */
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async remove(@Param('id') id: string) {
-    const inUse = await this.orgService.countUsingTerms(id);
-    if (inUse > 0) {
+    if (this.terms.isActiveTerms(id)) {
       throw new ConflictException(
-        `Cannot delete — ${inUse} organization(s) are using this Terms & Conditions. Reassign them first.`,
+        'Cannot delete the active Terms & Conditions. Activate a different one first.',
       );
     }
     await this.terms.remove(id);

@@ -20,8 +20,15 @@ describe('TermsService (unit, no DB)', () => {
       findOne: jest.fn(),
       count: jest.fn(),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      update: jest.fn().mockResolvedValue({}),
       create: jest.fn((v) => ({ ...v })),
       save: jest.fn(async (v) => ({ id: v.id ?? 't1', updatedAt: new Date(), ...v })),
+      // activate() runs its two flips inside a transaction.
+      manager: {
+        transaction: jest.fn(async (cb: any) =>
+          cb({ update: jest.fn().mockResolvedValue({}) }),
+        ),
+      },
     };
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -48,22 +55,60 @@ describe('TermsService (unit, no DB)', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('creates an HTML T&C at version 1 and caches its version', async () => {
-      repo.save.mockResolvedValueOnce({
+    it('creates an HTML T&C at version 1, caches its version, and publishes it active', async () => {
+      const row = {
         id: 't1',
         title: 'Standard',
         version: 1,
         kind: 'html',
         text: 'These are the terms.',
         fileId: null,
+        isActive: true,
         updatedAt: new Date(),
-      });
+      };
+      repo.save.mockResolvedValueOnce(row);
+      repo.findOne.mockResolvedValue(row); // activate() + get()
+      repo.find.mockResolvedValue([{ id: 't1', version: 1, isActive: true }]);
       const doc = await service.create(
         { title: 'Standard', kind: 'html', text: 'These are the terms.' },
         'admin',
       );
       expect(doc.version).toBe(1);
+      expect(doc.isActive).toBe(true);
       expect(service.getVersion('t1')).toBe(1);
+      // Creating publishes it as the single active platform T&C.
+      expect(service.getActive()).toEqual({ id: 't1', version: 1 });
+    });
+  });
+
+  describe('needsConsentActive (the platform-wide gate)', () => {
+    beforeEach(async () => {
+      // Warm the cache: t1 is the active T&C at version 3.
+      repo.find.mockResolvedValueOnce([{ id: 't1', version: 3, isActive: true }]);
+      await service.onModuleInit();
+    });
+
+    it('no active T&C configured → nobody is gated', async () => {
+      repo.find.mockResolvedValueOnce([]);
+      await service.onModuleInit();
+      expect(service.needsConsentActive(null)).toBe(false);
+      expect(service.needsConsentActive({ termsId: 't1', version: 3 })).toBe(false);
+    });
+
+    it('active T&C + never consented → must consent', () => {
+      expect(service.needsConsentActive(null)).toBe(true);
+    });
+
+    it('consented to a DIFFERENT document → must re-consent', () => {
+      expect(service.needsConsentActive({ termsId: 'old', version: 3 })).toBe(true);
+    });
+
+    it('consented to an OLDER version of the active doc → must re-consent', () => {
+      expect(service.needsConsentActive({ termsId: 't1', version: 2 })).toBe(true);
+    });
+
+    it('consented to the active document at its current version → no gate', () => {
+      expect(service.needsConsentActive({ termsId: 't1', version: 3 })).toBe(false);
     });
   });
 
@@ -88,37 +133,6 @@ describe('TermsService (unit, no DB)', () => {
     });
   });
 
-  describe('needsConsent', () => {
-    beforeEach(async () => {
-      // Warm the cache: document t1 is currently at version 3.
-      repo.find.mockResolvedValueOnce([{ id: 't1', version: 3 }]);
-      await service.onModuleInit();
-    });
-
-    it('no assigned T&C → no gate', () => {
-      expect(service.needsConsent(null, null)).toBe(false);
-    });
-
-    it('assigned but the document is missing from cache → do not lock out', () => {
-      expect(service.needsConsent('gone', null)).toBe(false);
-    });
-
-    it('assigned + never consented → must consent', () => {
-      expect(service.needsConsent('t1', null)).toBe(true);
-    });
-
-    it('consented to a DIFFERENT document → must re-consent', () => {
-      expect(service.needsConsent('t1', { termsId: 'other', version: 3 })).toBe(true);
-    });
-
-    it('consented to an OLDER version → must re-consent', () => {
-      expect(service.needsConsent('t1', { termsId: 't1', version: 2 })).toBe(true);
-    });
-
-    it('consented to the current document + version → no gate', () => {
-      expect(service.needsConsent('t1', { termsId: 't1', version: 3 })).toBe(false);
-    });
-  });
 
   describe('remove', () => {
     it('deletes the row and drops it from the cache', async () => {
