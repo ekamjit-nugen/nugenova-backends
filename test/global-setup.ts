@@ -48,6 +48,7 @@ import { BankAccount1787960000000 } from '../src/bootstrap/database/migrations/1
 import { Timesheets1787970000000 } from '../src/bootstrap/database/migrations/1787970000000-Timesheets';
 import { TermsActive1787980000000 } from '../src/bootstrap/database/migrations/1787980000000-TermsActive';
 import { NotificationEmailChannel1787990000000 } from '../src/bootstrap/database/migrations/1787990000000-NotificationEmailChannel';
+import { OrgNotificationSettings1788000000000 } from '../src/bootstrap/database/migrations/1788000000000-OrgNotificationSettings';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -57,6 +58,7 @@ import { PolicyAcknowledgementEntity } from '../src/modules/policy/entities/poli
 import { PolicyVersionEntity } from '../src/modules/policy/entities/policy-version.entity';
 import { NotificationEntity } from '../src/modules/notification/entities/notification.entity';
 import { NotificationPreferenceEntity } from '../src/modules/notification/entities/notification-preference.entity';
+import { OrgNotificationSettingEntity } from '../src/modules/notification/entities/org-notification-setting.entity';
 import { SalaryStructureEntity } from '../src/modules/payroll/entities/salary-structure.entity';
 import { PayslipEntity } from '../src/modules/payroll/entities/payslip.entity';
 import { PayrollRunEntity } from '../src/modules/payroll/entities/payroll-run.entity';
@@ -159,6 +161,7 @@ module.exports = async function globalSetup(): Promise<void> {
       Timesheets1787970000000,
       TermsActive1787980000000,
       NotificationEmailChannel1787990000000,
+      OrgNotificationSettings1788000000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

@@ -11,7 +11,8 @@ import { MailService } from '../../bootstrap/mail/mail.service';
 import { notificationEmail } from '../../bootstrap/mail/email-layout';
 import { NotificationService } from './notification.service';
 import { NotificationPreferenceService } from './notification-preference.service';
-import { emailMetaForType } from './notification-catalog';
+import { OrgNotificationSettingService } from './org-notification-setting.service';
+import { emailMetaForType, isCriticalNotification } from './notification-catalog';
 
 /** Per-notification email control: force-off, force-on, or override the copy. */
 export type EmailOption =
@@ -74,6 +75,7 @@ export class NotifierService {
   constructor(
     private readonly notifications: NotificationService,
     private readonly preferences: NotificationPreferenceService,
+    private readonly orgSettings: OrgNotificationSettingService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
     @InjectRepository(OrgMembershipEntity)
@@ -83,6 +85,32 @@ export class NotifierService {
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
   ) {}
+
+  /**
+   * Whether the org-level policy permits `channel` for this recipient. The policy
+   * gates EMPLOYEES only — owners/admins are never restricted — and critical
+   * types bypass it entirely. Fails OPEN.
+   */
+  private async orgAllows(
+    orgId: string,
+    userId: string,
+    type: string,
+    channel: 'inApp' | 'email',
+  ): Promise<boolean> {
+    if (isCriticalNotification(type)) return true;
+    try {
+      const membership = await this.memberships.findOne({
+        where: { organizationId: orgId, userId, status: 'active' },
+        select: { role: true },
+      });
+      const role = (membership?.role || '').toLowerCase();
+      // Owners/admins (and anyone the policy doesn't target) always pass.
+      if (role !== 'member' && role !== 'employee') return true;
+      return this.orgSettings.allowsForEmployee(orgId, type, channel);
+    } catch {
+      return true;
+    }
+  }
 
   /**
    * Notify a single recipient across BOTH channels — the in-app inbox and (for
@@ -98,7 +126,9 @@ export class NotifierService {
 
     // ── In-app channel ──
     try {
-      if (await this.preferences.allows(input.userId, input.type, priority)) {
+      const prefOk = await this.preferences.allows(input.userId, input.type, priority);
+      const orgOk = await this.orgAllows(input.organizationId, input.userId, input.type, 'inApp');
+      if (prefOk && orgOk) {
         await this.notifications.create({
           organizationId: input.organizationId,
           userId: input.userId,
@@ -130,6 +160,7 @@ export class NotifierService {
         : emailMetaForType(input.type);
       if (!meta) return; // not an email-worthy type and no override
       if (!(await this.preferences.allowsEmail(input.userId, input.type, priority))) return;
+      if (!(await this.orgAllows(input.organizationId, input.userId, input.type, 'email'))) return;
       const user = await this.users.findOne({ where: { id: input.userId } });
       if (!user?.email) return;
       const actionUrl = (input.data?.actionUrl as string) || '';

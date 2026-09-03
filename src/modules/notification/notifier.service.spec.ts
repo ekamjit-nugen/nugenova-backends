@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { NotifierService } from './notifier.service';
 import { NotificationService } from './notification.service';
 import { NotificationPreferenceService } from './notification-preference.service';
+import { OrgNotificationSettingService } from './org-notification-setting.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
@@ -21,6 +22,8 @@ describe('NotifierService (email fan-out)', () => {
   let send: jest.Mock;
   let allows: jest.Mock;
   let allowsEmail: jest.Mock;
+  let allowsForEmployee: jest.Mock;
+  let membershipFindOne: jest.Mock;
   let userFindOne: jest.Mock;
 
   const build = async () => {
@@ -28,6 +31,9 @@ describe('NotifierService (email fan-out)', () => {
     send = jest.fn().mockResolvedValue(true);
     allows = jest.fn().mockResolvedValue(true);
     allowsEmail = jest.fn().mockResolvedValue(true);
+    allowsForEmployee = jest.fn().mockResolvedValue(true);
+    // Default recipient is an EMPLOYEE (so the org policy applies to them).
+    membershipFindOne = jest.fn().mockResolvedValue({ role: 'member' });
     userFindOne = jest.fn().mockResolvedValue({ id: 'u1', email: 'nora@acme.test', firstName: 'Nora', lastName: 'P' });
 
     const moduleRef = await Test.createTestingModule({
@@ -35,9 +41,10 @@ describe('NotifierService (email fan-out)', () => {
         NotifierService,
         { provide: NotificationService, useValue: { create } },
         { provide: NotificationPreferenceService, useValue: { allows, allowsEmail } },
+        { provide: OrgNotificationSettingService, useValue: { allowsForEmployee } },
         { provide: MailService, useValue: { send } },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('https://app.nugenova.com') } },
-        { provide: getRepositoryToken(OrgMembershipEntity), useValue: {} },
+        { provide: getRepositoryToken(OrgMembershipEntity), useValue: { findOne: membershipFindOne } },
         { provide: getRepositoryToken(RoleEntity), useValue: {} },
         { provide: getRepositoryToken(UserEntity), useValue: { findOne: userFindOne } },
       ],
@@ -103,5 +110,30 @@ describe('NotifierService (email fan-out)', () => {
     await service.notify({ ...base, type: 'clock_in', email: { eyebrow: 'Attendance', subject: 'Clocked in' } });
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0].subject).toBe('Clocked in');
+  });
+
+  describe('org-level policy (owner restricts employees)', () => {
+    it('the org policy suppresses BOTH channels for an employee', async () => {
+      allowsForEmployee.mockResolvedValue(false);
+      await service.notify({ ...base, type: 'leave_approved' });
+      expect(create).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('the org policy does NOT restrict an owner/admin recipient', async () => {
+      allowsForEmployee.mockResolvedValue(false);
+      membershipFindOne.mockResolvedValue({ role: 'owner' });
+      await service.notify({ ...base, type: 'leave_approved' });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(allowsForEmployee).not.toHaveBeenCalled(); // owner bypasses the org gate
+    });
+
+    it('a CRITICAL type ignores the org policy even for an employee', async () => {
+      allowsForEmployee.mockResolvedValue(false);
+      await service.notify({ ...base, type: 'terms_activated', title: 'Updated Terms', data: { actionUrl: '/consent' } });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(1);
+    });
   });
 });

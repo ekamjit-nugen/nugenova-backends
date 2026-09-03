@@ -20,6 +20,10 @@ import {
   NotificationPreferenceService,
   UpdatePreferenceInput,
 } from './notification-preference.service';
+import {
+  OrgNotificationSettingService,
+  UpdateOrgNotificationInput,
+} from './org-notification-setting.service';
 
 /**
  * Notifications — the caller's own inbox. Guarded by JWT only: there is no
@@ -34,6 +38,7 @@ export class NotificationController {
   constructor(
     private readonly notifications: NotificationService,
     private readonly preferences: NotificationPreferenceService,
+    private readonly orgSettings: OrgNotificationSettingService,
   ) {}
 
   private userId(req: any): string {
@@ -44,6 +49,29 @@ export class NotificationController {
 
   private orgId(req: any): string | null {
     return req.user?.organizationId ?? null;
+  }
+
+  /** Require an org owner/admin — the org-wide settings are theirs to manage. */
+  private requireOrgAdmin(req: any): string {
+    const orgId = this.orgId(req);
+    if (!orgId) throw new ForbiddenException('No organization context');
+    const role = req.user?.orgRole;
+    if (role !== 'owner' && role !== 'admin') {
+      throw new ForbiddenException('Only an organization owner or admin can change team notification settings');
+    }
+    return orgId;
+  }
+
+  /** The org-wide policy for what employees receive (owner/admin only). */
+  @Get('org-settings')
+  async getOrgSettings(@Req() req: any) {
+    return { success: true, data: await this.orgSettings.get(this.requireOrgAdmin(req)) };
+  }
+
+  @Put('org-settings')
+  async updateOrgSettings(@Body() body: UpdateOrgNotificationInput, @Req() req: any) {
+    const data = await this.orgSettings.update(this.requireOrgAdmin(req), body || {});
+    return { success: true, message: 'Team notification settings saved', data };
   }
 
   @Get()

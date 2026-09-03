@@ -7,8 +7,10 @@ import { RoleEntity } from '../auth/entities/role.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { NotificationEntity } from './entities/notification.entity';
 import { NotificationPreferenceEntity } from './entities/notification-preference.entity';
+import { OrgNotificationSettingEntity } from './entities/org-notification-setting.entity';
 import { NotificationService } from './notification.service';
 import { NotificationPreferenceService } from './notification-preference.service';
+import { OrgNotificationSettingService } from './org-notification-setting.service';
 import { NotifierService } from './notifier.service';
 import { NotificationController } from './notification.controller';
 
@@ -28,13 +30,24 @@ import { NotificationController } from './notification.controller';
     TypeOrmModule.forFeature([
       NotificationEntity,
       NotificationPreferenceEntity,
+      OrgNotificationSettingEntity,
       OrgMembershipEntity,
       RoleEntity,
       UserEntity,
     ]),
   ],
   controllers: [NotificationController],
-  providers: [NotificationService, NotificationPreferenceService, NotifierService],
-  exports: [NotifierService, NotificationService, NotificationPreferenceService],
+  providers: [
+    NotificationService,
+    NotificationPreferenceService,
+    OrgNotificationSettingService,
+    NotifierService,
+  ],
+  exports: [
+    NotifierService,
+    NotificationService,
+    NotificationPreferenceService,
+    OrgNotificationSettingService,
+  ],
 })
 export class NotificationModule {}

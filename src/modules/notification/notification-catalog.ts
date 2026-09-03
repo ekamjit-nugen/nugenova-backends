@@ -63,3 +63,21 @@ export const NOTIFICATION_EMAIL: Record<string, NotificationEmailMeta> = {
 export function emailMetaForType(type: string): NotificationEmailMeta | null {
   return NOTIFICATION_EMAIL[type] ?? null;
 }
+
+/**
+ * Types that ALWAYS deliver — they bypass both the org-level policy and the
+ * recipient's personal preferences, because missing one is an account-integrity
+ * or lockout risk (a security alert, a required Terms re-accept, a suspension
+ * notice). Sign-in codes are sent outside notify() entirely and are always sent.
+ */
+export const CRITICAL_NOTIFICATION_TYPES = new Set<string>([
+  'terms_activated',
+  'org_suspended',
+  'org_reactivated',
+  'security_new_signin',
+  'security_mfa_changed',
+]);
+
+export function isCriticalNotification(type: string): boolean {
+  return CRITICAL_NOTIFICATION_TYPES.has(type);
+}
