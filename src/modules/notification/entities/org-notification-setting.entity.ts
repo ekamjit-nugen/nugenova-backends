@@ -27,4 +27,14 @@ export class OrgNotificationSettingEntity extends PgBaseEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'" })
   employeeCategories: Record<string, { inApp?: boolean; email?: boolean }>;
+
+  /**
+   * Per individual notification TYPE overrides, same channel shape as
+   * `employee_categories` but keyed by event type (e.g. `attendance_absent`).
+   * A type override wins over its category default; a channel not set here falls
+   * back to the category. Lets an owner silence one specific event while leaving
+   * the rest of its category on.
+   */
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  employeeTypes: Record<string, { inApp?: boolean; email?: boolean }>;
 }

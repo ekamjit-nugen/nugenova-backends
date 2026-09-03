@@ -49,6 +49,7 @@ import { Timesheets1787970000000 } from '../src/bootstrap/database/migrations/17
 import { TermsActive1787980000000 } from '../src/bootstrap/database/migrations/1787980000000-TermsActive';
 import { NotificationEmailChannel1787990000000 } from '../src/bootstrap/database/migrations/1787990000000-NotificationEmailChannel';
 import { OrgNotificationSettings1788000000000 } from '../src/bootstrap/database/migrations/1788000000000-OrgNotificationSettings';
+import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/migrations/1788010000000-OrgNotificationTypes';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -162,6 +163,7 @@ module.exports = async function globalSetup(): Promise<void> {
       TermsActive1787980000000,
       NotificationEmailChannel1787990000000,
       OrgNotificationSettings1788000000000,
+      OrgNotificationTypes1788010000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

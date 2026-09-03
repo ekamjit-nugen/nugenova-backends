@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { NotificationPreferenceEntity } from './entities/notification-preference.entity';
 import { categoryForType } from './notification.service';
 
-export const NOTIFICATION_CATEGORIES = ['attendance', 'leave', 'payroll', 'onboarding', 'policy', 'system'] as const;
+export const NOTIFICATION_CATEGORIES = ['attendance', 'leave', 'timesheet', 'payroll', 'onboarding', 'policy', 'system'] as const;
 
 export interface PreferenceView {
   inApp: boolean;
