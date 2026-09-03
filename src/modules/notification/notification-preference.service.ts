@@ -5,11 +5,13 @@ import { Repository } from 'typeorm';
 import { NotificationPreferenceEntity } from './entities/notification-preference.entity';
 import { categoryForType } from './notification.service';
 
-export const NOTIFICATION_CATEGORIES = ['attendance', 'leave', 'payroll', 'onboarding', 'policy', 'system'] as const;
+export const NOTIFICATION_CATEGORIES = ['attendance', 'leave', 'timesheet', 'payroll', 'onboarding', 'policy', 'system'] as const;
 
 export interface PreferenceView {
   inApp: boolean;
   categories: Record<string, boolean>;
+  email: boolean;
+  emailCategories: Record<string, boolean>;
   dndEnabled: boolean;
   dndAllowUrgent: boolean;
 }
@@ -17,6 +19,8 @@ export interface PreferenceView {
 export interface UpdatePreferenceInput {
   inApp?: boolean;
   categories?: Record<string, boolean>;
+  email?: boolean;
+  emailCategories?: Record<string, boolean>;
   dndEnabled?: boolean;
   dndAllowUrgent?: boolean;
 }
@@ -41,10 +45,16 @@ export class NotificationPreferenceService {
   async get(userId: string): Promise<PreferenceView> {
     const row = await this.repo.findOne({ where: { userId } });
     const cats: Record<string, boolean> = {};
-    for (const c of NOTIFICATION_CATEGORIES) cats[c] = row?.categories?.[c] !== false;
+    const emailCats: Record<string, boolean> = {};
+    for (const c of NOTIFICATION_CATEGORIES) {
+      cats[c] = row?.categories?.[c] !== false;
+      emailCats[c] = row?.emailCategories?.[c] !== false;
+    }
     return {
       inApp: row?.inApp !== false,
       categories: cats,
+      email: row?.email !== false,
+      emailCategories: emailCats,
       dndEnabled: !!row?.dndEnabled,
       dndAllowUrgent: row?.dndAllowUrgent !== false,
     };
@@ -52,8 +62,9 @@ export class NotificationPreferenceService {
 
   async update(userId: string, input: UpdatePreferenceInput): Promise<PreferenceView> {
     let row = await this.repo.findOne({ where: { userId } });
-    if (!row) row = this.repo.create({ userId, categories: {} });
+    if (!row) row = this.repo.create({ userId, categories: {}, emailCategories: {} });
     if (input.inApp !== undefined) row.inApp = input.inApp;
+    if (input.email !== undefined) row.email = input.email;
     if (input.dndEnabled !== undefined) row.dndEnabled = input.dndEnabled;
     if (input.dndAllowUrgent !== undefined) row.dndAllowUrgent = input.dndAllowUrgent;
     if (input.categories) {
@@ -63,8 +74,39 @@ export class NotificationPreferenceService {
       }
       row.categories = next;
     }
+    if (input.emailCategories) {
+      const next = { ...(row.emailCategories || {}) };
+      for (const c of NOTIFICATION_CATEGORIES) {
+        if (input.emailCategories[c] !== undefined) next[c] = input.emailCategories[c];
+      }
+      row.emailCategories = next;
+    }
     await this.repo.save(row);
     return this.get(userId);
+  }
+
+  /**
+   * Whether a notification of `type`/`priority` should ALSO be emailed to
+   * `userId` — the email channel's gate, independent of the in-app one. Master
+   * email switch + per-category email toggle + DND (email respects DND unless
+   * urgent). Fails OPEN.
+   */
+  async allowsEmail(userId: string, type: string, priority: string): Promise<boolean> {
+    try {
+      const row = await this.repo.findOne({ where: { userId } });
+      if (!row) return true; // no prefs saved → email on
+      if (row.email === false) return false;
+      const category = categoryForType(type);
+      if (row.emailCategories?.[category] === false) return false;
+      if (row.dndEnabled) {
+        const urgent = priority === 'high';
+        if (!(urgent && row.dndAllowUrgent !== false)) return false;
+      }
+      return true;
+    } catch (err) {
+      this.logger.error(`allowsEmail() failed for ${userId}: ${String(err)}`);
+      return true;
+    }
   }
 
   /**

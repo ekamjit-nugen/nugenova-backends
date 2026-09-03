@@ -20,6 +20,10 @@ import {
   NotificationPreferenceService,
   UpdatePreferenceInput,
 } from './notification-preference.service';
+import {
+  OrgNotificationSettingService,
+  UpdateOrgNotificationInput,
+} from './org-notification-setting.service';
 
 /**
  * Notifications — the caller's own inbox. Guarded by JWT only: there is no
@@ -34,6 +38,7 @@ export class NotificationController {
   constructor(
     private readonly notifications: NotificationService,
     private readonly preferences: NotificationPreferenceService,
+    private readonly orgSettings: OrgNotificationSettingService,
   ) {}
 
   private userId(req: any): string {
@@ -44,6 +49,29 @@ export class NotificationController {
 
   private orgId(req: any): string | null {
     return req.user?.organizationId ?? null;
+  }
+
+  /** Require an org owner/admin — the org-wide settings are theirs to manage. */
+  private requireOrgAdmin(req: any): string {
+    const orgId = this.orgId(req);
+    if (!orgId) throw new ForbiddenException('No organization context');
+    const role = req.user?.orgRole;
+    if (role !== 'owner' && role !== 'admin') {
+      throw new ForbiddenException('Only an organization owner or admin can change team notification settings');
+    }
+    return orgId;
+  }
+
+  /** The org-wide policy for what employees receive (owner/admin only). */
+  @Get('org-settings')
+  async getOrgSettings(@Req() req: any) {
+    return { success: true, data: await this.orgSettings.get(this.requireOrgAdmin(req)) };
+  }
+
+  @Put('org-settings')
+  async updateOrgSettings(@Body() body: UpdateOrgNotificationInput, @Req() req: any) {
+    const data = await this.orgSettings.update(this.requireOrgAdmin(req), body || {});
+    return { success: true, message: 'Team notification settings saved', data };
   }
 
   @Get()
@@ -144,6 +172,42 @@ export class NotificationController {
         title: 'New policy to acknowledge',
         body: 'Please review and acknowledge the Work From Office policy.',
         data: { actionUrl: '/policies' },
+      },
+      {
+        type: 'leave_approved',
+        title: 'Leave approved',
+        body: 'Your Casual Leave for 15–17 Sept was approved.',
+        data: { actionUrl: '/leaves' },
+      },
+      {
+        type: 'leave_rejected',
+        title: 'Leave declined',
+        body: 'Your Sick Leave for 8 Sept was declined. Tap for details.',
+        data: { actionUrl: '/leaves' },
+      },
+      {
+        type: 'payroll_payslip_ready',
+        title: 'Your payslip is ready',
+        body: 'Your August 2026 payslip is now available to download.',
+        data: { actionUrl: '/payroll' },
+      },
+      {
+        type: 'onboarding_document_rejected',
+        title: 'Document needs changes',
+        body: 'Your "Address proof" was rejected — please re-upload it.',
+        data: { actionUrl: '/onboarding/me' },
+      },
+      {
+        type: 'policy_ack_reminder',
+        title: 'Reminder: acknowledge your policies',
+        body: 'You still have 1 policy waiting for your acknowledgement.',
+        data: { actionUrl: '/policies' },
+      },
+      {
+        type: 'terms_activated',
+        title: 'Updated Terms & Conditions',
+        body: 'Please review and accept the latest Terms & Conditions.',
+        data: { actionUrl: '/consent' },
       },
     ];
     for (const s of samples) {

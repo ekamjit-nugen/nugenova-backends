@@ -17,6 +17,7 @@ import { SessionEntity } from '../../auth/entities/session.entity';
 import { DepartmentEntity } from '../entities/department.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
 import { TermsService } from '../../terms/terms.service';
+import { NotifierService } from '../../notification/notifier.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
 import { CreateOrganizationDto } from '../dto';
@@ -89,6 +90,7 @@ export class OrganizationService {
     private readonly config: ConfigService,
     private readonly policies: PolicyService,
     private readonly roles: OrgRoleService,
+    private readonly notifier: NotifierService,
   ) {}
 
   private frontendUrl(): string {
@@ -546,6 +548,12 @@ export class OrganizationService {
     org.status = 'suspended';
     await this.orgRepo.save(org);
     this.logger.log(`Org ${org.id} HALTED by ${actedBy}`);
+    await this.notifyOrgLeaders(orgId, actedBy, {
+      type: 'org_suspended',
+      title: 'Your organization has been suspended',
+      body: `${org.name} has been suspended by the platform administrator. Please contact support to restore access.`,
+      priority: 'high',
+    });
     return this.toPublic(org);
   }
 
@@ -554,6 +562,62 @@ export class OrganizationService {
     org.status = 'active';
     await this.orgRepo.save(org);
     this.logger.log(`Org ${org.id} reactivated by ${actedBy}`);
+    await this.notifyOrgLeaders(orgId, actedBy, {
+      type: 'org_reactivated',
+      title: 'Your organization is active again',
+      body: `${org.name} has been reactivated. Your team can sign in and use the platform again.`,
+      data: { actionUrl: '/dashboard' },
+    });
     return this.toPublic(org);
+  }
+
+  /** Notify every owner/admin of an org (used for lifecycle + terms changes). */
+  private async notifyOrgLeaders(
+    orgId: string,
+    actorId: string,
+    n: { type: string; title: string; body: string; data?: Record<string, unknown>; priority?: string },
+  ): Promise<void> {
+    const leaders = await this.membershipRepo.find({
+      where: [
+        { organizationId: orgId, status: 'active', role: 'owner' },
+        { organizationId: orgId, status: 'active', role: 'admin' },
+      ],
+    });
+    for (const m of leaders) {
+      if (!m.userId) continue;
+      await this.notifier.notify({
+        organizationId: orgId,
+        userId: m.userId,
+        actorId,
+        type: n.type,
+        title: n.title,
+        body: n.body,
+        data: n.data ?? {},
+        priority: n.priority,
+      });
+    }
+  }
+
+  /**
+   * The active platform T&C changed: tell every org's owner/admin to re-accept.
+   * Fanned out across all non-suspended orgs (a suspended org is already blocked).
+   */
+  async notifyOwnersTermsUpdated(actorId: string): Promise<number> {
+    const orgs = await this.orgRepo.find({
+      where: { status: 'active', deletedAt: null as any },
+      select: { id: true, name: true },
+    });
+    let count = 0;
+    for (const org of orgs) {
+      await this.notifyOrgLeaders(org.id, actorId, {
+        type: 'terms_activated',
+        title: 'Updated Terms & Conditions',
+        body: `The platform Terms & Conditions have been updated. Please review and accept them to keep using ${org.name}.`,
+        data: { actionUrl: '/consent' },
+        priority: 'high',
+      });
+      count += 1;
+    }
+    return count;
   }
 }

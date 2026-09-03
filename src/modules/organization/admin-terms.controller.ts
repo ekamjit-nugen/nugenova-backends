@@ -64,6 +64,7 @@ export class AdminTermsController {
       { kind: 'html', title: dto.title, text: dto.text },
       req.user.userId,
     );
+    if (doc.isActive) void this.orgService.notifyOwnersTermsUpdated(req.user.userId);
     return { success: true, message: 'Terms & Conditions created', data: doc };
   }
 
@@ -83,6 +84,7 @@ export class AdminTermsController {
       { kind: 'pdf', title: dto.title || file.originalname, fileId },
       req.user.userId,
     );
+    if (doc.isActive) void this.orgService.notifyOwnersTermsUpdated(req.user.userId);
     return { success: true, message: 'Terms & Conditions created', data: doc };
   }
 
@@ -94,8 +96,10 @@ export class AdminTermsController {
   /** Make this document THE active platform T&C — every org must re-accept it. */
   @Post(':id/activate')
   @HttpCode(HttpStatus.OK)
-  async activate(@Param('id') id: string) {
+  async activate(@Param('id') id: string, @Req() req: any) {
     const doc = await this.terms.activate(id);
+    // Tell every org's owner/admin to re-accept (in-app + email).
+    void this.orgService.notifyOwnersTermsUpdated(req.user.userId);
     return {
       success: true,
       message: 'Now the active Terms & Conditions — all organizations must accept it',
@@ -115,6 +119,7 @@ export class AdminTermsController {
       { kind: 'html', title: dto.title, text: dto.text },
       req.user.userId,
     );
+    if (doc.isActive) void this.orgService.notifyOwnersTermsUpdated(req.user.userId);
     return {
       success: true,
       message: `Terms updated to v${doc.version} — all organizations must re-accept`,
@@ -139,6 +144,7 @@ export class AdminTermsController {
       { kind: 'pdf', title: dto.title || file.originalname, fileId },
       req.user.userId,
     );
+    if (doc.isActive) void this.orgService.notifyOwnersTermsUpdated(req.user.userId);
     return {
       success: true,
       message: `Terms updated to v${doc.version} — all organizations must re-accept`,
