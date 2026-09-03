@@ -135,5 +135,14 @@ describe('NotifierService (email fan-out)', () => {
       expect(create).toHaveBeenCalledTimes(1);
       expect(send).toHaveBeenCalledTimes(1);
     });
+
+    it('a CRITICAL type also ignores the recipient\'s OWN preferences (must reach them)', async () => {
+      allows.mockResolvedValue(false);
+      allowsEmail.mockResolvedValue(false);
+      allowsForEmployee.mockResolvedValue(false);
+      await service.notify({ ...base, type: 'terms_activated', title: 'Updated Terms', data: { actionUrl: '/consent' } });
+      expect(create).toHaveBeenCalledTimes(1); // in-app delivered despite pref off
+      expect(send).toHaveBeenCalledTimes(1); // email delivered despite pref off
+    });
   });
 });

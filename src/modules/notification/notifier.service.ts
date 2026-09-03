@@ -123,10 +123,14 @@ export class NotifierService {
     // Don't notify a user about their own action.
     if (input.actorId && input.actorId === input.userId) return;
     const priority = input.priority ?? 'normal';
+    // Critical notifications (a required Terms re-accept, a security alert, a
+    // suspension) MUST reach the recipient — they ignore both the org policy and
+    // the recipient's own preferences on every channel.
+    const critical = isCriticalNotification(input.type);
 
     // ── In-app channel ──
     try {
-      const prefOk = await this.preferences.allows(input.userId, input.type, priority);
+      const prefOk = critical || (await this.preferences.allows(input.userId, input.type, priority));
       const orgOk = await this.orgAllows(input.organizationId, input.userId, input.type, 'inApp');
       if (prefOk && orgOk) {
         await this.notifications.create({
@@ -147,19 +151,19 @@ export class NotifierService {
     }
 
     // ── Email channel (independent) ──
-    await this.maybeEmail(input, priority);
+    await this.maybeEmail(input, priority, critical);
   }
 
   /** Send the branded email for a notification, if the type/prefs warrant it. */
-  private async maybeEmail(input: NotifyInput, priority: string): Promise<void> {
+  private async maybeEmail(input: NotifyInput, priority: string, critical: boolean): Promise<void> {
     try {
-      if (input.email === false) return; // explicitly in-app only
+      if (input.email === false && !critical) return; // explicitly in-app only
       const override = typeof input.email === 'object' ? input.email : null;
       const meta = override
         ? { eyebrow: override.eyebrow ?? 'Notification', cta: override.cta, footerNote: override.footerNote }
         : emailMetaForType(input.type);
       if (!meta) return; // not an email-worthy type and no override
-      if (!(await this.preferences.allowsEmail(input.userId, input.type, priority))) return;
+      if (!critical && !(await this.preferences.allowsEmail(input.userId, input.type, priority))) return;
       if (!(await this.orgAllows(input.organizationId, input.userId, input.type, 'email'))) return;
       const user = await this.users.findOne({ where: { id: input.userId } });
       if (!user?.email) return;
