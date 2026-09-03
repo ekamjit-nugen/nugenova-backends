@@ -1478,6 +1478,7 @@ export class AttendanceService {
           autoCheckedOut: false,
           approvalStatus: null as string | null,
           entryType: r.entryType,
+          pendingEntryId: null as string | null,
           _hoursOfMain: -1,
         };
         merged.sessions.push(...sessions);
@@ -1487,8 +1488,12 @@ export class AttendanceService {
         merged.lateByMinutes = Math.max(merged.lateByMinutes, r.lateByMinutes || 0);
         merged.missedCheckout = merged.missedCheckout || !!r.missedCheckout;
         merged.autoCheckedOut = merged.autoCheckedOut || !!r.autoCheckedOut;
-        if (r.approvalStatus === 'pending') merged.approvalStatus = 'pending';
-        else if (!merged.approvalStatus) merged.approvalStatus = r.approvalStatus ?? null;
+        if (r.approvalStatus === 'pending') {
+          merged.approvalStatus = 'pending';
+          // Capture the pending MANUAL entry's id so HR can approve/reject it
+          // straight from the activity row.
+          if (r.entryType === 'manual' && !merged.pendingEntryId) merged.pendingEntryId = r.id;
+        } else if (!merged.approvalStatus) merged.approvalStatus = r.approvalStatus ?? null;
         // Headline status comes from the record with the most worked hours
         // (the substantive session), so a 0-hour stub doesn't override a full day.
         const hrs = Number(r.effectiveWorkingHours) || 0;
