@@ -1,12 +1,28 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
+import { UserEntity } from '../auth/entities/user.entity';
 import { permMapAllows } from '../organization/guards/require-permission.decorator';
+import { MailService } from '../../bootstrap/mail/mail.service';
+import { notificationEmail } from '../../bootstrap/mail/email-layout';
 import { NotificationService } from './notification.service';
 import { NotificationPreferenceService } from './notification-preference.service';
+import { emailMetaForType } from './notification-catalog';
+
+/** Per-notification email control: force-off, force-on, or override the copy. */
+export type EmailOption =
+  | boolean
+  | {
+      eyebrow?: string;
+      cta?: string;
+      subject?: string;
+      bodyHtml?: string;
+      footerNote?: string;
+    };
 
 export interface NotifyInput {
   organizationId: string;
@@ -19,6 +35,12 @@ export interface NotifyInput {
   /** MUST include an `actionUrl` so the tapped notification can route. */
   data?: Record<string, unknown>;
   priority?: string;
+  /**
+   * Email channel control. Omit to use the type's registry default (email-worthy
+   * types email, others don't). `false` forces in-app only; an object overrides
+   * the email's eyebrow/subject/body/CTA.
+   */
+  email?: EmailOption;
 }
 
 export interface NotifyManagersInput {
@@ -52,40 +74,94 @@ export class NotifierService {
   constructor(
     private readonly notifications: NotificationService,
     private readonly preferences: NotificationPreferenceService,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(RoleEntity)
     private readonly roles: Repository<RoleEntity>,
+    @InjectRepository(UserEntity)
+    private readonly users: Repository<UserEntity>,
   ) {}
 
-  /** Notify a single recipient. Never throws. */
+  /**
+   * Notify a single recipient across BOTH channels — the in-app inbox and (for
+   * email-worthy types, or when `email` is set) a branded email. The two channels
+   * are independent: each has its own preference gate, and each is fire-and-forget
+   * and fail-safe so a delivery error never breaks the business action.
+   */
   async notify(input: NotifyInput): Promise<void> {
+    if (!input.userId || !input.organizationId) return;
+    // Don't notify a user about their own action.
+    if (input.actorId && input.actorId === input.userId) return;
+    const priority = input.priority ?? 'normal';
+
+    // ── In-app channel ──
     try {
-      if (!input.userId || !input.organizationId) return;
-      // Don't notify a user about their own action.
-      if (input.actorId && input.actorId === input.userId) return;
-      // Respect the recipient's notification preferences (fails open).
-      const allowed = await this.preferences.allows(
-        input.userId,
-        input.type,
-        input.priority ?? 'normal',
+      if (await this.preferences.allows(input.userId, input.type, priority)) {
+        await this.notifications.create({
+          organizationId: input.organizationId,
+          userId: input.userId,
+          actorId: input.actorId ?? null,
+          type: input.type,
+          title: input.title,
+          body: input.body ?? null,
+          data: input.data ?? {},
+          priority,
+        });
+      }
+    } catch (err) {
+      this.logger.error(
+        `notify (in-app) failed (type=${input.type}, user=${input.userId}): ${String(err)}`,
       );
-      if (!allowed) return;
-      await this.notifications.create({
-        organizationId: input.organizationId,
-        userId: input.userId,
-        actorId: input.actorId ?? null,
-        type: input.type,
-        title: input.title,
-        body: input.body ?? null,
-        data: input.data ?? {},
-        priority: input.priority ?? 'normal',
+    }
+
+    // ── Email channel (independent) ──
+    await this.maybeEmail(input, priority);
+  }
+
+  /** Send the branded email for a notification, if the type/prefs warrant it. */
+  private async maybeEmail(input: NotifyInput, priority: string): Promise<void> {
+    try {
+      if (input.email === false) return; // explicitly in-app only
+      const override = typeof input.email === 'object' ? input.email : null;
+      const meta = override
+        ? { eyebrow: override.eyebrow ?? 'Notification', cta: override.cta, footerNote: override.footerNote }
+        : emailMetaForType(input.type);
+      if (!meta) return; // not an email-worthy type and no override
+      if (!(await this.preferences.allowsEmail(input.userId, input.type, priority))) return;
+      const user = await this.users.findOne({ where: { id: input.userId } });
+      if (!user?.email) return;
+      const actionUrl = (input.data?.actionUrl as string) || '';
+      const ctaText = override?.cta ?? meta.cta;
+      const ctaUrl = ctaText && actionUrl ? this.absoluteUrl(actionUrl) : undefined;
+      const { subject, html } = notificationEmail({
+        eyebrow: override?.eyebrow ?? meta.eyebrow,
+        title: override?.subject ?? input.title,
+        body: input.body,
+        bodyHtml: override?.bodyHtml,
+        ctaText: ctaUrl ? ctaText : undefined,
+        ctaUrl,
+        footerNote: override?.footerNote ?? meta.footerNote,
+      });
+      await this.mail.send({
+        to: { email: user.email, name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || undefined },
+        subject,
+        html,
+        category: 'notification',
       });
     } catch (err) {
       this.logger.error(
-        `notify failed (type=${input.type}, user=${input.userId}): ${String(err)}`,
+        `notify (email) failed (type=${input.type}, user=${input.userId}): ${String(err)}`,
       );
     }
+  }
+
+  /** Turn a relative app path into an absolute URL for email links. */
+  private absoluteUrl(path: string): string {
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = (this.config.get<string>('FRONTEND_URL') || '').replace(/\/+$/, '');
+    return base ? `${base}/${path.replace(/^\/+/, '')}` : path;
   }
 
   /**

@@ -153,6 +153,83 @@ function docListHtml(docTitles: string[]): string {
   return `<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:18px;">${rows}</table>`;
 }
 
+// ── Generic notification email ───────────────────────────────────────────────
+
+/**
+ * The default email for a notification that has no bespoke template. The
+ * NotifierService feeds it the notification's own title/body plus a per-type
+ * eyebrow + CTA, so every notification email is consistent by construction.
+ * `body` is plain text (escaped here) unless `bodyHtml` is given.
+ */
+export function notificationEmail(params: {
+  eyebrow: string;
+  title: string;
+  body?: string | null;
+  bodyHtml?: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  footerNote?: string;
+}): { subject: string; html: string } {
+  const bodyHtml =
+    params.bodyHtml ??
+    (params.body
+      ? `<p style="margin:0;">${esc(params.body)}</p>`
+      : '<p style="margin:0;">You have a new update in Nugenova.</p>');
+  return {
+    subject: params.title,
+    html: renderBrandedEmail({
+      eyebrow: params.eyebrow,
+      title: params.title,
+      preheader: params.body ?? params.title,
+      bodyHtml,
+      ctaText: params.ctaText,
+      ctaUrl: params.ctaUrl,
+      footerNote: params.footerNote,
+    }),
+  };
+}
+
+// ── Security alerts ──────────────────────────────────────────────────────────
+
+/**
+ * A security-event alert (new sign-in, MFA change). Renders the event details as
+ * a small labelled table and a reassuring "wasn't you?" footer.
+ */
+export function securityAlertEmail(params: {
+  title: string;
+  intro: string;
+  rows?: Array<{ label: string; value: string }>;
+  ctaText?: string;
+  ctaUrl?: string;
+}): { subject: string; html: string } {
+  const detail =
+    params.rows && params.rows.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-top:16px;border:1px solid #E9EEF3;border-radius:10px;">${params.rows
+          .map(
+            (r, i) =>
+              `<tr><td style="padding:10px 14px;font-size:13px;color:#94A3B8;${i ? 'border-top:1px solid #F1F5F9;' : ''}width:34%;">${esc(
+                r.label,
+              )}</td><td style="padding:10px 14px;font-size:13px;font-weight:600;color:#0F172A;${i ? 'border-top:1px solid #F1F5F9;' : ''}">${esc(
+                r.value,
+              )}</td></tr>`,
+          )
+          .join('')}</table>`
+      : '';
+  return {
+    subject: params.title,
+    html: renderBrandedEmail({
+      eyebrow: 'Security',
+      title: params.title,
+      preheader: params.intro,
+      bodyHtml: `<p style="margin:0;">${esc(params.intro)}</p>${detail}`,
+      ctaText: params.ctaText,
+      ctaUrl: params.ctaUrl,
+      footerNote:
+        "If this was you, no action is needed. If you don't recognise this, change your access and contact your administrator right away.",
+    }),
+  };
+}
+
 // ── Sign-in code (OTP) ───────────────────────────────────────────────────────
 
 /**

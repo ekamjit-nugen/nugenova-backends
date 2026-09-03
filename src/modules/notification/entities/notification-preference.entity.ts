@@ -25,6 +25,18 @@ export class NotificationPreferenceEntity extends PgBaseEntity {
   @Column({ type: 'jsonb', default: () => "'{}'" })
   categories: Record<string, boolean>;
 
+  /** Master email switch. Off ⇒ no notification emails at all. */
+  @Column({ type: 'boolean', default: true })
+  email: boolean;
+
+  /**
+   * Per-category EMAIL toggles, same shape as `categories`. A missing/true key =
+   * emails for that family are on; false = suppressed. In-app and email are
+   * independent channels, each with its own master + per-category switches.
+   */
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  emailCategories: Record<string, boolean>;
+
   /** Do Not Disturb — while on, only urgent notifications get through. */
   @Column({ type: 'boolean', default: false })
   dndEnabled: boolean;

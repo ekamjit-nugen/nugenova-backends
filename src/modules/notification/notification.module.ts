@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
+import { UserEntity } from '../auth/entities/user.entity';
 import { NotificationEntity } from './entities/notification.entity';
 import { NotificationPreferenceEntity } from './entities/notification-preference.entity';
 import { NotificationService } from './notification.service';
@@ -29,6 +30,7 @@ import { NotificationController } from './notification.controller';
       NotificationPreferenceEntity,
       OrgMembershipEntity,
       RoleEntity,
+      UserEntity,
     ]),
   ],
   controllers: [NotificationController],

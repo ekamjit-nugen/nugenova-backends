@@ -22,7 +22,7 @@ import { TermsService } from '../terms/terms.service';
 import { AuditAction, AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
-import { otpEmail } from '../../bootstrap/mail/email-layout';
+import { otpEmail, securityAlertEmail } from '../../bootstrap/mail/email-layout';
 
 export interface AuthTokens {
   accessToken: string;
@@ -805,18 +805,34 @@ export class AuthService {
       { expiresIn: '7d' as any },
     );
 
+    const deviceLabel = device?.deviceInfo?.trim() || 'Unknown device';
     try {
+      // A "new device" is one this user hasn't signed in from before — alert them.
+      const seenBefore = await this.sessionRepo.count({
+        where: { userId: user.id, deviceInfo: deviceLabel },
+      });
       await this.sessionRepo.save(
         this.sessionRepo.create({
           userId: user.id,
           refreshTokenFamily: tokenFamily,
-          deviceInfo: device?.deviceInfo?.trim() || 'Unknown device',
+          deviceInfo: deviceLabel,
           ipAddress: device?.ipAddress ?? null,
           lastUsedAt: new Date(),
           isRevoked: false,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         }),
       );
+      if (seenBefore === 0) {
+        void this.sendSecurityAlert(user.email, {
+          title: 'New sign-in to your account',
+          intro: `Your Nugenova account was just accessed from a device we haven't seen before.`,
+          rows: [
+            { label: 'Device', value: deviceLabel },
+            ...(device?.ipAddress ? [{ label: 'IP address', value: device.ipAddress }] : []),
+            { label: 'When', value: new Date().toUTCString() },
+          ],
+        });
+      }
     } catch (err: any) {
       this.logger.warn(`Failed to create session: ${err?.message || err}`);
     }
@@ -993,6 +1009,11 @@ export class AuthService {
       action: AuditAction.MFA_ENABLED,
       userId: user.id,
     });
+    void this.sendSecurityAlert(user.email, {
+      title: 'Two-factor authentication enabled',
+      intro:
+        'Two-factor authentication was just turned on for your Nugenova account. From now on you\'ll enter a code from your authenticator app when you sign in.',
+    });
     return { backupCodes };
   }
 
@@ -1008,6 +1029,34 @@ export class AuthService {
       action: AuditAction.MFA_DISABLED,
       userId: user.id,
     });
+    void this.sendSecurityAlert(user.email, {
+      title: 'Two-factor authentication disabled',
+      intro:
+        'Two-factor authentication was just turned off for your Nugenova account. Your account is now protected by the sign-in code alone.',
+    });
+  }
+
+  /**
+   * Fire-and-forget security alert email (new sign-in, MFA change). Never throws
+   * — a mail failure must not break the auth action that triggered it.
+   */
+  private async sendSecurityAlert(
+    email: string | null | undefined,
+    opts: { title: string; intro: string; rows?: Array<{ label: string; value: string }> },
+  ): Promise<void> {
+    if (!email) return;
+    try {
+      const { subject, html } = securityAlertEmail({
+        title: opts.title,
+        intro: opts.intro,
+        rows: opts.rows,
+        ctaText: 'Review security',
+        ctaUrl: `${(this.configService.get<string>('FRONTEND_URL') || '').replace(/\/+$/, '')}/settings/security`,
+      });
+      await this.mail.send({ to: { email }, subject, html, category: 'security' });
+    } catch (err) {
+      this.logger.warn(`security alert email to ${email} failed: ${String(err)}`);
+    }
   }
 
   // ── Lookups ────────────────────────────────────────────────────────────────

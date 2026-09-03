@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { PolicyModule } from '../policy/policy.module';
+import { NotificationModule } from '../notification/notification.module';
 import { OrganizationEntity } from './entities/organization.entity';
 import { DepartmentEntity } from './entities/department.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
@@ -33,6 +34,7 @@ import { AdminTermsController } from './admin-terms.controller';
   imports: [
     AuthModule,
     PolicyModule,
+    NotificationModule,
     TypeOrmModule.forFeature([
       OrganizationEntity,
       DepartmentEntity,

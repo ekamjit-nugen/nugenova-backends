@@ -47,6 +47,7 @@ import { StatutoryIds1787950000000 } from '../src/bootstrap/database/migrations/
 import { BankAccount1787960000000 } from '../src/bootstrap/database/migrations/1787960000000-BankAccount';
 import { Timesheets1787970000000 } from '../src/bootstrap/database/migrations/1787970000000-Timesheets';
 import { TermsActive1787980000000 } from '../src/bootstrap/database/migrations/1787980000000-TermsActive';
+import { NotificationEmailChannel1787990000000 } from '../src/bootstrap/database/migrations/1787990000000-NotificationEmailChannel';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -157,6 +158,7 @@ module.exports = async function globalSetup(): Promise<void> {
       BankAccount1787960000000,
       Timesheets1787970000000,
       TermsActive1787980000000,
+      NotificationEmailChannel1787990000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

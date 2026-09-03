@@ -14,6 +14,7 @@ import { MailService } from '../../../bootstrap/mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { PolicyService } from '../../policy/policy.service';
 import { OrgRoleService } from './org-role.service';
+import { NotifierService } from '../../notification/notifier.service';
 
 /**
  * Pure unit specs — NO database. Every repository is a jest mock, so these run
@@ -94,6 +95,10 @@ describe('OrganizationService (unit, no DB)', () => {
             seedDefaults: jest.fn().mockResolvedValue([]),
             systemRoleForTier: jest.fn().mockResolvedValue({ id: 'owner-role-id' }),
           },
+        },
+        {
+          provide: NotifierService,
+          useValue: { notify: jest.fn(), notifyManagers: jest.fn() },
         },
       ],
     }).compile();
