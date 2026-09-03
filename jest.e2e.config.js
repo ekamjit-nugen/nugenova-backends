@@ -19,7 +19,10 @@ module.exports = {
   // parallel connection storms and fixture races across the e2e specs.
   maxWorkers: 1,
   // Supabase (local dev) adds real network latency per request; a scenario that
-  // provisions multiple orgs + members does many round-trips. 60s keeps the
-  // heaviest multi-org setups from flaking without masking real hangs.
-  testTimeout: 60000,
+  // provisions multiple orgs + members does many round-trips. The chat cross-org
+  // isolation scenario bootstraps TWO full orgs (each with members, a
+  // conversation and a message exchange), which overran the old 60s cap on a
+  // quiet DB; 120s gives the heaviest multi-org setups headroom without masking
+  // real hangs (a true hang still runs indefinitely).
+  testTimeout: 120000,
 };
