@@ -38,10 +38,15 @@ export class CreateOrganizationDto {
   @MaxLength(80)
   ownerLastName?: string;
 
-  /** The T&C document (from the library) the new org must accept. Required. */
+  /**
+   * Optional, legacy: which library T&C to record on the org. Terms are now
+   * platform-wide — every org gates on the single ACTIVE T&C — so provisioning
+   * no longer needs this; when omitted, the active T&C is used.
+   */
+  @IsOptional()
   @IsString()
   @MaxLength(24)
-  termsId: string;
+  termsId?: string;
 }
 
 /** Create or edit an HTML T&C document in the library. */

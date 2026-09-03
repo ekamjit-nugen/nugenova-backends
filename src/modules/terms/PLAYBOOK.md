@@ -43,14 +43,22 @@ mounted by the `organization` module:
 
 - `GET  /admin/terms` — list the library (super admin).
 - `GET  /admin/terms/templates` — the ready-made HTML starting points.
-- `POST /admin/terms` — create an HTML document; `POST /admin/terms/pdf` — upload a PDF.
-- `GET/PUT/DELETE /admin/terms/:id` — read / edit (version bump) / delete (blocked if in use).
+- `POST /admin/terms` — create an HTML document (published as the active T&C); `POST /admin/terms/pdf` — upload a PDF (also published active).
+- `POST /admin/terms/:id/activate` — make one document the single active T&C.
+- `GET/PUT/DELETE /admin/terms/:id` — read / edit (version bump) / delete (blocked for the active doc).
 - `GET  /admin/terms/:id/document` — stream a PDF document's bytes.
 - Consent side (org owner): `GET /consent`, `POST /consent/accept`, `GET /consent/document`.
 
-Core service API: `list` · `get` · `exists` · `create` · `update` (bumps version)
-· `remove` · `getVersion` (cache) · **`needsConsent(termsId, consent)`** ·
-`getForConsent` · `getDocumentBytes` · `listTemplates`.
+**Model: one active document, all orgs gate on it.** Exactly one `platform_terms`
+row is `is_active`; every organization (active or not) must accept the active doc
+at its current version. Creating publishes a new active doc; editing the active
+doc bumps its version; `activate` switches which is active. Any of these makes
+every org's consent stale and re-gates them at login.
+
+Core service API: `list` · `get` · `exists` · `create` (publishes active) ·
+`activate` · `update` (bumps version) · `remove` · `getVersion` (cache) ·
+`getActive` · **`needsConsentActive(consent)`** (the gate) · `getActiveForConsent`
+· `isActiveTerms` · `getDocumentBytes` · `listTemplates`.
 
 ## Migration status
 

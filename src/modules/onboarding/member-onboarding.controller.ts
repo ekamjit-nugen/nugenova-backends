@@ -15,7 +15,12 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OnboardingAccessGuard } from './guards/onboarding-access.guard';
 import { RequirePermission } from '../organization/guards/require-permission.decorator';
 import { OnboardingLifecycleService } from './services/member-onboarding.service';
-import { InitiateOnboardingDto, RejectionDto, SetChecklistItemDto } from './dto';
+import {
+  InitiateOnboardingDto,
+  RejectionDto,
+  RequestEmployeeDocumentDto,
+  SetChecklistItemDto,
+} from './dto';
 
 /**
  * HR-facing employee onboarding lifecycle. Effective paths (global prefix
@@ -102,6 +107,40 @@ export class MemberOnboardingController {
       req.user.userId,
     );
     return { success: true, message: 'Document rejected', data };
+  }
+
+  /** HR requests an additional document from this employee (Onboarding page). */
+  @Post(':id/request-document')
+  @HttpCode(HttpStatus.OK)
+  async requestDocument(
+    @Param('id') id: string,
+    @Body() dto: RequestEmployeeDocumentDto,
+    @Req() req: any,
+  ) {
+    const data = await this.lifecycle.requestDocument(
+      this.orgId(req),
+      id,
+      dto,
+      req.user.userId,
+    );
+    return { success: true, message: 'Document requested', data };
+  }
+
+  /** HR requests a document from an employee by membership (Directory page). */
+  @Post('members/:membershipId/request-document')
+  @HttpCode(HttpStatus.OK)
+  async requestDocumentForMember(
+    @Param('membershipId') membershipId: string,
+    @Body() dto: RequestEmployeeDocumentDto,
+    @Req() req: any,
+  ) {
+    const data = await this.lifecycle.requestDocumentForMembership(
+      this.orgId(req),
+      membershipId,
+      dto,
+      req.user.userId,
+    );
+    return { success: true, message: 'Document requested', data };
   }
 
   /** HR/manager ticks (or re-opens) any checklist item — incl. the IT/HR tasks. */

@@ -97,9 +97,9 @@ export class OrganizationService {
     ).replace(/\/+$/, '');
   }
 
-  /** True when the org has not accepted its assigned T&C at its current version. */
+  /** True when the org has not accepted the ACTIVE platform T&C at its version. */
   needsConsent(o: OrganizationEntity): boolean {
-    return this.terms.needsConsent(o.termsId, o.consent);
+    return this.terms.needsConsentActive(o.consent);
   }
 
   /** How many orgs are assigned a given T&C — gates deletion of that document. */
@@ -130,7 +130,7 @@ export class OrganizationService {
   }
 
   toPublic(o: OrganizationEntity): OrgPublic {
-    const currentTermsVersion = this.terms.getVersion(o.termsId);
+    const currentTermsVersion = this.terms.getActive()?.version ?? null;
     const needsConsent = this.needsConsent(o);
     const onboardingCompleted = !!o.onboardingCompleted;
 
@@ -186,23 +186,25 @@ export class OrganizationService {
       owner = await this.userRepo.save(owner);
     }
 
-    // A T&C must be chosen from the library and must exist.
-    if (!dto.termsId || !(await this.terms.exists(dto.termsId))) {
-      throw new BadRequestException(
-        'A valid Terms & Conditions must be selected for the organization',
-      );
-    }
+    // Terms are platform-wide now: every org gates on the single ACTIVE T&C, so
+    // provisioning no longer picks one. Record the active id for reference (if a
+    // caller still passes a valid termsId, honour it; otherwise use the active).
+    const activeTermsId = this.terms.getActive()?.id ?? null;
+    const termsId =
+      dto.termsId && (await this.terms.exists(dto.termsId))
+        ? dto.termsId
+        : activeTermsId;
 
     const slug = await this.uniqueSlug(dto.name);
     // Provisioned orgs are `active` with NO consent yet — the owner can sign in
     // but is routed to the consent screen and blocked from the app until they
-    // accept the assigned Terms & Conditions. `suspended` is a manual halt.
+    // accept the active Terms & Conditions. `suspended` is a manual halt.
     const org = await this.orgRepo.save(
       this.orgRepo.create({
         name: dto.name.trim(),
         slug,
         status: 'active',
-        termsId: dto.termsId,
+        termsId,
         consent: null,
         ownerId: owner.id,
         createdBy: createdByUserId,
@@ -438,16 +440,15 @@ export class OrganizationService {
 
   // ── Consent (owner) ──────────────────────────────────────────────────────
 
-  /** The T&C id assigned to an org (for streaming its PDF). */
-  async getAssignedTermsId(orgId: string): Promise<string | null> {
-    const org = await this.getEntity(orgId);
-    return org.termsId ?? null;
+  /** The active T&C id (for streaming its PDF on the consent screen). */
+  async getAssignedTermsId(_orgId: string): Promise<string | null> {
+    return this.terms.getActive()?.id ?? null;
   }
 
-  /** The consent state + the org's assigned T&C for the owner's consent screen. */
+  /** The consent state + the active platform T&C for the owner's consent screen. */
   async getConsentState(orgId: string) {
     const org = await this.getEntity(orgId);
-    const doc = org.termsId ? await this.terms.get(org.termsId) : null;
+    const doc = await this.terms.getActiveForConsent();
     return {
       organization: { id: org.id, name: org.name, status: org.status },
       terms: doc
@@ -467,7 +468,7 @@ export class OrganizationService {
     };
   }
 
-  /** Record the owner's acceptance of the org's assigned T&C at its version. */
+  /** Record the owner's acceptance of the ACTIVE platform T&C at its version. */
   async acceptConsent(
     orgId: string,
     userId: string,
@@ -475,10 +476,11 @@ export class OrganizationService {
     ua?: string,
   ): Promise<OrgPublic> {
     const org = await this.getEntity(orgId);
-    if (!org.termsId) {
-      throw new BadRequestException('No Terms & Conditions assigned to this organization');
+    const active = this.terms.getActive();
+    if (!active) {
+      throw new BadRequestException('No active Terms & Conditions to accept');
     }
-    const doc = await this.terms.get(org.termsId);
+    const doc = await this.terms.get(active.id);
     org.consent = {
       termsId: doc.id,
       version: doc.version,

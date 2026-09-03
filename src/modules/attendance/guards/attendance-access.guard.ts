@@ -60,7 +60,7 @@ export class AttendanceAccessGuard implements CanActivate {
           'Your organization has been suspended — please contact the platform administrator',
         );
       }
-      if (this.terms.needsConsent(org.termsId, org.consent)) {
+      if (this.terms.needsConsentActive(org.consent)) {
         throw new ForbiddenException(
           'Please review and accept the latest Terms & Conditions to continue',
         );

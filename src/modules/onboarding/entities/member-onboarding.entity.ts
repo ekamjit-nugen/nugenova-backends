@@ -17,6 +17,16 @@ export interface OnboardingDocumentSlot {
   verifiedAt?: string | null;
   verifiedBy?: string | null;
   note?: string | null;
+  /**
+   * An ad-hoc document HR requested from this employee (from Directory or the
+   * Onboarding page), rather than one seeded from the onboarding policy. Ad-hoc
+   * slots are preserved across policy reconciliation even while still pending.
+   */
+  adhoc?: boolean;
+  /** Optional instructions shown to the employee for an ad-hoc request. */
+  description?: string | null;
+  requestedBy?: string | null;
+  requestedAt?: string | null;
 }
 
 /** One checklist task on a member's onboarding. `assignedTo` gates completion. */

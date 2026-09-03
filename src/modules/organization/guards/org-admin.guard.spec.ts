@@ -28,8 +28,8 @@ describe('OrgAdminGuard (unit)', () => {
       findOne: jest.fn().mockResolvedValue(org),
     } as unknown as Repository<OrganizationEntity>;
     const terms = {
-      needsConsent: jest.fn(
-        (_termsId: string | null, consent: { version: number } | null) =>
+      needsConsentActive: jest.fn(
+        (consent: { version: number } | null) =>
           !consent || consent.version < currentVersion,
       ),
     } as unknown as TermsService;

@@ -26,6 +26,7 @@ export interface TermsDoc {
   kind: 'html' | 'pdf';
   text: string | null;
   fileId: string | null;
+  isActive: boolean;
   updatedAt: Date;
 }
 
@@ -35,6 +36,7 @@ export interface TermsSummary {
   version: number;
   kind: 'html' | 'pdf';
   hasDocument: boolean;
+  isActive: boolean;
   updatedAt: Date;
 }
 
@@ -52,18 +54,23 @@ export interface CreateTermsInput {
 }
 
 /**
- * Owns the platform Terms & Conditions **library** — a catalog of named T&C
- * documents (HTML from a template/editor, or an uploaded PDF). The super admin
- * assigns one to each org at creation; the owner consents to it.
+ * Owns the platform Terms & Conditions. Exactly ONE document is `active` at a
+ * time, and EVERY organization — active or not — must accept the active document
+ * at its current version before the app opens. Creating a new T&C publishes it as
+ * the active one; editing the active doc bumps its version. Either makes every
+ * org's consent stale, re-gating them at login (`needsConsentActive`). Older docs
+ * are kept for audit but gate nobody.
  *
- * A per-document `version` cache (id → version) is kept in memory so the
- * auth/guard hot paths can decide whether an org's accepted version is stale
- * without a DB round-trip. It's refreshed on every mutation.
+ * A per-document `version` cache (id → version) plus the active `{id, version}`
+ * are kept in memory so the auth/guard hot paths can decide whether an org's
+ * accepted version is stale without a DB round-trip. Refreshed on every mutation.
  */
 @Injectable()
 export class TermsService implements OnModuleInit {
   private readonly logger = new Logger(TermsService.name);
   private versions = new Map<string, number>();
+  /** The single active document (id + current version), cached for the gate. */
+  private active: { id: string; version: number } | null = null;
 
   constructor(
     @InjectRepository(PlatformTermsEntity)
@@ -84,8 +91,14 @@ export class TermsService implements OnModuleInit {
   }
 
   private async refreshCache(): Promise<void> {
-    const rows = await this.repo.find({ select: { id: true, version: true } });
+    const rows = await this.repo.find({
+      select: { id: true, version: true, isActive: true },
+    });
     this.versions = new Map(rows.map((r) => [r.id, r.version]));
+    const activeRow = rows.find((r) => r.isActive);
+    this.active = activeRow
+      ? { id: activeRow.id, version: activeRow.version }
+      : null;
   }
 
   private toDoc(row: PlatformTermsEntity): TermsDoc {
@@ -96,6 +109,7 @@ export class TermsService implements OnModuleInit {
       kind: row.kind === 'pdf' ? 'pdf' : 'html',
       text: row.text ?? null,
       fileId: row.fileId ?? null,
+      isActive: !!row.isActive,
       updatedAt: row.updatedAt,
     };
   }
@@ -107,6 +121,7 @@ export class TermsService implements OnModuleInit {
       version: row.version,
       kind: row.kind === 'pdf' ? 'pdf' : 'html',
       hasDocument: row.kind === 'pdf' && !!row.fileId,
+      isActive: !!row.isActive,
       updatedAt: row.updatedAt,
     };
   }
@@ -141,7 +156,17 @@ export class TermsService implements OnModuleInit {
     return (await this.repo.count({ where: { id } })) > 0;
   }
 
-  async create(input: CreateTermsInput, createdBy: string): Promise<TermsDoc> {
+  /**
+   * Create a new T&C and PUBLISH it as the single active document — every org
+   * must accept it before the app opens. Deactivates any previously-active doc
+   * (which is kept for audit). Pass `activate: false` to add it to the library
+   * without publishing.
+   */
+  async create(
+    input: CreateTermsInput,
+    createdBy: string,
+    activate = true,
+  ): Promise<TermsDoc> {
     this.validate(input);
     const saved = await this.repo.save(
       this.repo.create({
@@ -150,12 +175,32 @@ export class TermsService implements OnModuleInit {
         kind: input.kind,
         text: input.kind === 'html' ? (input.text ?? '').trim() : null,
         fileId: input.kind === 'pdf' ? (input.fileId ?? null) : null,
+        isActive: false,
         updatedBy: createdBy,
       }),
     );
     this.versions.set(saved.id, saved.version);
     this.logger.log(`T&C '${saved.title}' (${saved.id}) created by ${createdBy}`);
+    if (activate) return this.activate(saved.id);
+    await this.refreshCache();
     return this.toDoc(saved);
+  }
+
+  /**
+   * Make one document THE active platform T&C (and deactivate all others in a
+   * single transaction so the partial unique index is never violated). Every
+   * org's consent goes stale and they re-gate at login.
+   */
+  async activate(id: string): Promise<TermsDoc> {
+    const row = await this.repo.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('Terms & Conditions not found');
+    await this.repo.manager.transaction(async (tx) => {
+      await tx.update(PlatformTermsEntity, { isActive: true }, { isActive: false });
+      await tx.update(PlatformTermsEntity, { id }, { isActive: true });
+    });
+    await this.refreshCache();
+    this.logger.log(`T&C '${row.title}' (${id}) is now the active platform terms`);
+    return this.get(id);
   }
 
   /** Edit a T&C — bumps its version, forcing its orgs to re-accept. */
@@ -175,6 +220,7 @@ export class TermsService implements OnModuleInit {
     row.updatedBy = updatedBy;
     const saved = await this.repo.save(row);
     this.versions.set(saved.id, saved.version);
+    if (saved.isActive) this.active = { id: saved.id, version: saved.version };
     this.logger.log(
       `T&C '${saved.title}' (${saved.id}) edited → v${saved.version} by ${updatedBy}`,
     );
@@ -187,7 +233,13 @@ export class TermsService implements OnModuleInit {
     if (!row) throw new NotFoundException('Terms & Conditions not found');
     await this.repo.delete({ id });
     this.versions.delete(id);
+    if (this.active?.id === id) this.active = null;
     this.logger.log(`T&C '${row.title}' (${id}) deleted`);
+  }
+
+  /** Whether a document is the active platform T&C. */
+  isActiveTerms(id: string): boolean {
+    return this.active?.id === id;
   }
 
   private validate(input: CreateTermsInput): void {
@@ -213,20 +265,31 @@ export class TermsService implements OnModuleInit {
     return this.versions.get(id) ?? null;
   }
 
+  /** The active platform T&C's `{id, version}`, or null if none is configured. */
+  getActive(): { id: string; version: number } | null {
+    return this.active;
+  }
+
   /**
-   * Whether an org must (re-)accept: it has an assigned T&C AND either never
-   * consented, consented to a DIFFERENT document, or to an older version of it.
-   * Sync (cache-backed) so guards/routing stay cheap.
+   * Whether an org must (re-)accept the ACTIVE platform T&C — the single gate
+   * every org passes through, regardless of which document (if any) it once
+   * accepted. True iff an active T&C exists AND the org either never consented,
+   * consented to a DIFFERENT document, or to an older version of the active one.
+   * Sync (cache-backed) so the login-routing/guard hot paths stay cheap. When no
+   * T&C is configured at all, returns false so nobody is locked out.
    */
-  needsConsent(
-    termsId: string | null | undefined,
-    consent: AcceptedTerms | null | undefined,
-  ): boolean {
-    if (!termsId) return false; // no T&C assigned → no gate
-    const current = this.getVersion(termsId);
-    if (current == null) return false; // assigned T&C missing → don't lock out
+  needsConsentActive(consent: AcceptedTerms | null | undefined): boolean {
+    if (!this.active) return false;
     if (!consent) return true;
-    return consent.termsId !== termsId || consent.version < current;
+    return (
+      consent.termsId !== this.active.id || consent.version < this.active.version
+    );
+  }
+
+  /** The active T&C document for the owner's consent screen (or null if none). */
+  async getActiveForConsent(): Promise<TermsDoc | null> {
+    if (!this.active) return null;
+    return this.get(this.active.id);
   }
 
   /** The doc for the owner's consent screen (by the org's assigned termsId). */

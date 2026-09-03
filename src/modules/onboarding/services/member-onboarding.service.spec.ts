@@ -21,6 +21,7 @@ import { OnboardingConfig } from '../../policy/onboarding-catalog';
 describe('OnboardingLifecycleService (unit, no DB)', () => {
   let service: OnboardingLifecycleService;
   let repo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock; create: jest.Mock };
+  const notifier = { notify: jest.fn(), notifyManagers: jest.fn() };
 
   const cfg: OnboardingConfig = {
     documents: [
@@ -59,7 +60,7 @@ describe('OnboardingLifecycleService (unit, no DB)', () => {
         },
         { provide: MailService, useValue: { send: jest.fn().mockResolvedValue(true) } },
         { provide: ConfigService, useValue: { get: jest.fn() } },
-        { provide: NotifierService, useValue: { notify: jest.fn(), notifyManagers: jest.fn() } },
+        { provide: NotifierService, useValue: notifier },
       ],
     }).compile();
     service = moduleRef.get(OnboardingLifecycleService);
@@ -153,6 +154,20 @@ describe('OnboardingLifecycleService (unit, no DB)', () => {
       expect(record.documents.map((d: any) => d.key)).toContain('old_doc');
     });
 
+    it('keeps an ad-hoc HR-requested document even while still pending', async () => {
+      const record = {
+        status: 'in_progress',
+        documents: [
+          { key: 'photo_id', title: 'Government Photo ID', required: true, status: 'pending' },
+          { key: 'pan_card', title: 'PAN Card', required: true, status: 'pending' },
+          { key: 'adhoc_nda', title: 'Signed NDA', required: true, status: 'pending', adhoc: true },
+        ],
+      } as any;
+      await (service as any).reconcile(record, cfg);
+      // A pending non-policy doc is normally pruned; the ad-hoc flag preserves it.
+      expect(record.documents.map((d: any) => d.key)).toContain('adhoc_nda');
+    });
+
     it('skips completed records (historical)', async () => {
       const record = { status: 'completed', documents: [] } as any;
       await (service as any).reconcile(record, cfg);
@@ -209,6 +224,52 @@ describe('OnboardingLifecycleService (unit, no DB)', () => {
       jest.spyOn(service as any, 'myRecord').mockResolvedValue(record);
       await service.completeMyChecklistItem('org1', 'u1', 'welcome_read');
       expect(record.checklist[0].status).toBe('done');
+    });
+  });
+
+  describe('requestDocument (HR asks an employee for a document)', () => {
+    it('appends an ad-hoc pending slot, marks in_progress, and notifies the employee', async () => {
+      const record: any = {
+        id: 'onb1',
+        organizationId: 'org1',
+        userId: 'u9',
+        status: 'pending',
+        documents: [],
+        checklist: [],
+      };
+      repo.findOne.mockResolvedValueOnce(record);
+      const view = await service.requestDocument(
+        'org1',
+        'onb1',
+        { title: 'Signed NDA', required: true, description: 'Sign page 3' },
+        'hr1',
+      );
+      const doc = view.documents.find((d: any) => d.title === 'Signed NDA') as any;
+      expect(doc).toBeTruthy();
+      expect(doc.adhoc).toBe(true);
+      expect(doc.status).toBe('pending');
+      expect(doc.key.startsWith('adhoc_')).toBe(true);
+      expect(doc.description).toBe('Sign page 3');
+      expect(record.status).toBe('in_progress'); // pending → in_progress on request
+      expect(notifier.notify).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'onboarding_document_requested', userId: 'u9' }),
+      );
+    });
+
+    it('generates a unique key when the same document is requested twice', async () => {
+      const record: any = {
+        id: 'onb1',
+        organizationId: 'org1',
+        userId: 'u9',
+        status: 'in_progress',
+        documents: [{ key: 'adhoc_nda', title: 'NDA', required: true, status: 'pending', adhoc: true }],
+        checklist: [],
+      };
+      repo.findOne.mockResolvedValueOnce(record);
+      const view = await service.requestDocument('org1', 'onb1', { title: 'NDA' }, 'hr1');
+      const keys = view.documents.map((d: any) => d.key);
+      expect(new Set(keys).size).toBe(keys.length); // no duplicate keys
+      expect(keys).toContain('adhoc_nda_2');
     });
   });
 });
