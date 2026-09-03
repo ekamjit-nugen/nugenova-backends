@@ -50,6 +50,7 @@ import { TermsActive1787980000000 } from '../src/bootstrap/database/migrations/1
 import { NotificationEmailChannel1787990000000 } from '../src/bootstrap/database/migrations/1787990000000-NotificationEmailChannel';
 import { OrgNotificationSettings1788000000000 } from '../src/bootstrap/database/migrations/1788000000000-OrgNotificationSettings';
 import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/migrations/1788010000000-OrgNotificationTypes';
+import { Chat1788020000000 } from '../src/bootstrap/database/migrations/1788020000000-Chat';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -67,6 +68,8 @@ import { TaxDeclarationEntity } from '../src/modules/payroll/entities/tax-declar
 import { LeaveRequestEntity } from '../src/modules/leave/entities/leave-request.entity';
 import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.entity';
 import { TimesheetEntity } from '../src/modules/timesheet/entities/timesheet.entity';
+import { ConversationEntity } from '../src/modules/chat/entities/conversation.entity';
+import { MessageEntity } from '../src/modules/chat/entities/message.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -126,6 +129,8 @@ module.exports = async function globalSetup(): Promise<void> {
       PayslipEntity,
       PayrollRunEntity,
       TaxDeclarationEntity,
+      ConversationEntity,
+      MessageEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -164,6 +169,7 @@ module.exports = async function globalSetup(): Promise<void> {
       NotificationEmailChannel1787990000000,
       OrgNotificationSettings1788000000000,
       OrgNotificationTypes1788010000000,
+      Chat1788020000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

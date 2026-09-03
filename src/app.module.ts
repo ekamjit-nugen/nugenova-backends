@@ -17,6 +17,7 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { TimesheetModule } from './modules/timesheet/timesheet.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
+import { ChatModule } from './modules/chat/chat.module';
 
 /**
  * Nugenova backend root module.
@@ -46,6 +47,7 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
     TimesheetModule,
     NotificationModule,
     AdminPlatformModule,
+    ChatModule,
   ],
 })
 export class AppModule {}
