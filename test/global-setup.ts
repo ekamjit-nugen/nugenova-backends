@@ -50,6 +50,8 @@ import { TermsActive1787980000000 } from '../src/bootstrap/database/migrations/1
 import { NotificationEmailChannel1787990000000 } from '../src/bootstrap/database/migrations/1787990000000-NotificationEmailChannel';
 import { OrgNotificationSettings1788000000000 } from '../src/bootstrap/database/migrations/1788000000000-OrgNotificationSettings';
 import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/migrations/1788010000000-OrgNotificationTypes';
+import { MembershipPersonType1788030000000 } from '../src/bootstrap/database/migrations/1788030000000-MembershipPersonType';
+import { Academic1788031000000 } from '../src/bootstrap/database/migrations/1788031000000-Academic';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -67,6 +69,8 @@ import { TaxDeclarationEntity } from '../src/modules/payroll/entities/tax-declar
 import { LeaveRequestEntity } from '../src/modules/leave/entities/leave-request.entity';
 import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.entity';
 import { TimesheetEntity } from '../src/modules/timesheet/entities/timesheet.entity';
+import { AcademicYearEntity } from '../src/modules/academic/entities/academic-year.entity';
+import { TermEntity } from '../src/modules/academic/entities/term.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -126,6 +130,8 @@ module.exports = async function globalSetup(): Promise<void> {
       PayslipEntity,
       PayrollRunEntity,
       TaxDeclarationEntity,
+      AcademicYearEntity,
+      TermEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -164,6 +170,8 @@ module.exports = async function globalSetup(): Promise<void> {
       NotificationEmailChannel1787990000000,
       OrgNotificationSettings1788000000000,
       OrgNotificationTypes1788010000000,
+      MembershipPersonType1788030000000,
+      Academic1788031000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

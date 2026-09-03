@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { applyStaffScope, staffScope } from '../auth/entities/person-type';
 import { NotificationEntity } from '../notification/entities/notification.entity';
 import { SessionEntity } from '../auth/entities/session.entity';
 import { EmailOutboxEntity } from '../../bootstrap/mail/email-outbox.entity';
@@ -65,11 +66,16 @@ export class AdminPlatformService {
     const allOrgs = await this.orgs.find({ order: { createdAt: 'DESC' } });
 
     // ── seats per org (the one account-level usage number we surface) ──────────
-    const seatRows = await this.memberships
-      .createQueryBuilder('m')
-      .select('m.organizationId', 'orgId')
-      .addSelect('COUNT(*)', 'count')
-      .where("m.status = 'active'")
+    // staffScope: seats are a billing/account metric — STAFF only. Counting
+    // students/guardians here would inflate every org's seat count.
+    const seatRows = await applyStaffScope(
+      this.memberships
+        .createQueryBuilder('m')
+        .select('m.organizationId', 'orgId')
+        .addSelect('COUNT(*)', 'count')
+        .where("m.status = 'active'"),
+      'm',
+    )
       .groupBy('m.organizationId')
       .getRawMany<{ orgId: string; count: string }>();
     const seatsByOrg = new Map(seatRows.map((r) => [r.orgId, Number(r.count)]));
@@ -101,8 +107,8 @@ export class AdminPlatformService {
         this.users.count(),
         this.users.count({ where: { isActive: true } }),
         this.users.count({ where: { isPlatformAdmin: true } }),
-        this.memberships.count(),
-        this.memberships.count({ where: { status: 'active' } }),
+        this.memberships.count({ where: staffScope() }),
+        this.memberships.count({ where: staffScope({ status: 'active' }) }),
       ]);
 
     // ── communications (infrastructure throughput — no tenant content) ─────────

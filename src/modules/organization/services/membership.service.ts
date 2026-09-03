@@ -9,6 +9,7 @@ import { In, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { staffScope } from '../../auth/entities/person-type';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
 import { AddMemberDto } from '../dto';
@@ -152,8 +153,11 @@ export class MembershipService {
   }
 
   async list(orgId: string): Promise<MemberView[]> {
+    // staffScope: the org directory is the STAFF roster. Students/guardians (the
+    // education vertical) live in the same table but are enumerated through their
+    // own surfaces, never this member list.
     const memberships = await this.membershipRepo.find({
-      where: { organizationId: orgId },
+      where: staffScope({ organizationId: orgId }),
       order: { createdAt: 'ASC' },
     });
     const userIds = memberships.map((m) => m.userId).filter(Boolean) as string[];

@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { staffScope } from '../../auth/entities/person-type';
 import { SessionEntity } from '../../auth/entities/session.entity';
 import { DepartmentEntity } from '../entities/department.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
@@ -343,7 +344,11 @@ export class OrganizationService {
     const pub = this.toPublic(org);
     const now = new Date();
 
-    const memberships = await this.membershipRepo.find({ where: { organizationId: id } });
+    // staffScope: account-level member counts + security signals are STAFF seats;
+    // students/guardians must not inflate them (mirrors the platform seat metric).
+    const memberships = await this.membershipRepo.find({
+      where: staffScope({ organizationId: id }),
+    });
     const active = memberships.filter((m) => m.status === 'active');
     const invited = memberships.filter((m) => m.status !== 'active');
     const userIds = [...new Set(memberships.map((m) => m.userId).filter((x): x is string => !!x))];

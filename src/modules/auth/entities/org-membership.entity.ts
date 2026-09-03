@@ -41,6 +41,20 @@ export class OrgMembershipEntity extends PgBaseEntity {
   @Column({ type: 'varchar', default: 'employee' })
   role: string;
 
+  /**
+   * Which KIND of person this membership represents — the education-vertical
+   * guard. Every module today (payroll, attendance roster, seat counts,
+   * directory) queries this table assuming the person is STAFF; adding students
+   * later without excluding them would generate payslips for students, inflate
+   * seat counts, and put students in the attendance roster. Defaults to 'staff'
+   * so every existing row and every future org-member stays staff unless it is
+   * explicitly enrolled as a 'student' or 'guardian'. Staff-only surfaces MUST
+   * narrow their queries with `staffScope()` (see person-type.ts).
+   */
+  @Index()
+  @Column({ type: 'varchar', length: 16, default: 'staff' })
+  personType: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   department: string | null;
 
