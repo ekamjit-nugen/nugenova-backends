@@ -67,9 +67,10 @@ export class OrgAdminGuard implements CanActivate {
       }
       const needsConsent = this.terms.needsConsentActive(org.consent);
       if (needsConsent) {
-        throw new ForbiddenException(
-          'Please review and accept the latest Terms & Conditions to continue',
-        );
+        throw new ForbiddenException({
+          code: 'CONSENT_REQUIRED',
+          message: 'Please review and accept the latest Terms & Conditions to continue',
+        });
       }
     }
 

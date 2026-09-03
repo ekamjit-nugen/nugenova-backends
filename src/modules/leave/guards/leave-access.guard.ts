@@ -58,9 +58,10 @@ export class LeaveAccessGuard implements CanActivate {
         );
       }
       if (this.terms.needsConsentActive(org.consent)) {
-        throw new ForbiddenException(
-          'Please review and accept the latest Terms & Conditions to continue',
-        );
+        throw new ForbiddenException({
+          code: 'CONSENT_REQUIRED',
+          message: 'Please review and accept the latest Terms & Conditions to continue',
+        });
       }
     }
 
