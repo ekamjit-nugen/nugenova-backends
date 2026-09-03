@@ -11,6 +11,28 @@
  */
 
 export const BRAND_BLUE = '#2E86C1';
+const BRAND_BLUE_DARK = '#2874A6';
+const INK = '#0F172A';
+const INK_SOFT = '#475569';
+const MUTED = '#94A3B8';
+const CANVAS = '#EEF2F6';
+const HAIRLINE = '#E9EEF3';
+
+/**
+ * The Nugenova logo lockup as pure, email-safe HTML (a rounded "N" mark + the
+ * "nugen·ova" wordmark). No image — so it renders identically with images
+ * blocked, the common inbox default.
+ */
+function logoLockup(): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="vertical-align:middle;">
+        <div style="width:34px;height:34px;border-radius:9px;background:${BRAND_BLUE};text-align:center;">
+          <span style="display:inline-block;line-height:34px;color:#FFFFFF;font-family:'Inter',Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;">N</span>
+        </div>
+      </td>
+      <td style="vertical-align:middle;padding-left:10px;font-family:'Inter',Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;letter-spacing:-0.01em;color:${INK};">nugen<span style="color:${BRAND_BLUE};">ova</span></td>
+    </tr></table>`;
+}
 
 /** HTML-escape dynamic text (mirrors the monolith's local esc()). */
 export function esc(value: unknown): string {
@@ -32,6 +54,8 @@ export interface BrandedEmailOptions {
   /** Extra muted line above the copyright (optional). */
   footerNote?: string;
   year?: number;
+  /** Hidden inbox-preview text shown after the subject in most clients. */
+  preheader?: string;
 }
 
 /**
@@ -40,53 +64,75 @@ export interface BrandedEmailOptions {
  */
 export function renderBrandedEmail(opts: BrandedEmailOptions): string {
   const accent = opts.accent || BRAND_BLUE;
-  const year = opts.year || 2026;
+  const accentDark = accent === BRAND_BLUE ? BRAND_BLUE_DARK : accent;
+  const year = opts.year || new Date().getFullYear();
   const cta =
     opts.ctaText && opts.ctaUrl
       ? `
-            <table cellpadding="0" cellspacing="0" width="100%" style="margin-top:28px;"><tr><td align="center">
-              <a href="${opts.ctaUrl}" style="display:inline-block;background:${accent};color:#FFFFFF;font-size:15px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:8px;">${esc(
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:28px;"><tr><td align="center">
+              <a href="${opts.ctaUrl}" style="display:inline-block;background:${accent};background-image:linear-gradient(180deg,${accent},${accentDark});color:#FFFFFF;font-size:15px;font-weight:600;text-decoration:none;padding:13px 34px;border-radius:10px;box-shadow:0 1px 2px rgba(15,23,42,0.12);">${esc(
                 opts.ctaText,
               )}</a>
             </td></tr></table>
-            <p style="margin:24px 0 0;font-size:13px;line-height:1.5;color:#9CA3AF;">
-              If the button doesn't work, copy and paste this link into your browser:<br/>
+            <p style="margin:20px 0 0;font-size:12px;line-height:1.5;color:${MUTED};">
+              Button not working? Paste this link into your browser:<br/>
               <a href="${opts.ctaUrl}" style="color:${accent};word-break:break-all;">${opts.ctaUrl}</a>
             </p>`
       : '';
   const footerNote = opts.footerNote
-    ? `<p style="margin:0 0 6px;font-size:12px;color:#9CA3AF;">${esc(opts.footerNote)}</p>`
+    ? `<p style="margin:0 0 8px;font-size:12px;line-height:1.5;color:${MUTED};">${esc(opts.footerNote)}</p>`
+    : '';
+  const preheader = opts.preheader
+    ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;font-size:1px;line-height:1px;color:${CANVAS};">${esc(
+        opts.preheader,
+      )}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>`
     : '';
 
   return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#F3F4F6;font-family:'Inter',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F3F4F6;padding:40px 0;">
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light only">
+  <meta name="supported-color-schemes" content="light only">
+  <title>${esc(opts.title)}</title>
+  <style>
+    @media only screen and (max-width:600px){
+      .np-card{width:100% !important;border-radius:0 !important;}
+      .np-pad{padding-left:24px !important;padding-right:24px !important;}
+    }
+    a{text-decoration:none;}
+  </style>
+</head>
+<body style="margin:0;padding:0;background:${CANVAS};font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  ${preheader}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${CANVAS};padding:32px 12px;">
     <tr><td align="center">
-      <table width="520" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+      <table role="presentation" class="np-card" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#FFFFFF;border:1px solid ${HAIRLINE};border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,0.06);">
         <tr>
-          <td style="background:${accent};padding:24px 40px;">
-            <div style="color:rgba(255,255,255,0.82);font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${esc(
+          <td class="np-pad" style="padding:26px 40px 22px;border-bottom:1px solid ${HAIRLINE};">
+            ${logoLockup()}
+          </td>
+        </tr>
+        <tr>
+          <td class="np-pad" style="padding:30px 40px 34px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:${accent};">${esc(
               opts.eyebrow,
             )}</div>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:32px 40px 8px;">
-            <h1 style="margin:0 0 12px;font-size:21px;font-weight:600;color:#111827;">${esc(
+            <h1 style="margin:8px 0 14px;font-size:22px;line-height:1.3;font-weight:700;letter-spacing:-0.01em;color:${INK};">${esc(
               opts.title,
             )}</h1>
-            <div style="margin:0;font-size:15px;line-height:1.6;color:#4B5563;">${opts.bodyHtml}</div>${cta}
+            <div style="margin:0;font-size:15px;line-height:1.65;color:${INK_SOFT};">${opts.bodyHtml}</div>${cta}
           </td>
         </tr>
         <tr>
-          <td style="padding:22px 40px 28px;border-top:1px solid #F3F4F6;text-align:center;">
+          <td class="np-pad" style="padding:20px 40px 26px;border-top:1px solid ${HAIRLINE};background:#FAFCFE;text-align:center;">
             ${footerNote}
-            <p style="margin:0;font-size:12px;color:#9CA3AF;">&copy; ${year} Nugenova. This is an automated message.</p>
+            <p style="margin:0;font-size:12px;color:${MUTED};">&copy; ${year} Nugenova &middot; This is an automated message, please don't reply.</p>
           </td>
         </tr>
       </table>
+      <p style="margin:16px 0 0;font-size:11px;color:${MUTED};">Sent by Nugenova to keep your workspace moving.</p>
     </td></tr>
   </table>
 </body>
@@ -105,6 +151,36 @@ function docListHtml(docTitles: string[]): string {
     )
     .join('');
   return `<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:18px;">${rows}</table>`;
+}
+
+// ── Sign-in code (OTP) ───────────────────────────────────────────────────────
+
+/**
+ * The passwordless sign-in code. The most-seen email in the product, so it wears
+ * the same branded shell as everything else, with the code in a prominent,
+ * copy-friendly, letter-spaced block.
+ */
+export function otpEmail(params: {
+  otp: string;
+  expiresMinutes?: number;
+}): { subject: string; html: string } {
+  const mins = params.expiresMinutes ?? 10;
+  const code = esc(params.otp);
+  const bodyHtml = `
+    <p style="margin:0 0 20px;">Use this code to finish signing in. It expires in ${mins} minutes.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td align="center">
+      <div style="display:inline-block;background:#EFF6FF;border:1px solid #DCEAF7;border-radius:12px;padding:18px 28px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:10px;color:${BRAND_BLUE};">${code}</div>
+    </td></tr></table>`;
+  return {
+    subject: `${params.otp} is your Nugenova sign-in code`,
+    html: renderBrandedEmail({
+      eyebrow: 'Sign in',
+      title: 'Your sign-in code',
+      preheader: `${params.otp} — your Nugenova sign-in code (expires in ${mins} min).`,
+      bodyHtml,
+      footerNote: "Didn't try to sign in? You can safely ignore this email — no one can sign in without this code.",
+    }),
+  };
 }
 
 // ── Organization invite ──────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ import { TermsService } from '../terms/terms.service';
 import { AuditAction, AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
+import { otpEmail } from '../../bootstrap/mail/email-layout';
 
 export interface AuthTokens {
   accessToken: string;
@@ -264,16 +265,10 @@ export class AuthService {
    * path skips this entirely (the magic code is always accepted).
    */
   private async sendOtpEmail(email: string, otp: string): Promise<void> {
-    const html = `
-      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:8px">
-        <h2 style="color:#0F172A;margin:0 0 8px">Your Nugenova sign-in code</h2>
-        <p style="color:#334155;margin:0 0 16px">Enter this code to finish signing in. It expires in a few minutes.</p>
-        <div style="font-size:32px;font-weight:700;letter-spacing:8px;color:#2E86C1;background:#EFF6FF;border-radius:12px;padding:16px;text-align:center">${otp}</div>
-        <p style="color:#94A3B8;font-size:12px;margin:16px 0 0">If you didn't request this, you can safely ignore this email.</p>
-      </div>`;
+    const { subject, html } = otpEmail({ otp, expiresMinutes: 10 });
     const delivered = await this.mail.send({
       to: { email },
-      subject: `${otp} is your Nugenova sign-in code`,
+      subject,
       html,
       category: 'otp',
     });
