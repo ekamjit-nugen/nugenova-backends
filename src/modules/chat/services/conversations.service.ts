@@ -443,6 +443,13 @@ export class ConversationsService {
     return this.view(saved, userId);
   }
 
+  async archive(conversationId: string, orgId: string, userId: string) {
+    const conv = await this.loadForMember(conversationId, orgId, userId);
+    conv.isArchived = true;
+    const saved = await this.conversations.save(conv);
+    return this.view(saved, userId);
+  }
+
   async markUnread(conversationId: string, orgId: string, userId: string, fromMessageId: string) {
     const conv = await this.loadForMember(conversationId, orgId, userId);
     const p = conv.participants.find((x) => x.userId === userId)!;

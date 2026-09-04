@@ -196,6 +196,12 @@ export class ConversationsController {
     return { success: true, message: 'Conversation unarchived', data };
   }
 
+  @Put('conversations/:id/archive')
+  async archive(@Param('id') id: string, @Req() req: any) {
+    const data = await this.conversations.archive(id, this.orgId(req), req.user.userId);
+    return { success: true, message: 'Conversation archived', data };
+  }
+
   @Post('conversations/:id/convert-group')
   @HttpCode(HttpStatus.OK)
   async convertToGroup(@Param('id') id: string, @Body() dto: ConvertToGroupDto, @Req() req: any) {
