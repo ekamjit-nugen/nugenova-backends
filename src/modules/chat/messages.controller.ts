@@ -14,8 +14,10 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MessagesService } from './services/messages.service';
+import { BookmarksService } from './services/bookmarks.service';
 import {
   EditMessageDto,
+  ForwardMessageDto,
   MessageQueryDto,
   SearchMessageDto,
   SendMessageDto,
@@ -33,7 +35,10 @@ import {
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
 export class MessagesController {
-  constructor(private readonly messages: MessagesService) {}
+  constructor(
+    private readonly messages: MessagesService,
+    private readonly bookmarks: BookmarksService,
+  ) {}
 
   private orgId(req: any): string {
     const id = req.user?.organizationId;
@@ -126,6 +131,61 @@ export class MessagesController {
   async search(@Param('id') id: string, @Query() query: SearchMessageDto, @Req() req: any) {
     const data = await this.messages.searchMessages(id, this.orgId(req), query.q, req.user.userId);
     return { success: true, message: 'Search results', data };
+  }
+
+  // ── pin / unpin ─────────────────────────────────────────────────────────────
+
+  @Put('messages/:id/pin')
+  async pin(@Param('id') id: string, @Req() req: any) {
+    const data = await this.messages.pinMessage(id, this.orgId(req), req.user.userId);
+    return { success: true, message: 'Message pinned', data };
+  }
+
+  @Put('messages/:id/unpin')
+  async unpin(@Param('id') id: string, @Req() req: any) {
+    const data = await this.messages.unpinMessage(id, this.orgId(req), req.user.userId);
+    return { success: true, message: 'Message unpinned', data };
+  }
+
+  @Get('conversations/:id/pinned')
+  async pinned(@Param('id') id: string, @Req() req: any) {
+    const data = await this.messages.getPinnedMessages(id, this.orgId(req), req.user.userId);
+    return { success: true, message: 'Pinned messages retrieved', data };
+  }
+
+  // ── forward ───────────────────────────────────────────────────────────────
+
+  @Post('messages/:id/forward')
+  @HttpCode(HttpStatus.CREATED)
+  async forward(@Param('id') id: string, @Body() dto: ForwardMessageDto, @Req() req: any) {
+    const data = await this.messages.forwardMessage(
+      id,
+      this.orgId(req),
+      req.user.userId,
+      dto.conversationIds,
+      this.senderName(req),
+    );
+    return { success: true, message: 'Message forwarded', data };
+  }
+
+  // ── bookmark / save ─────────────────────────────────────────────────────────
+
+  @Put('messages/:id/bookmark')
+  async bookmark(@Param('id') id: string, @Req() req: any) {
+    const data = await this.bookmarks.saveBookmark(this.orgId(req), req.user.userId, id);
+    return { success: true, message: 'Message bookmarked', data };
+  }
+
+  @Delete('messages/:id/bookmark')
+  async unbookmark(@Param('id') id: string, @Req() req: any) {
+    const result = await this.bookmarks.removeBookmark(this.orgId(req), req.user.userId, id);
+    return { success: true, ...result };
+  }
+
+  @Get('bookmarks')
+  async listBookmarks(@Req() req: any) {
+    const data = await this.bookmarks.getBookmarks(this.orgId(req), req.user.userId);
+    return { success: true, message: 'Bookmarks retrieved', data };
   }
 
   @Get('conversations/:convId/messages/:msgId/read-status')

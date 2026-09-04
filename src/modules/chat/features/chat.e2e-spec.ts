@@ -10,6 +10,7 @@ import {
 } from '../../organization/features/support/org-harness';
 import { ConversationEntity } from '../entities/conversation.entity';
 import { MessageEntity } from '../entities/message.entity';
+import { ChatBookmarkEntity } from '../entities/chat-bookmark.entity';
 import { NotificationEntity } from '../../notification/entities/notification.entity';
 
 const feature = loadFeature('./chat.feature', { loadRelativePath: true });
@@ -25,6 +26,7 @@ defineFeature(feature, (test) => {
   let h: OrgTestHarness;
   let conversations: Repository<ConversationEntity>;
   let messages: Repository<MessageEntity>;
+  let bookmarks: Repository<ChatBookmarkEntity>;
   let notifs: Repository<NotificationEntity>;
   const orgIds = new Set<string>();
 
@@ -32,12 +34,14 @@ defineFeature(feature, (test) => {
     h = await bootOrgTestApp();
     conversations = h.app.get(getRepositoryToken(ConversationEntity));
     messages = h.app.get(getRepositoryToken(MessageEntity));
+    bookmarks = h.app.get(getRepositoryToken(ChatBookmarkEntity));
     notifs = h.app.get(getRepositoryToken(NotificationEntity));
   });
   afterAll(async () => {
     const ids = [...orgIds];
     if (ids.length) {
       await notifs.delete({ organizationId: In(ids) }).catch(() => undefined);
+      await bookmarks.delete({ organizationId: In(ids) }).catch(() => undefined);
       await messages.delete({ organizationId: In(ids) }).catch(() => undefined);
       await conversations.delete({ organizationId: In(ids) }).catch(() => undefined);
     }
@@ -65,6 +69,9 @@ defineFeature(feature, (test) => {
 
   const contents = (res: request.Response): string[] =>
     (res.body.data as any[]).map((m) => m.content);
+
+  const createGroup = (actor: Member, name: string, memberIds: string[]) =>
+    h.api().post(`${API}/chat/conversations/group`).set(auth(actor.token)).send({ name, memberIds });
 
   // ── scenarios ──────────────────────────────────────────────────────────────
 
@@ -156,6 +163,111 @@ defineFeature(feature, (test) => {
         const ids = (res.body.data as any[]).map((c) => c.id);
         expect(ids).toContain(convId);
       }
+    });
+  });
+
+  test('a pinned message shows up in the conversation\'s pinned list', ({ given, when, then }) => {
+    let a: Member;
+    let b: Member;
+    let convId: string;
+    let msgId: string;
+
+    given('an organization with two members and a direct conversation between them', async () => {
+      ({ a, b } = await orgWithTwo());
+      const res = await openDirect(a, b.userId).expect(201);
+      convId = res.body.data.id;
+    });
+    when('the first member sends "Pin me" and pins it', async () => {
+      const sent = await send(a, convId, 'Pin me').expect(201);
+      msgId = sent.body.data.id;
+      await h.api().put(`${API}/chat/messages/${msgId}/pin`).set(auth(a.token)).expect(200);
+    });
+    then('the conversation\'s pinned list contains "Pin me"', async () => {
+      const res = await h
+        .api()
+        .get(`${API}/chat/conversations/${convId}/pinned`)
+        .set(auth(a.token))
+        .expect(200);
+      const pinned = res.body.data as any[];
+      expect(pinned.map((m) => m.id)).toContain(msgId);
+      expect(pinned.find((m) => m.id === msgId)?.isPinned).toBe(true);
+    });
+  });
+
+  test('forwarding a message copies it into another conversation the user is in', ({ given, and, when, then }) => {
+    let a: Member;
+    let b: Member;
+    let directId: string;
+    let groupId: string;
+    let originalId: string;
+    let forwardRes: request.Response;
+
+    given('an organization with two members and a direct conversation between them', async () => {
+      ({ a, b } = await orgWithTwo());
+      const res = await openDirect(a, b.userId).expect(201);
+      directId = res.body.data.id;
+      const sent = await send(a, directId, 'Forward me please').expect(201);
+      originalId = sent.body.data.id;
+    });
+    and('the first member is also in a group conversation', async () => {
+      const res = await createGroup(a, 'Forward Target', [b.userId]).expect(201);
+      groupId = res.body.data.id;
+    });
+    when('the first member forwards a message from the direct into the group', async () => {
+      forwardRes = await h
+        .api()
+        .post(`${API}/chat/messages/${originalId}/forward`)
+        .set(auth(a.token))
+        .send({ conversationIds: [groupId] })
+        .expect(201);
+    });
+    then('the group has a forwarded copy carrying the original\'s forwardedFrom', async () => {
+      const created = forwardRes.body.data as any[];
+      expect(created).toHaveLength(1);
+      expect(created[0].type).toBe('forwarded');
+
+      const res = await listMessages(a, groupId).expect(200);
+      const rows = res.body.data as any[];
+      const copy = rows.find((m) => m.type === 'forwarded');
+      expect(copy).toBeDefined();
+      expect(copy.content).toContain('Forward me please');
+      expect(copy.forwardedFrom).toMatchObject({
+        messageId: originalId,
+        conversationId: directId,
+        senderId: a.userId,
+      });
+    });
+  });
+
+  test('a bookmarked message appears in the owner\'s bookmarks and not another user\'s', ({ given, when, then, and }) => {
+    let a: Member;
+    let b: Member;
+    let convId: string;
+    let msgId: string;
+
+    given('an organization with two members and a direct conversation between them', async () => {
+      ({ a, b } = await orgWithTwo());
+      const res = await openDirect(a, b.userId).expect(201);
+      convId = res.body.data.id;
+    });
+    when('the first member sends "Save me" and bookmarks it', async () => {
+      const sent = await send(a, convId, 'Save me').expect(201);
+      msgId = sent.body.data.id;
+      await h.api().put(`${API}/chat/messages/${msgId}/bookmark`).set(auth(a.token)).expect(200);
+      // Idempotent: a second save must not create a duplicate.
+      await h.api().put(`${API}/chat/messages/${msgId}/bookmark`).set(auth(a.token)).expect(200);
+    });
+    then('the first member\'s bookmarks include "Save me"', async () => {
+      const res = await h.api().get(`${API}/chat/bookmarks`).set(auth(a.token)).expect(200);
+      const rows = res.body.data as any[];
+      const mine = rows.filter((r) => r.messageId === msgId);
+      expect(mine).toHaveLength(1); // idempotent — exactly one
+      expect(mine[0].message?.content).toContain('Save me');
+    });
+    and('the second member\'s bookmarks do not include it', async () => {
+      const res = await h.api().get(`${API}/chat/bookmarks`).set(auth(b.token)).expect(200);
+      const ids = (res.body.data as any[]).map((r) => r.messageId);
+      expect(ids).not.toContain(msgId);
     });
   });
 

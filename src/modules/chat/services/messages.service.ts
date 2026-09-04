@@ -99,6 +99,19 @@ export class MessagesService {
     return conv;
   }
 
+  /**
+   * Public isolation gate — resolves the parent conversation enforcing same-org
+   * AND participant, for sibling services (bookmarks) that must apply the exact
+   * same check before touching a message. Delegates to `conversationForMember`.
+   */
+  async requireConversationMember(
+    conversationId: string,
+    orgId: string,
+    userId: string,
+  ): Promise<ConversationEntity> {
+    return this.conversationForMember(conversationId, orgId, userId);
+  }
+
   /** Preserve the Mongo `_id` shape as `id` (and keep `_id` for legacy FE). */
   private view(m: MessageEntity): Record<string, unknown> {
     return { ...m, _id: m.id };
@@ -117,6 +130,7 @@ export class MessagesService {
     fileData?: FileData,
     idempotencyKey?: string,
     mentions?: IncomingMention[],
+    forwardedFrom?: Record<string, unknown> | null,
   ) {
     // Idempotency: use the client key, else a deterministic content+time-bucket
     // hash so a double-fired send collapses to one message. The partial-unique
@@ -184,6 +198,7 @@ export class MessagesService {
       contentPlainText,
       type,
       replyTo: replyTo || null,
+      forwardedFrom: forwardedFrom ?? null,
       idempotencyKey: effectiveKey,
       status: 'sent',
       readBy: [{ userId: senderId, readAt: nowIso }],
@@ -514,5 +529,131 @@ export class MessagesService {
         ? (message.readBy ?? []).map((r) => ({ userId: r.userId, readAt: r.readAt }))
         : [];
     return { totalParticipants, readCount, readBy };
+  }
+
+  // ── pin / unpin ───────────────────────────────────────────────────────────
+
+  /** Load a non-deleted message, enforcing same-org + participant on its parent. */
+  private async messageForMember(
+    messageId: string,
+    orgId: string,
+    userId: string,
+  ): Promise<MessageEntity> {
+    const message = await this.messages.findOne({ where: { id: messageId, isDeleted: false } });
+    if (!message) throw new NotFoundException('Message not found');
+    await this.conversationForMember(message.conversationId, orgId, userId);
+    return message;
+  }
+
+  /** Pin a message (participant-only). Emits `chat.message.updated`. */
+  async pinMessage(messageId: string, orgId: string, userId: string) {
+    const message = await this.messageForMember(messageId, orgId, userId);
+    message.isPinned = true;
+    message.pinnedBy = userId;
+    message.pinnedAt = new Date();
+    const saved = await this.messages.save(message);
+    const viewed = this.view(saved);
+    this.safeEmit(CHAT_MESSAGE_UPDATED, { conversationId: saved.conversationId, message: viewed });
+    return viewed;
+  }
+
+  /** Unpin a message (participant-only). Emits `chat.message.updated`. */
+  async unpinMessage(messageId: string, orgId: string, userId: string) {
+    const message = await this.messageForMember(messageId, orgId, userId);
+    message.isPinned = false;
+    message.pinnedBy = null;
+    message.pinnedAt = null;
+    const saved = await this.messages.save(message);
+    const viewed = this.view(saved);
+    this.safeEmit(CHAT_MESSAGE_UPDATED, { conversationId: saved.conversationId, message: viewed });
+    return viewed;
+  }
+
+  /** The conversation's pinned messages, newest-pinned first (participant-only). */
+  async getPinnedMessages(conversationId: string, orgId: string, userId: string) {
+    await this.conversationForMember(conversationId, orgId, userId);
+    const rows = await this.messages.find({
+      where: { conversationId, isPinned: true, isDeleted: false },
+      order: { pinnedAt: 'DESC' },
+    });
+    return rows.map((m) => this.view(m));
+  }
+
+  // ── forward ───────────────────────────────────────────────────────────────
+
+  /**
+   * Forward a message into one or more conversations. For every target the
+   * caller is a participant of (same org), a NEW `forwarded` message is created
+   * via the normal send path — so idempotency + the `chat.message.new` emit both
+   * happen. Targets the caller isn't a participant of (or cross-org) are SKIPPED
+   * silently — we never leak whether such a conversation exists. Returns the
+   * created forwarded messages.
+   */
+  async forwardMessage(
+    messageId: string,
+    orgId: string,
+    userId: string,
+    conversationIds: string[],
+    senderName?: string,
+  ) {
+    // The caller must be a participant of the SOURCE conversation to forward.
+    const original = await this.messages.findOne({
+      where: { id: messageId, isDeleted: false },
+    });
+    if (!original) throw new NotFoundException('Message not found');
+    const source = await this.conversationForMember(original.conversationId, orgId, userId);
+
+    const forwardedFrom: Record<string, unknown> = {
+      messageId: original.id,
+      conversationId: original.conversationId,
+      conversationName: source.name ?? null,
+      senderId: original.senderId,
+      senderName: original.senderName ?? null,
+      content: original.content ?? '',
+    };
+
+    const fileData =
+      original.fileUrl || original.fileId
+        ? {
+            fileUrl: original.fileUrl ?? undefined,
+            fileName: original.fileName ?? undefined,
+            fileSize: original.fileSize ?? undefined,
+            fileMimeType: original.fileMimeType ?? undefined,
+            fileId: original.fileId ?? undefined,
+          }
+        : undefined;
+
+    const uniqueTargets = [...new Set(conversationIds ?? [])];
+    const created: Record<string, unknown>[] = [];
+    for (const targetId of uniqueTargets) {
+      // Silently skip a target the caller isn't in (or that's cross-org / gone) —
+      // don't leak its existence, and don't fail the whole forward.
+      try {
+        await this.conversationForMember(targetId, orgId, userId);
+      } catch {
+        continue;
+      }
+      try {
+        const msg = await this.sendMessage(
+          targetId,
+          orgId,
+          userId,
+          original.content ?? '',
+          'forwarded',
+          undefined,
+          senderName,
+          fileData,
+          undefined,
+          undefined,
+          forwardedFrom,
+        );
+        created.push(msg);
+      } catch (err) {
+        // A per-target send failure (e.g. archived target) must not abort the
+        // rest of the batch — skip it and continue.
+        this.logger.warn(`forward to ${targetId} failed: ${String(err)}`);
+      }
+    }
+    return created;
   }
 }

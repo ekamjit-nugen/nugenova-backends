@@ -188,6 +188,13 @@ export class EditMessageDto {
   content: string;
 }
 
+/** Forward a message into one or more conversations the caller participates in. */
+export class ForwardMessageDto {
+  @IsArray()
+  @IsString({ each: true })
+  conversationIds: string[];
+}
+
 export class MessageQueryDto {
   @IsOptional()
   @Type(() => Number)

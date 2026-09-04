@@ -33,6 +33,23 @@ Feature: Chat / messaging
     And the mentioned participant receives a chat mention notification
     And the non-participant does not receive a notification
 
+  Scenario: a pinned message shows up in the conversation's pinned list
+    Given an organization with two members and a direct conversation between them
+    When the first member sends "Pin me" and pins it
+    Then the conversation's pinned list contains "Pin me"
+
+  Scenario: forwarding a message copies it into another conversation the user is in
+    Given an organization with two members and a direct conversation between them
+    And the first member is also in a group conversation
+    When the first member forwards a message from the direct into the group
+    Then the group has a forwarded copy carrying the original's forwardedFrom
+
+  Scenario: a bookmarked message appears in the owner's bookmarks and not another user's
+    Given an organization with two members and a direct conversation between them
+    When the first member sends "Save me" and bookmarks it
+    Then the first member's bookmarks include "Save me"
+    And the second member's bookmarks do not include it
+
   @security
   Scenario: a member cannot read a conversation they are not part of
     Given an organization with two members and a direct conversation between them
