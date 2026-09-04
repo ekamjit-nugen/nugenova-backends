@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
+import { StorageModule } from '../../bootstrap/storage/storage.module';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { ChatBookmarkEntity } from './entities/chat-bookmark.entity';
@@ -36,6 +37,7 @@ import { ChatGateway } from './realtime/chat.gateway';
   imports: [
     AuthModule,
     NotificationModule,
+    StorageModule,
     TypeOrmModule.forFeature([
       ConversationEntity,
       MessageEntity,

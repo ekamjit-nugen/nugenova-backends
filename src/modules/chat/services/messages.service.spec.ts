@@ -113,6 +113,43 @@ describe('MessagesService (isolation + send guards)', () => {
     expect(res.id).toBe('dup1');
     expect(messageSave).not.toHaveBeenCalled();
   });
+
+  it('persists the attachment fields + type onto a file message', async () => {
+    convFindOne.mockResolvedValue(CONV());
+    const res: any = await service.sendMessage(
+      'conv1',
+      'orgA',
+      'alice',
+      undefined, // an image send carries no text
+      'image',
+      undefined,
+      undefined,
+      {
+        fileUrl: 'https://cdn/x.png',
+        fileName: 'x.png',
+        fileSize: 1234,
+        fileMimeType: 'image/png',
+        fileId: 'file-99',
+      },
+    );
+    const saved = messageSave.mock.calls[0][0];
+    expect(saved).toMatchObject({
+      type: 'image',
+      fileId: 'file-99',
+      fileName: 'x.png',
+      fileSize: 1234,
+      fileMimeType: 'image/png',
+      fileUrl: 'https://cdn/x.png',
+    });
+    // The presented message carries the attachment fields + type.
+    expect(res).toMatchObject({
+      type: 'image',
+      fileId: 'file-99',
+      fileName: 'x.png',
+      fileSize: 1234,
+      fileMimeType: 'image/png',
+    });
+  });
 });
 
 /**

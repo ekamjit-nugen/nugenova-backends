@@ -271,6 +271,121 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('a member uploads a file, sends it, and participants can fetch it', ({ given, when, then, and }) => {
+    let a: Member;
+    let b: Member;
+    let convId: string;
+    let fileId: string;
+    let msg: request.Response;
+    const bytes = Buffer.from('the quick brown fox PNG bytes');
+
+    given('an organization with two members and a direct conversation between them', async () => {
+      ({ a, b } = await orgWithTwo());
+      const res = await openDirect(a, b.userId).expect(201);
+      convId = res.body.data.id;
+    });
+    when('the first member uploads a file and sends it as a message', async () => {
+      const up = await h
+        .api()
+        .post(`${API}/chat/upload`)
+        .set(auth(a.token))
+        .attach('file', bytes, 'note.png')
+        .expect(201);
+      fileId = up.body.data.fileId;
+      expect(fileId).toBeDefined();
+      expect(up.body.data).toMatchObject({
+        fileName: 'note.png',
+        fileSize: bytes.length,
+        fileMimeType: 'image/png',
+      });
+      // Real contract: the client echoes back fileId + metadata only — NO fileUrl
+      // (URLs are resolved on demand via GET /chat/files/:fileId).
+      msg = await h
+        .api()
+        .post(`${API}/chat/conversations/${convId}/messages`)
+        .set(auth(a.token))
+        .send({
+          type: 'image',
+          fileId,
+          fileName: up.body.data.fileName,
+          fileSize: up.body.data.fileSize,
+          fileMimeType: up.body.data.fileMimeType,
+        })
+        .expect(201);
+    });
+    then('the message carries the attachment fields', () => {
+      expect(msg.body.data).toMatchObject({
+        type: 'image',
+        fileId,
+        fileName: 'note.png',
+        fileSize: bytes.length,
+        fileMimeType: 'image/png',
+      });
+    });
+    and('the first member can fetch the file', async () => {
+      // Bytes are streamed through the authenticated endpoint itself — the SAME
+      // 200 for both the S3 and bytea drivers (S3 is fetched server-side; no
+      // presigned URL / redirect ever leaves the server).
+      const res = await h
+        .api()
+        .get(`${API}/chat/files/${fileId}`)
+        .set(auth(a.token))
+        .buffer(true);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('image/png');
+      expect(res.headers['content-disposition']).toContain('inline');
+      expect(res.headers['cache-control']).toContain('no-store');
+    });
+    and('the second member can fetch the file', async () => {
+      const res = await h.api().get(`${API}/chat/files/${fileId}`).set(auth(b.token));
+      expect(res.status).toBe(200);
+    });
+    and('an unauthenticated fetch is rejected', async () => {
+      // No bearer token → the guard 401s before any access check; opening the raw
+      // URL in a new tab can never reach the bytes.
+      const res = await h.api().get(`${API}/chat/files/${fileId}`);
+      expect(res.status).toBe(401);
+    });
+  });
+
+  test('a non-participant cannot fetch a conversation\'s file', ({ given, and, when, then }) => {
+    let a: Member;
+    let b: Member;
+    let c: Member;
+    let o: CreatedOrg;
+    let convId: string;
+    let fileId: string;
+    const bytes = Buffer.from('secret attachment bytes');
+
+    given('an organization with two members and a direct conversation between them', async () => {
+      ({ o, a, b } = await orgWithTwo());
+      const res = await openDirect(a, b.userId).expect(201);
+      convId = res.body.data.id;
+    });
+    and('a third member of the same organization', async () => {
+      c = await h.createEmployeeMember(o);
+    });
+    when('the first member uploads a file and sends it as a message', async () => {
+      const up = await h
+        .api()
+        .post(`${API}/chat/upload`)
+        .set(auth(a.token))
+        .attach('file', bytes, 'secret.png')
+        .expect(201);
+      fileId = up.body.data.fileId;
+      await h
+        .api()
+        .post(`${API}/chat/conversations/${convId}/messages`)
+        .set(auth(a.token))
+        .send({ type: 'image', fileId, fileName: 'secret.png' })
+        .expect(201);
+    });
+    then('the third member is refused the file as not found', async () => {
+      const res = await h.api().get(`${API}/chat/files/${fileId}`).set(auth(c.token));
+      expect(res.status).toBe(404);
+    });
+  });
+
   test('a member cannot read a conversation they are not part of', ({ given, and, when, then }) => {
     let a: Member;
     let b: Member;

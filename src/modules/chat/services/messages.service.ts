@@ -117,6 +117,33 @@ export class MessagesService {
     return { ...m, _id: m.id };
   }
 
+  /**
+   * Attachment access gate for `GET /chat/files/:fileId`. The caller may see a
+   * file ONLY if some message referencing this `fileId` lives in a conversation
+   * that is (a) same-org and (b) one the caller is a participant of. A single
+   * index-served query joins messages→conversations and filters on
+   * `participant_ids` — the same membership predicate used everywhere else.
+   *
+   * Returns a boolean; the controller 404s on `false` so file existence is never
+   * leaked to a non-participant (or across orgs).
+   */
+  async userCanAccessFile(
+    fileId: string,
+    orgId: string,
+    userId: string,
+  ): Promise<boolean> {
+    if (!fileId || !orgId || !userId) return false;
+    const count = await this.messages
+      .createQueryBuilder('m')
+      .innerJoin(ConversationEntity, 'c', 'c.id = m.conversation_id')
+      .where('m.file_id = :fileId', { fileId })
+      .andWhere('c.is_deleted = false')
+      .andWhere('c.organization_id = :orgId', { orgId })
+      .andWhere(':me = ANY(c.participant_ids)', { me: userId })
+      .getCount();
+    return count > 0;
+  }
+
   // ── send ────────────────────────────────────────────────────────────────
 
   async sendMessage(
