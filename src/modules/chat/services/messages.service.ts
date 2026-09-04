@@ -10,9 +10,16 @@ import { IsNull, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 
 import { ConversationEntity } from '../entities/conversation.entity';
-import { MessageEntity, ReactionGroup } from '../entities/message.entity';
+import { Mention, MessageEntity, ReactionGroup } from '../entities/message.entity';
 import { ConversationsService } from './conversations.service';
 import { sanitizeHtml, toPlainText } from '../util/sanitize.util';
+import { NotifierService } from '../../notification/notifier.service';
+
+/** The FE↔BE mention contract entry (see SendMessageDto.mentions). */
+export interface IncomingMention {
+  type: 'user' | 'here' | 'all';
+  targetId: string;
+}
 
 // Window (ms) within which an identical resend with no client-supplied
 // idempotencyKey is treated as a duplicate. Covers accidental double-sends
@@ -50,6 +57,7 @@ export class MessagesService {
     @InjectRepository(ConversationEntity)
     private readonly conversations: Repository<ConversationEntity>,
     private readonly conversationsService: ConversationsService,
+    private readonly notifier: NotifierService,
   ) {}
 
   // ── access ──────────────────────────────────────────────────────────────
@@ -90,6 +98,7 @@ export class MessagesService {
     senderName?: string,
     fileData?: FileData,
     idempotencyKey?: string,
+    mentions?: IncomingMention[],
   ) {
     // Idempotency: use the client key, else a deterministic content+time-bucket
     // hash so a double-fired send collapses to one message. The partial-unique
@@ -136,6 +145,17 @@ export class MessagesService {
       throw new BadRequestException('Message cannot be empty');
     }
 
+    // Normalise the incoming FE↔BE mention contract into the stored entity shape.
+    const storedMentions: Mention[] = (mentions ?? [])
+      .filter((m) => m && (m.type === 'user' || m.type === 'here' || m.type === 'all'))
+      .map((m) => ({
+        type: m.type,
+        targetId: m.targetId ?? '',
+        displayName: null,
+        offset: 0,
+        length: 0,
+      }));
+
     const nowIso = new Date().toISOString();
     const entity = this.messages.create({
       conversationId,
@@ -149,6 +169,7 @@ export class MessagesService {
       idempotencyKey: effectiveKey,
       status: 'sent',
       readBy: [{ userId: senderId, readAt: nowIso }],
+      mentions: storedMentions,
       fileUrl: fileData?.fileUrl ?? null,
       fileName: fileData?.fileName ?? null,
       fileSize: fileData?.fileSize ?? null,
@@ -170,7 +191,76 @@ export class MessagesService {
     }
 
     await this.conversationsService.updateLastMessage(conversationId, saved);
+
+    // Fire mention notifications. Best-effort: a notification failure must NEVER
+    // fail the message send. Recipients are resolved strictly from THIS
+    // conversation's participants, so a mention can't leak across conversations.
+    await this.notifyMentions(conversation, saved, storedMentions, senderId, senderName);
+
     return this.view(saved);
+  }
+
+  /**
+   * Expand a message's mentions to the de-duplicated set of recipient userIds,
+   * EXCLUDING the sender:
+   *   - `user`  → that userId, but ONLY if they are a participant of the
+   *               conversation (non-participants are ignored).
+   *   - `here` / `all` → every participant except the sender (no presence in v1,
+   *               so `here` == every participant).
+   */
+  resolveMentionRecipients(
+    conversation: ConversationEntity,
+    mentions: Mention[] | undefined,
+    senderId: string,
+  ): string[] {
+    if (!mentions?.length) return [];
+    const participantIds = new Set(
+      (conversation.participants ?? []).map((p) => p.userId),
+    );
+    const recipients = new Set<string>();
+    for (const m of mentions) {
+      if (m.type === 'here' || m.type === 'all') {
+        for (const id of participantIds) recipients.add(id);
+      } else if (m.type === 'user') {
+        if (participantIds.has(m.targetId)) recipients.add(m.targetId);
+      }
+    }
+    recipients.delete(senderId);
+    return [...recipients];
+  }
+
+  /** Emit a `chat_mention` notification per resolved recipient. Fail-safe. */
+  private async notifyMentions(
+    conversation: ConversationEntity,
+    message: MessageEntity,
+    mentions: Mention[],
+    senderId: string,
+    senderName?: string,
+  ): Promise<void> {
+    try {
+      const recipients = this.resolveMentionRecipients(conversation, mentions, senderId);
+      if (!recipients.length) return;
+      const who = senderName || 'Someone';
+      const where = conversation.name ? `#${conversation.name}` : 'a conversation';
+      for (const userId of recipients) {
+        await this.notifier.notify({
+          organizationId: conversation.organizationId || '',
+          userId,
+          actorId: senderId,
+          type: 'chat_mention',
+          title: `${who} mentioned you`,
+          body: message.contentPlainText || `${who} mentioned you in ${where}.`,
+          data: {
+            actionUrl: `/chat?conversation=${conversation.id}`,
+            conversationId: conversation.id,
+            messageId: message.id,
+          },
+        });
+      }
+    } catch (err) {
+      // Never let a notification failure break the send.
+      this.logger.error(`notifyMentions failed (conv=${conversation.id}): ${String(err)}`);
+    }
   }
 
   private isUniqueViolation(err: any): boolean {

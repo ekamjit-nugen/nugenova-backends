@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
+import { NotificationModule } from '../notification/notification.module';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { UserEntity } from '../auth/entities/user.entity';
@@ -23,6 +24,7 @@ import { MessagesController } from './messages.controller';
 @Module({
   imports: [
     AuthModule,
+    NotificationModule,
     TypeOrmModule.forFeature([ConversationEntity, MessageEntity, UserEntity]),
   ],
   controllers: [ConversationsController, MessagesController],

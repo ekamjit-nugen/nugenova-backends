@@ -67,6 +67,7 @@ export class MessagesController {
       this.senderName(req),
       fileData,
       dto.idempotencyKey,
+      dto.mentions,
     );
     return { success: true, message: 'Message sent', data };
   }

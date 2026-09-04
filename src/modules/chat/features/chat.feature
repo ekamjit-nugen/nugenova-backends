@@ -26,6 +26,13 @@ Feature: Chat / messaging
     When the first member creates a group with the second
     Then both members see the group in their conversation list
 
+  Scenario: mentioning a participant persists the mention and notifies them
+    Given an organization with three members and a group conversation between two of them
+    When the first member sends a message mentioning the second and the non-participant third
+    Then the stored message persists both mentions
+    And the mentioned participant receives a chat mention notification
+    And the non-participant does not receive a notification
+
   @security
   Scenario: a member cannot read a conversation they are not part of
     Given an organization with two members and a direct conversation between them

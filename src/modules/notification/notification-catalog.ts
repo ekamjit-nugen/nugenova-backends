@@ -48,6 +48,9 @@ export const NOTIFICATION_EMAIL: Record<string, NotificationEmailMeta> = {
   wfh_request_submitted: { eyebrow: 'WFH request', cta: 'Review request' },
   wfh_request_reviewed: { eyebrow: 'WFH request', cta: 'View request' },
 
+  // ── Chat ──
+  chat_mention: { eyebrow: 'You were mentioned', cta: 'Open conversation' },
+
   // ── Terms & Conditions ──
   terms_activated: { eyebrow: 'Terms & Conditions', cta: 'Review & accept' },
 
@@ -127,6 +130,8 @@ export const NOTIFICATION_TYPE_CATALOG: NotificationTypeMeta[] = [
   // Policy
   { type: 'policy_published', label: 'New policy published', category: 'policy', audience: 'employee' },
   { type: 'policy_ack_reminder', label: 'Policy acknowledgement reminder', category: 'policy', audience: 'employee' },
+  // Chat
+  { type: 'chat_mention', label: 'You were @mentioned', category: 'chat', audience: 'employee' },
 ];
 
 /** Catalog entries for one category. */

@@ -6,6 +6,7 @@ import {
   IsString,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -96,6 +97,23 @@ export class MarkUnreadDto {
 
 // ── messages ─────────────────────────────────────────────────────────────────
 
+/**
+ * One @mention the client attaches to a send. The shared FE↔BE contract:
+ *   - `user` → `targetId` is the mentioned user's userId.
+ *   - `here` / `all` → broadcast to the conversation's participants; `targetId`
+ *     is the conversationId (or may be empty — the server resolves recipients
+ *     from the conversation regardless).
+ * NOTE: main.ts runs `forbidNonWhitelisted`, so this DTO field is REQUIRED for
+ * the frontend to be allowed to send mentions at all.
+ */
+export class MentionDto {
+  @IsEnum(['user', 'here', 'all'])
+  type: 'user' | 'here' | 'all';
+
+  @IsString()
+  targetId: string;
+}
+
 export class SendMessageDto {
   // No length cap — messages may be arbitrarily long.
   @IsOptional()
@@ -155,6 +173,14 @@ export class SendMessageDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  // @mentions attached to this message. Nested-validated so a malformed entry is
+  // rejected rather than silently stored.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MentionDto)
+  mentions?: MentionDto[];
 }
 
 export class EditMessageDto {

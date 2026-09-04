@@ -10,6 +10,7 @@ import {
 } from '../../organization/features/support/org-harness';
 import { ConversationEntity } from '../entities/conversation.entity';
 import { MessageEntity } from '../entities/message.entity';
+import { NotificationEntity } from '../../notification/entities/notification.entity';
 
 const feature = loadFeature('./chat.feature', { loadRelativePath: true });
 const API = '/api/v1';
@@ -24,16 +25,19 @@ defineFeature(feature, (test) => {
   let h: OrgTestHarness;
   let conversations: Repository<ConversationEntity>;
   let messages: Repository<MessageEntity>;
+  let notifs: Repository<NotificationEntity>;
   const orgIds = new Set<string>();
 
   beforeAll(async () => {
     h = await bootOrgTestApp();
     conversations = h.app.get(getRepositoryToken(ConversationEntity));
     messages = h.app.get(getRepositoryToken(MessageEntity));
+    notifs = h.app.get(getRepositoryToken(NotificationEntity));
   });
   afterAll(async () => {
     const ids = [...orgIds];
     if (ids.length) {
+      await notifs.delete({ organizationId: In(ids) }).catch(() => undefined);
       await messages.delete({ organizationId: In(ids) }).catch(() => undefined);
       await conversations.delete({ organizationId: In(ids) }).catch(() => undefined);
     }
@@ -205,6 +209,64 @@ defineFeature(feature, (test) => {
       const res = await h.api().get(`${API}/chat/conversations`).set(auth(a1.token)).expect(200);
       const ids = (res.body.data as any[]).map((c) => c.id);
       expect(ids).not.toContain(conv2Id);
+    });
+  });
+
+  test('mentioning a participant persists the mention and notifies them', ({ given, when, then, and }) => {
+    let a: Member; // sender
+    let b: Member; // participant, mentioned
+    let c: Member; // org member but NOT a participant, also mentioned
+    let convId: string;
+    let msgId: string;
+
+    given('an organization with three members and a group conversation between two of them', async () => {
+      const o = await h.createOrg();
+      orgIds.add(o.orgId);
+      a = await h.createEmployeeMember(o);
+      b = await h.createEmployeeMember(o);
+      c = await h.createEmployeeMember(o);
+      const res = await h
+        .api()
+        .post(`${API}/chat/conversations/group`)
+        .set(auth(a.token))
+        .send({ name: 'Mentions', memberIds: [b.userId] })
+        .expect(201);
+      convId = res.body.data.id;
+    });
+
+    when('the first member sends a message mentioning the second and the non-participant third', async () => {
+      const res = await h
+        .api()
+        .post(`${API}/chat/conversations/${convId}/messages`)
+        .set(auth(a.token))
+        .send({
+          content: 'hey team',
+          mentions: [
+            { type: 'user', targetId: b.userId },
+            { type: 'user', targetId: c.userId },
+          ],
+        })
+        .expect(201);
+      msgId = res.body.data.id;
+      expect(msgId).toBeDefined();
+    });
+
+    then('the stored message persists both mentions', async () => {
+      const stored = await messages.findOne({ where: { id: msgId } });
+      expect(stored?.mentions?.map((m) => m.targetId).sort()).toEqual(
+        [b.userId, c.userId].sort(),
+      );
+    });
+
+    and('the mentioned participant receives a chat mention notification', async () => {
+      const rows = await notifs.find({ where: { userId: b.userId, type: 'chat_mention' } });
+      expect(rows.length).toBe(1);
+      expect((rows[0].data as any).conversationId).toBe(convId);
+    });
+
+    and('the non-participant does not receive a notification', async () => {
+      const rows = await notifs.find({ where: { userId: c.userId, type: 'chat_mention' } });
+      expect(rows.length).toBe(0);
     });
   });
 });
