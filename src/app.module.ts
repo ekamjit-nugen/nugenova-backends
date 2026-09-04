@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PostgresModule } from './bootstrap/database/postgres.module';
 import { MailModule } from './bootstrap/mail/mail.module';
 import { StorageModule } from './bootstrap/storage/storage.module';
@@ -17,6 +18,7 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { TimesheetModule } from './modules/timesheet/timesheet.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
+import { ChatModule } from './modules/chat/chat.module';
 
 /**
  * Nugenova backend root module.
@@ -30,6 +32,10 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     PostgresModule,
     ScheduleModule.forRoot(),
+    // In-process event bus — chat message broadcasts flow gateway-ward through
+    // this (MessagesService emits, ChatGateway @OnEvent listens) to avoid a
+    // service↔gateway circular dependency. Registered once here.
+    EventEmitterModule.forRoot(),
     MailModule,
     StorageModule,
     TermsModule,
@@ -46,6 +52,7 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
     TimesheetModule,
     NotificationModule,
     AdminPlatformModule,
+    ChatModule,
   ],
 })
 export class AppModule {}
