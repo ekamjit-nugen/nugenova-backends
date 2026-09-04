@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { IsNull, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 
@@ -14,6 +15,12 @@ import { Mention, MessageEntity, ReactionGroup } from '../entities/message.entit
 import { ConversationsService } from './conversations.service';
 import { sanitizeHtml, toPlainText } from '../util/sanitize.util';
 import { NotifierService } from '../../notification/notifier.service';
+import { PresenceService } from '../realtime/presence.service';
+import {
+  CHAT_MESSAGE_DELETED,
+  CHAT_MESSAGE_NEW,
+  CHAT_MESSAGE_UPDATED,
+} from '../realtime/chat-events';
 
 /** The FE↔BE mention contract entry (see SendMessageDto.mentions). */
 export interface IncomingMention {
@@ -58,7 +65,18 @@ export class MessagesService {
     private readonly conversations: Repository<ConversationEntity>,
     private readonly conversationsService: ConversationsService,
     private readonly notifier: NotifierService,
+    private readonly presence: PresenceService,
+    private readonly events: EventEmitter2,
   ) {}
+
+  /** Fire an in-process event, best-effort — never break a write on emit. */
+  private safeEmit(event: string, payload: unknown): void {
+    try {
+      this.events.emit(event, payload);
+    } catch (err) {
+      this.logger.warn(`emit ${event} failed: ${String(err)}`);
+    }
+  }
 
   // ── access ──────────────────────────────────────────────────────────────
 
@@ -192,12 +210,17 @@ export class MessagesService {
 
     await this.conversationsService.updateLastMessage(conversationId, saved);
 
+    const viewed = this.view(saved);
+    // Broadcast the new message to the conversation room (live delivery). Routed
+    // through the event bus so this service never depends on the socket gateway.
+    this.safeEmit(CHAT_MESSAGE_NEW, { conversationId, message: viewed });
+
     // Fire mention notifications. Best-effort: a notification failure must NEVER
     // fail the message send. Recipients are resolved strictly from THIS
     // conversation's participants, so a mention can't leak across conversations.
     await this.notifyMentions(conversation, saved, storedMentions, senderId, senderName);
 
-    return this.view(saved);
+    return viewed;
   }
 
   /**
@@ -243,6 +266,15 @@ export class MessagesService {
       const who = senderName || 'Someone';
       const where = conversation.name ? `#${conversation.name}` : 'a conversation';
       for (const userId of recipients) {
+        // Away-gated: an actively-online recipient sees the mention live in the
+        // open conversation, so skip the notification. Only away/offline/
+        // on-holiday recipients get notified. Fail-safe — a presence lookup
+        // error means we notify (better a redundant ping than a missed one).
+        try {
+          if (this.presence.isOnline(userId)) continue;
+        } catch {
+          /* fall through and notify */
+        }
         await this.notifier.notify({
           organizationId: conversation.organizationId || '',
           userId,
@@ -324,7 +356,12 @@ export class MessagesService {
     message.isEdited = true;
     message.editedAt = new Date();
     const saved = await this.messages.save(message);
-    return this.view(saved);
+    const viewed = this.view(saved);
+    this.safeEmit(CHAT_MESSAGE_UPDATED, {
+      conversationId: saved.conversationId,
+      message: viewed,
+    });
+    return viewed;
   }
 
   async deleteMessage(messageId: string, orgId: string, userId: string) {
@@ -345,6 +382,10 @@ export class MessagesService {
     message.deletedAt = new Date();
     message.deletedBy = userId;
     await this.messages.save(message);
+    this.safeEmit(CHAT_MESSAGE_DELETED, {
+      conversationId: message.conversationId,
+      messageId: message.id,
+    });
     return { message: 'Message deleted successfully' };
   }
 

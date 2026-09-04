@@ -2,11 +2,14 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 
+import { EventEmitter2 } from '@nestjs/event-emitter';
+
 import { MessagesService } from './messages.service';
 import { ConversationsService } from './conversations.service';
 import { ConversationEntity } from '../entities/conversation.entity';
 import { MessageEntity, Mention } from '../entities/message.entity';
 import { NotifierService } from '../../notification/notifier.service';
+import { PresenceService } from '../realtime/presence.service';
 
 /**
  * Unit specs for the message-level isolation gate and the send guards. These
@@ -56,6 +59,8 @@ describe('MessagesService (isolation + send guards)', () => {
         },
         { provide: ConversationsService, useValue: { updateLastMessage: jest.fn() } },
         { provide: NotifierService, useValue: { notify } },
+        { provide: PresenceService, useValue: { isOnline: jest.fn().mockReturnValue(false) } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
     service = moduleRef.get(MessagesService);
@@ -120,6 +125,7 @@ describe('MessagesService (mentions)', () => {
   let messageSave: jest.Mock;
   let convFindOne: jest.Mock;
   let notify: jest.Mock;
+  let isOnline: jest.Mock;
 
   const CONV = (participantIds: string[], over: Partial<ConversationEntity> = {}): ConversationEntity =>
     ({
@@ -141,6 +147,7 @@ describe('MessagesService (mentions)', () => {
     messageSave = jest.fn().mockImplementation((m) => ({ ...m, id: 'msg1' }));
     convFindOne = jest.fn();
     notify = jest.fn().mockResolvedValue(undefined);
+    isOnline = jest.fn().mockReturnValue(false); // default: recipient is away → notify
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -152,6 +159,8 @@ describe('MessagesService (mentions)', () => {
         { provide: getRepositoryToken(ConversationEntity), useValue: { findOne: convFindOne } },
         { provide: ConversationsService, useValue: { updateLastMessage: jest.fn() } },
         { provide: NotifierService, useValue: { notify } },
+        { provide: PresenceService, useValue: { isOnline } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
     service = moduleRef.get(MessagesService);
@@ -203,6 +212,40 @@ describe('MessagesService (mentions)', () => {
     const arg = notify.mock.calls[0][0];
     expect(arg).toMatchObject({ userId: 'bob', actorId: 'alice', type: 'chat_mention' });
     expect(arg.data.conversationId).toBe('conv1');
+  });
+
+  it('away-gated: an OFFLINE/away recipient IS notified', async () => {
+    isOnline.mockReturnValue(false);
+    convFindOne.mockResolvedValue(CONV(['alice', 'bob']));
+    await service.sendMessage(
+      'conv1', 'orgA', 'alice', 'hey @bob', 'text',
+      undefined, 'Alice A', undefined, undefined, [{ type: 'user', targetId: 'bob' }],
+    );
+    expect(isOnline).toHaveBeenCalledWith('bob');
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('away-gated: an actively-ONLINE recipient is NOT notified (sees it live)', async () => {
+    isOnline.mockReturnValue(true);
+    convFindOne.mockResolvedValue(CONV(['alice', 'bob']));
+    await service.sendMessage(
+      'conv1', 'orgA', 'alice', 'hey @bob', 'text',
+      undefined, 'Alice A', undefined, undefined, [{ type: 'user', targetId: 'bob' }],
+    );
+    expect(isOnline).toHaveBeenCalledWith('bob');
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('away-gated: notifies only the away recipients in a mixed group', async () => {
+    // bob online (skip), carol away (notify).
+    isOnline.mockImplementation((id: string) => id === 'bob');
+    convFindOne.mockResolvedValue(CONV(['alice', 'bob', 'carol']));
+    await service.sendMessage(
+      'conv1', 'orgA', 'alice', 'hey @here', 'text',
+      undefined, 'Alice A', undefined, undefined, [{ type: 'here', targetId: '' }],
+    );
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0]).toMatchObject({ userId: 'carol' });
   });
 
   it('persists the mentions on the stored message', async () => {

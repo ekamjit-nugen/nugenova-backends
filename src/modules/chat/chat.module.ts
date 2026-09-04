@@ -7,10 +7,13 @@ import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { LeaveRequestEntity } from '../leave/entities/leave-request.entity';
 import { ConversationsService } from './services/conversations.service';
 import { MessagesService } from './services/messages.service';
 import { ConversationsController } from './conversations.controller';
 import { MessagesController } from './messages.controller';
+import { PresenceService } from './realtime/presence.service';
+import { ChatGateway } from './realtime/chat.gateway';
 
 /**
  * Chat / messaging — direct/group/channel/self conversations + messages
@@ -18,8 +21,13 @@ import { MessagesController } from './messages.controller';
  * chat-service. Guarded by JwtAuthGuard; every read/write is scoped to
  * organizationId AND the caller's userId (tenant + user isolation).
  *
- * Deferred to follow-ups (see PLAYBOOK.md): the Socket.IO realtime gateway
- * (presence/typing/live delivery), threads, polls, moderation/DLP,
+ * Realtime (this tranche): the Socket.IO `/chat` gateway + PresenceService give
+ * presence (online/away/offline/on-holiday), typing relay, and live
+ * message/edit/delete delivery (fanned out via EventEmitter2, no gateway↔service
+ * circular dep). Presence is single-node in-memory — multi-node would need a
+ * Redis socket.io adapter + shared presence store (see PLAYBOOK.md).
+ *
+ * Deferred to follow-ups (see PLAYBOOK.md): threads, polls, moderation/DLP,
  * link-preview, slash-commands, managed client channels, and the frontend UI.
  */
 @Module({
@@ -31,10 +39,11 @@ import { MessagesController } from './messages.controller';
       MessageEntity,
       UserEntity,
       OrgMembershipEntity,
+      LeaveRequestEntity,
     ]),
   ],
   controllers: [ConversationsController, MessagesController],
-  providers: [ConversationsService, MessagesService],
-  exports: [ConversationsService, MessagesService],
+  providers: [ConversationsService, MessagesService, PresenceService, ChatGateway],
+  exports: [ConversationsService, MessagesService, PresenceService],
 })
 export class ChatModule {}
