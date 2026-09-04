@@ -117,6 +117,83 @@ describe('PresenceService', () => {
     });
   });
 
+  describe('manual status override', () => {
+    it('a manual busy overrides auto-online while connected', async () => {
+      service.onConnect('alice', 'orgA');
+      service.setManual('alice', 'busy', 'orgA');
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe('busy');
+    });
+
+    it('a manual busy is NOT flipped to away by the idle sweep', async () => {
+      const changes: any[] = [];
+      service.registerChangeListener((c) => changes.push(c));
+      service.onConnect('alice', 'orgA');
+      service.setManual('alice', 'busy', 'orgA');
+
+      service.sweepAway(Date.now() + PresenceService.AWAY_AFTER_MS + 1000);
+
+      expect(changes).toHaveLength(0); // sweep left the manual override alone
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe('busy');
+    });
+
+    it('a manual offline shows offline while still connected', async () => {
+      service.onConnect('alice', 'orgA');
+      service.setManual('alice', 'offline', 'orgA');
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe(
+        'offline',
+      );
+      // No leave lookup — the user is connected, override wins.
+      expect(leaveCount).not.toHaveBeenCalled();
+    });
+
+    it('a manual away overrides online while connected', async () => {
+      service.onConnect('alice', 'orgA');
+      service.setManual('alice', 'away', 'orgA');
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe('away');
+    });
+
+    it("setManual('active') clears a prior override and resumes auto-online", async () => {
+      service.onConnect('alice', 'orgA');
+      service.setManual('alice', 'busy', 'orgA');
+      service.setManual('alice', 'active', 'orgA');
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe(
+        'online',
+      );
+    });
+
+    it('precedence: manual > on_holiday > auto when connected', async () => {
+      // On approved leave today, but connected AND manually busy → busy wins.
+      leaveCount.mockResolvedValue(1);
+      service.onConnect('alice', 'orgA');
+      service.setManual('alice', 'busy', 'orgA');
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe('busy');
+      // Manual wins without ever consulting leave while connected.
+      expect(leaveCount).not.toHaveBeenCalled();
+    });
+
+    it('a manual-offline user resolves normally (on_holiday/offline) once disconnected', async () => {
+      service.onConnect('alice', 'orgA');
+      service.setManual('alice', 'offline', 'orgA');
+      service.onDisconnect('alice'); // full disconnect clears the override
+      leaveCount.mockResolvedValue(1); // on approved leave today
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe(
+        'on_holiday',
+      );
+    });
+
+    it('an idle-away user (no manual) IS still swept', () => {
+      // Guards against the sweep guard being too broad.
+      const changes: any[] = [];
+      service.registerChangeListener((c) => changes.push(c));
+      service.onConnect('alice', 'orgA');
+
+      service.sweepAway(Date.now() + PresenceService.AWAY_AFTER_MS + 1000);
+      expect(changes).toEqual([
+        { userId: 'alice', orgId: 'orgA', status: 'away' },
+      ]);
+    });
+  });
+
   describe('idle away sweep', () => {
     it('flips an idle connected user to away and notifies the listener', () => {
       const changes: any[] = [];

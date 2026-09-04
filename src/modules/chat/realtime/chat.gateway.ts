@@ -12,7 +12,7 @@ import {
 import { Repository } from 'typeorm';
 
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
-import { PresenceService, PresenceStatus } from './presence.service';
+import { ManualStatus, PresenceService, PresenceStatus } from './presence.service';
 import {
   CHAT_MESSAGE_DELETED,
   CHAT_MESSAGE_NEW,
@@ -199,6 +199,39 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!userId) return;
     this.presence.setAway(userId, orgId);
     if (orgId) this.broadcastPresence(orgId, userId, 'away');
+  }
+
+  /**
+   * Explicit manual presence override. Body: `{ status: 'active'|'away'|'busy'
+   * |'offline' }` — 'active' clears the override (resume auto), the rest set a
+   * sticky override that wins while connected. Broadcasts the freshly resolved
+   * status so appear-offline resolves to 'offline', etc.
+   */
+  @SubscribeMessage('presence:set')
+  async handlePresenceSet(
+    client: ChatSocket,
+    data: { status?: string },
+  ): Promise<void> {
+    const userId = client.data?.userId;
+    const orgId = client.data?.orgId ?? null;
+    if (!userId) return;
+    const status = this.clampManualStatus(data?.status);
+    if (!status) return; // ignore unknown/garbage values
+    this.presence.setManual(userId, status, orgId);
+    if (orgId) {
+      const resolved = await this.presence.resolveStatus(userId, orgId);
+      this.broadcastPresence(orgId, userId, resolved);
+    }
+  }
+
+  /** Validate/clamp an inbound manual status; null if not one of the four. */
+  private clampManualStatus(value: unknown): ManualStatus | null {
+    return value === 'active' ||
+      value === 'away' ||
+      value === 'busy' ||
+      value === 'offline'
+      ? value
+      : null;
   }
 
   // ── message fan-out (driven by MessagesService via the event bus) ─────────
