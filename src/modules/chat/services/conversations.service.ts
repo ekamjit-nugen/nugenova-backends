@@ -10,6 +10,7 @@ import { In, Repository } from 'typeorm';
 
 import { ConversationEntity, Participant } from '../entities/conversation.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
+import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 
 /**
  * ConversationsService — direct/group/channel/self threads. Ported from the
@@ -34,7 +35,37 @@ export class ConversationsService {
     private readonly conversations: Repository<ConversationEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    @InjectRepository(OrgMembershipEntity)
+    private readonly memberships: Repository<OrgMembershipEntity>,
   ) {}
+
+  /**
+   * The people the caller can start a conversation with / @mention: every ACTIVE
+   * member of the caller's org who has a linked user account, minus the caller.
+   * Available to ANY authenticated member (not admin-gated like `/org/members`),
+   * since messaging a colleague is not an admin action. Always scoped to the
+   * caller's org.
+   */
+  async directory(orgId: string, meId: string) {
+    const rows = await this.memberships.find({
+      where: { organizationId: orgId, status: 'active' },
+      order: { createdAt: 'ASC' },
+    });
+    const messageable = rows.filter((m) => m.userId && m.userId !== meId);
+    const names = await this.nameMap(messageable.map((m) => m.userId as string));
+    return messageable.map((m) => {
+      const n = names.get(m.userId as string);
+      return {
+        membershipId: m.id,
+        userId: m.userId,
+        email: m.email,
+        firstName: n?.firstName ?? null,
+        lastName: n?.lastName ?? null,
+        role: m.role,
+        status: m.status,
+      };
+    });
+  }
 
   // ── helpers ───────────────────────────────────────────────────────────────
 

@@ -123,6 +123,15 @@ export class ConversationsController {
     return { success: true, message: 'Self conversation retrieved', data };
   }
 
+  // The people the caller can start a DM with / @mention. Unlike /org/members
+  // (admin-only), this is available to any member — messaging is not an admin
+  // action. Scoped to the caller's org; excludes the caller.
+  @Get('directory')
+  async directory(@Req() req: any) {
+    const data = await this.conversations.directory(this.orgId(req), req.user.userId);
+    return { success: true, message: 'Directory retrieved', data };
+  }
+
   @Get('conversations/:id')
   async getOne(@Param('id') id: string, @Req() req: any) {
     const data = await this.conversations.getConversation(id, this.orgId(req), req.user.userId);

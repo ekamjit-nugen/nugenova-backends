@@ -6,6 +6,7 @@ import { NotificationModule } from '../notification/notification.module';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { ConversationsService } from './services/conversations.service';
 import { MessagesService } from './services/messages.service';
 import { ConversationsController } from './conversations.controller';
@@ -25,7 +26,12 @@ import { MessagesController } from './messages.controller';
   imports: [
     AuthModule,
     NotificationModule,
-    TypeOrmModule.forFeature([ConversationEntity, MessageEntity, UserEntity]),
+    TypeOrmModule.forFeature([
+      ConversationEntity,
+      MessageEntity,
+      UserEntity,
+      OrgMembershipEntity,
+    ]),
   ],
   controllers: [ConversationsController, MessagesController],
   providers: [ConversationsService, MessagesService],
