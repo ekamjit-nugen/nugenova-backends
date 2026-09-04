@@ -63,7 +63,7 @@ export class ConsentController {
     const safeName = filename.replace(/[^\w.\-]+/g, '_');
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
-    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(buffer);
   }
 
