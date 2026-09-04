@@ -285,14 +285,19 @@ export class ConversationsService {
       .andWhere(':me = ANY(c.participant_ids)', { me: userId })
       .getMany();
 
-    // Pinned-first, then most-recent activity.
+    // Pinned-first, then most-recent activity. A conversation with no messages
+    // yet (a just-created DM) has no lastMessage, so fall back to the row's own
+    // updated/created time — otherwise a brand-new chat would sort to the very
+    // bottom instead of showing near the top where the user just opened it.
+    const activityTime = (c: ConversationEntity): number => {
+      const t = c.lastMessage?.sentAt ?? c.updatedAt ?? c.createdAt;
+      return t ? new Date(t).getTime() : 0;
+    };
     rows.sort((a, b) => {
       const aPinned = a.participants.find((p) => p.userId === userId)?.isPinned ? 1 : 0;
       const bPinned = b.participants.find((p) => p.userId === userId)?.isPinned ? 1 : 0;
       if (bPinned !== aPinned) return bPinned - aPinned;
-      const at = a.lastMessage?.sentAt ? new Date(a.lastMessage.sentAt).getTime() : 0;
-      const bt = b.lastMessage?.sentAt ? new Date(b.lastMessage.sentAt).getTime() : 0;
-      return bt - at;
+      return activityTime(b) - activityTime(a);
     });
 
     const names = await this.nameMap(rows.flatMap((c) => c.participants.map((p) => p.userId)));
