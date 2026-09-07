@@ -85,7 +85,7 @@ export class StorageController {
       'Content-Disposition',
       `inline; filename="${safeName}"`,
     );
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(bytes);
   }
 }

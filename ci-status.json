@@ -1,98 +1,106 @@
 {
+  "chat": {
+    "status": "passing",
+    "passed": 78,
+    "failed": 0,
+    "total": 78,
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
+  },
   "onboarding": {
     "status": "passing",
     "passed": 59,
     "failed": 0,
     "total": 59,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "auth": {
     "status": "passing",
     "passed": 50,
     "failed": 0,
     "total": 50,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "organization": {
     "status": "passing",
     "passed": 90,
     "failed": 0,
     "total": 90,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "notification": {
     "status": "passing",
     "passed": 25,
     "failed": 0,
     "total": 25,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "payroll": {
     "status": "passing",
     "passed": 91,
     "failed": 0,
     "total": 91,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "terms": {
     "status": "passing",
     "passed": 11,
     "failed": 0,
     "total": 11,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "policy": {
     "status": "passing",
     "passed": 59,
     "failed": 0,
     "total": 59,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "attendance": {
     "status": "passing",
     "passed": 75,
     "failed": 0,
     "total": 75,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "leave": {
     "status": "passing",
     "passed": 23,
     "failed": 0,
     "total": 23,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "health": {
     "status": "passing",
     "passed": 2,
     "failed": 0,
     "total": 2,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "timesheet": {
     "status": "passing",
     "passed": 8,
     "failed": 0,
     "total": 8,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   },
   "admin-platform": {
     "status": "passing",
     "passed": 2,
     "failed": 0,
     "total": 2,
-    "ranAt": "2026-09-03T17:44:27.146Z",
-    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/33785745601"
+    "ranAt": "2026-09-07T17:45:22.704Z",
+    "runUrl": "https://github.com/cto-varun/nugenova-backend/actions/runs/34148469540"
   }
 }

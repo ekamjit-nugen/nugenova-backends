@@ -14,7 +14,6 @@ import {
   PutObjectCommand,
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { DocumentFileEntity } from './document-file.entity';
 
@@ -49,8 +48,10 @@ const MIME_TO_EXT: Record<string, string> = {
 
 /**
  * Pluggable file storage. Ported from the monolith's UploadService S3 mechanics
- * (`<orgId>/<uuid>.<ext>` keys, PutObject, presigned GET at 1h, private bucket)
- * but with a Postgres-`bytea` fallback so dev/CI run with no S3 at all.
+ * (`<orgId>/<uuid>.<ext>` keys, PutObject, private bucket) but with a
+ * Postgres-`bytea` fallback so dev/CI run with no S3 at all. Bytes are served
+ * ONLY via the authenticated byte-proxy (`getBytes`); no presigned URL is ever
+ * handed to a client.
  *
  * Driver selection is by whether S3 creds are present (`S3_ACCESS_KEY` +
  * `S3_SECRET_KEY`), mirroring the monolith's `s3Enabled` gate — the moment those
@@ -172,15 +173,11 @@ export class StorageService {
     throw new NotFoundException('File content unavailable');
   }
 
-  /** Presigned GET (S3 driver only), 1h — for clients that fetch S3 directly. */
-  async getPresignedUrl(f: DocumentFileEntity): Promise<string | null> {
-    if (f.driver !== 's3' || !f.storageKey || !this.s3Client) return null;
-    return getSignedUrl(
-      this.s3Client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: f.storageKey }),
-      { expiresIn: 3600 },
-    );
-  }
+  // NOTE: presigned-URL generation is intentionally NOT provided. Confidential
+  // documents must be served only through the authenticated byte-proxy
+  // (`getBytes` behind JwtAuthGuard) or the auth'd `openStream` below; a
+  // presigned S3 URL is auth-free and copy-pasteable from the Network tab,
+  // which the product must never expose.
 
   /**
    * Open a stored file as an authenticated, server-side byte STREAM — the reusable
