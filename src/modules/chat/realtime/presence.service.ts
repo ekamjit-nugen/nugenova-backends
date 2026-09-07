@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 
 import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
+import { UserEntity } from '../../auth/entities/user.entity';
 
 /** Presence states shared with the frontend (see the socket contract). */
 export type PresenceStatus =
@@ -81,6 +82,8 @@ export class PresenceService implements OnModuleDestroy {
   constructor(
     @InjectRepository(LeaveRequestEntity)
     private readonly leaveRepo: Repository<LeaveRequestEntity>,
+    @InjectRepository(UserEntity)
+    private readonly userRepo: Repository<UserEntity>,
   ) {
     this.sweepTimer = setInterval(
       () => this.sweepAway(),
@@ -218,8 +221,66 @@ export class PresenceService implements OnModuleDestroy {
     return !!e && e.socketCount > 0 && !e.away;
   }
 
+  // ── self-declared holiday (status picker) ───────────────────────────────
+  // A user can mark themselves "On holiday" for a date range from the chat status
+  // picker. Unlike a manual busy/away override (in-memory, per-session), this is
+  // persisted on the user's `preferences` jsonb so it survives disconnects, shows
+  // to everyone, and auto-expires when the window ends — no migration needed.
+
+  /** Persist a self-declared holiday window [from, until]. */
+  async setHoliday(userId: string, from: Date, until: Date): Promise<void> {
+    try {
+      const user = await this.userRepo.findOne({ where: { id: userId } });
+      if (!user) return;
+      user.preferences = {
+        ...(user.preferences ?? {}),
+        chatHoliday: { from: from.toISOString(), until: until.toISOString() },
+      };
+      await this.userRepo.save(user);
+    } catch (err) {
+      this.logger.error(`setHoliday failed (user=${userId}): ${String(err)}`);
+    }
+  }
+
+  /** Remove any self-declared holiday window (resume normal presence). */
+  async clearHoliday(userId: string): Promise<void> {
+    try {
+      const user = await this.userRepo.findOne({ where: { id: userId } });
+      if (!user?.preferences || !('chatHoliday' in user.preferences)) return;
+      const prefs = { ...user.preferences };
+      delete (prefs as Record<string, unknown>).chatHoliday;
+      user.preferences = prefs;
+      await this.userRepo.save(user);
+    } catch (err) {
+      this.logger.error(`clearHoliday failed (user=${userId}): ${String(err)}`);
+    }
+  }
+
+  /** Whether `now` falls inside the user's self-declared holiday window. */
+  private async isSelfHolidayNow(userId: string): Promise<boolean> {
+    try {
+      const user = await this.userRepo.findOne({
+        where: { id: userId },
+        select: ['id', 'preferences'],
+      });
+      const h = user?.preferences?.['chatHoliday'] as
+        | { from?: string; until?: string }
+        | undefined;
+      if (!h?.from || !h?.until) return false;
+      const now = Date.now();
+      return now >= new Date(h.from).getTime() && now <= new Date(h.until).getTime();
+    } catch (err) {
+      this.logger.error(`holiday lookup failed (user=${userId}): ${String(err)}`);
+      return false;
+    }
+  }
+
   /** Resolve the full status, consulting approved leave when not connected. */
   async resolveStatus(userId: string, orgId: string): Promise<PresenceStatus> {
+    // A self-declared holiday window wins over everything (shown even while the
+    // user is actively connected) for as long as the window is active.
+    if (await this.isSelfHolidayNow(userId)) return 'on_holiday';
+
     const e = this.presence.get(userId);
     if (e && e.socketCount > 0) {
       // Manual override wins while connected (busy/away/appear-offline).

@@ -12,6 +12,12 @@ export interface Participant {
   role: string; // owner | admin | member
   memberStatus: string; // active | invited | pending
   joinedAt: string; // ISO — jsonb has no Date type
+  /**
+   * When set (ISO), this member only sees messages sent at/after this time — used
+   * when they were added WITHOUT sharing prior history. Null/undefined = full
+   * history (the default for the group's original members).
+   */
+  historyFrom?: string | null;
   lastReadAt: string; // ISO
   lastReadMessageId?: string | null;
   muted: boolean;

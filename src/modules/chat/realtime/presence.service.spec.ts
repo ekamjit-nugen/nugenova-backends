@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { PresenceService } from './presence.service';
 import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
+import { UserEntity } from '../../auth/entities/user.entity';
 
 /**
  * Unit specs for PresenceService — the in-memory presence model behind the chat
@@ -13,15 +14,23 @@ import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
 describe('PresenceService', () => {
   let service: PresenceService;
   let leaveCount: jest.Mock;
+  let userFindOne: jest.Mock;
 
   beforeEach(async () => {
     leaveCount = jest.fn().mockResolvedValue(0);
+    // Default: no self-declared holiday window (findOne resolves a user with no
+    // chatHoliday). Individual tests can override for the holiday cases.
+    userFindOne = jest.fn().mockResolvedValue({ id: 'u', preferences: null });
     const moduleRef = await Test.createTestingModule({
       providers: [
         PresenceService,
         {
           provide: getRepositoryToken(LeaveRequestEntity),
           useValue: { count: leaveCount },
+        },
+        {
+          provide: getRepositoryToken(UserEntity),
+          useValue: { findOne: userFindOne, save: jest.fn() },
         },
       ],
     }).compile();
@@ -191,6 +200,41 @@ describe('PresenceService', () => {
       expect(changes).toEqual([
         { userId: 'alice', orgId: 'orgA', status: 'away' },
       ]);
+    });
+  });
+
+  describe('self-declared holiday (status picker, persisted on the user)', () => {
+    const HOLIDAY = { from: '2020-01-01T00:00:00.000Z', until: '2999-01-01T00:00:00.000Z' };
+
+    it('resolves on_holiday while the window is active — even while connected', async () => {
+      userFindOne.mockResolvedValue({ id: 'alice', preferences: { chatHoliday: HOLIDAY } });
+      service.onConnect('alice', 'orgA'); // has a live socket → normally "online"
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe('on_holiday');
+    });
+
+    it('ignores an expired window (falls through to the normal derivation)', async () => {
+      userFindOne.mockResolvedValue({
+        id: 'alice',
+        preferences: { chatHoliday: { from: '2020-01-01T00:00:00.000Z', until: '2020-01-02T00:00:00.000Z' } },
+      });
+      service.onConnect('alice', 'orgA');
+      await expect(service.resolveStatus('alice', 'orgA')).resolves.toBe('online');
+    });
+
+    it('setHoliday persists the window and clearHoliday removes it', async () => {
+      const save = jest.fn();
+      userFindOne.mockResolvedValue({ id: 'alice', preferences: null });
+      (service as any).userRepo.save = save;
+
+      await service.setHoliday('alice', new Date(HOLIDAY.from), new Date(HOLIDAY.until));
+      expect(save.mock.calls[0][0].preferences.chatHoliday).toEqual({
+        from: new Date(HOLIDAY.from).toISOString(),
+        until: new Date(HOLIDAY.until).toISOString(),
+      });
+
+      userFindOne.mockResolvedValue({ id: 'alice', preferences: { chatHoliday: HOLIDAY } });
+      await service.clearHoliday('alice');
+      expect(save.mock.calls[1][0].preferences.chatHoliday).toBeUndefined();
     });
   });
 

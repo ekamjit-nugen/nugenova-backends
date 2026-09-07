@@ -4,6 +4,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { MessagesService } from './messages.service';
+import { ChatSettingsService } from './chat-settings.service';
 import { BookmarksService } from './bookmarks.service';
 import { ConversationsService } from './conversations.service';
 import { ConversationEntity } from '../entities/conversation.entity';
@@ -75,6 +76,13 @@ describe('MessagesService — pin / unpin / pinned', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         MessagesService,
+        {
+          provide: ChatSettingsService,
+          useValue: {
+            load: jest.fn().mockResolvedValue({ allowDeleteOwn: true, adminCanDeleteAny: true }),
+            isAdmin: () => false,
+          },
+        },
         {
           provide: getRepositoryToken(MessageEntity),
           useValue: { findOne: messageFindOne, find: messageFind, save: messageSave, create: (x: any) => x },
@@ -164,6 +172,13 @@ describe('MessagesService — forward', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         MessagesService,
+        {
+          provide: ChatSettingsService,
+          useValue: {
+            load: jest.fn().mockResolvedValue({ allowDeleteOwn: true, adminCanDeleteAny: true }),
+            isAdmin: () => false,
+          },
+        },
         {
           provide: getRepositoryToken(MessageEntity),
           useValue: { findOne: messageFindOne, find: jest.fn(), save: messageSave, create: (x: any) => x },

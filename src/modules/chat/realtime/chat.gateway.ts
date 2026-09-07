@@ -202,22 +202,38 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * Explicit manual presence override. Body: `{ status: 'active'|'away'|'busy'
-   * |'offline' }` — 'active' clears the override (resume auto), the rest set a
-   * sticky override that wins while connected. Broadcasts the freshly resolved
-   * status so appear-offline resolves to 'offline', etc.
+   * Explicit presence pick from the status picker. Body:
+   *   - `{ status: 'active'|'away'|'busy'|'offline' }` — 'active' clears the
+   *     override (resume auto), the rest set a sticky override that wins while
+   *     connected. Any of these also clears a self-declared holiday window.
+   *   - `{ status: 'on_holiday', from, until }` — persist a holiday window (dates
+   *     as 'YYYY-MM-DD' or ISO). It wins over everything until it expires and is
+   *     shown to everyone. Broadcasts the freshly resolved status.
    */
   @SubscribeMessage('presence:set')
   async handlePresenceSet(
     client: ChatSocket,
-    data: { status?: string },
+    data: { status?: string; from?: string; until?: string },
   ): Promise<void> {
     const userId = client.data?.userId;
     const orgId = client.data?.orgId ?? null;
     if (!userId) return;
-    const status = this.clampManualStatus(data?.status);
-    if (!status) return; // ignore unknown/garbage values
-    this.presence.setManual(userId, status, orgId);
+
+    if (data?.status === 'on_holiday') {
+      const from = this.parseDay(data?.from, false);
+      const until = this.parseDay(data?.until, true);
+      if (!from || !until || until.getTime() < from.getTime()) return; // need a valid range
+      await this.presence.setHoliday(userId, from, until);
+      // Drop any stale in-memory override so the holiday resolves cleanly (and
+      // nothing odd resurfaces the moment the window later expires).
+      this.presence.setManual(userId, 'active', orgId);
+    } else {
+      const status = this.clampManualStatus(data?.status);
+      if (!status) return; // ignore unknown/garbage values
+      await this.presence.clearHoliday(userId);
+      this.presence.setManual(userId, status, orgId);
+    }
+
     if (orgId) {
       const resolved = await this.presence.resolveStatus(userId, orgId);
       this.broadcastPresence(orgId, userId, resolved);
@@ -232,6 +248,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       value === 'offline'
       ? value
       : null;
+  }
+
+  /**
+   * Parse a day boundary for a holiday window. Accepts 'YYYY-MM-DD' (from the
+   * date picker) — start-of-day for `from`, end-of-day for `until` — or a full
+   * ISO timestamp. Returns null on anything unparseable. UTC.
+   */
+  private parseDay(value: unknown, endOfDay: boolean): Date | null {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+    const iso = isDateOnly
+      ? `${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`
+      : value;
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? null : d;
   }
 
   // ── message fan-out (driven by MessagesService via the event bus) ─────────

@@ -50,6 +50,21 @@ Feature: Chat / messaging
     Then the first member's bookmarks include "Save me"
     And the second member's bookmarks do not include it
 
+  Scenario: a member uploads a file, sends it, and participants can fetch it
+    Given an organization with two members and a direct conversation between them
+    When the first member uploads a file and sends it as a message
+    Then the message carries the attachment fields
+    And the first member can fetch the file
+    And the second member can fetch the file
+    And an unauthenticated fetch is rejected
+
+  @security
+  Scenario: a non-participant cannot fetch a conversation's file
+    Given an organization with two members and a direct conversation between them
+    And a third member of the same organization
+    When the first member uploads a file and sends it as a message
+    Then the third member is refused the file as not found
+
   @security
   Scenario: a member cannot read a conversation they are not part of
     Given an organization with two members and a direct conversation between them

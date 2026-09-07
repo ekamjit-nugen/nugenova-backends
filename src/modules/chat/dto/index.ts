@@ -1,6 +1,9 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
+  IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -78,6 +81,22 @@ export class AddParticipantsDto {
   @IsArray()
   @IsString({ each: true })
   userIds: string[];
+
+  /** Whether the new members can see messages sent before they joined. */
+  @IsOptional()
+  @IsBoolean()
+  shareHistory?: boolean;
+}
+
+export class UpdateGroupDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  /** Group picture as a data-URI (or '' to clear). */
+  @IsOptional()
+  @IsString()
+  avatar?: string;
 }
 
 export class ConvertToGroupDto {
@@ -219,4 +238,26 @@ export class MessageQueryDto {
 export class SearchMessageDto {
   @IsString()
   q: string;
+}
+
+// ── org chat settings (admin) ────────────────────────────────────────────────
+
+export class UpdateChatSettingsDto {
+  @IsOptional() @IsBoolean() chatEnabled?: boolean;
+  @IsOptional() @IsIn(['everyone', 'same_department', 'admins']) whoCanDm?: 'everyone' | 'same_department' | 'admins';
+  @IsOptional() @IsIn(['everyone', 'admins']) whoCanCreateChannels?: 'everyone' | 'admins';
+  @IsOptional() @IsIn(['everyone', 'admins']) whoCanCreateGroups?: 'everyone' | 'admins';
+  @IsOptional() @IsIn(['creator_and_admins', 'any_member', 'admins']) whoCanManageGroups?: 'creator_and_admins' | 'any_member' | 'admins';
+  @IsOptional() @IsBoolean() shareHistoryDefault?: boolean;
+
+  @IsOptional() @IsBoolean() attachmentsEnabled?: boolean;
+  @IsOptional() @IsInt() @Min(1) @Max(25) maxFileSizeMb?: number;
+  @IsOptional() @IsArray() @IsString({ each: true }) blockedExtensions?: string[];
+
+  @IsOptional() @IsBoolean() allowEditOwn?: boolean;
+  @IsOptional() @IsBoolean() allowDeleteOwn?: boolean;
+  @IsOptional() @IsBoolean() adminCanDeleteAny?: boolean;
+  @IsOptional() @IsInt() @Min(0) @Max(3650) retentionDays?: number;
+
+  @IsOptional() @IsBoolean() broadcastAdminsOnly?: boolean;
 }

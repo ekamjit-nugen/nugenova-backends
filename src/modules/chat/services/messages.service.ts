@@ -7,12 +7,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, MoreThanOrEqual, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 
 import { ConversationEntity } from '../entities/conversation.entity';
 import { Mention, MessageEntity, ReactionGroup } from '../entities/message.entity';
 import { ConversationsService } from './conversations.service';
+import { ChatSettingsService } from './chat-settings.service';
 import { sanitizeHtml, toPlainText } from '../util/sanitize.util';
 import { NotifierService } from '../../notification/notifier.service';
 import { PresenceService } from '../realtime/presence.service';
@@ -64,6 +65,7 @@ export class MessagesService {
     @InjectRepository(ConversationEntity)
     private readonly conversations: Repository<ConversationEntity>,
     private readonly conversationsService: ConversationsService,
+    private readonly chatSettings: ChatSettingsService,
     private readonly notifier: NotifierService,
     private readonly presence: PresenceService,
     private readonly events: EventEmitter2,
@@ -115,6 +117,33 @@ export class MessagesService {
   /** Preserve the Mongo `_id` shape as `id` (and keep `_id` for legacy FE). */
   private view(m: MessageEntity): Record<string, unknown> {
     return { ...m, _id: m.id };
+  }
+
+  /**
+   * Attachment access gate for `GET /chat/files/:fileId`. The caller may see a
+   * file ONLY if some message referencing this `fileId` lives in a conversation
+   * that is (a) same-org and (b) one the caller is a participant of. A single
+   * index-served query joins messages→conversations and filters on
+   * `participant_ids` — the same membership predicate used everywhere else.
+   *
+   * Returns a boolean; the controller 404s on `false` so file existence is never
+   * leaked to a non-participant (or across orgs).
+   */
+  async userCanAccessFile(
+    fileId: string,
+    orgId: string,
+    userId: string,
+  ): Promise<boolean> {
+    if (!fileId || !orgId || !userId) return false;
+    const count = await this.messages
+      .createQueryBuilder('m')
+      .innerJoin(ConversationEntity, 'c', 'c.id = m.conversation_id')
+      .where('m.file_id = :fileId', { fileId })
+      .andWhere('c.is_deleted = false')
+      .andWhere('c.organization_id = :orgId', { orgId })
+      .andWhere(':me = ANY(c.participant_ids)', { me: userId })
+      .getCount();
+    return count > 0;
   }
 
   // ── send ────────────────────────────────────────────────────────────────
@@ -325,15 +354,22 @@ export class MessagesService {
     limit = 50,
     order: 'asc' | 'desc' = 'asc',
   ) {
-    await this.conversationForMember(conversationId, orgId, userId);
+    const conv = await this.conversationForMember(conversationId, orgId, userId);
 
     const safeLimit = Math.min(limit || 50, 200);
     const safePage = Math.max(page || 1, 1);
     const skip = (safePage - 1) * safeLimit;
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
+    // Members added without shared history only see messages from their cutoff on.
+    const cutoff = conv.participants.find((p) => p.userId === userId)?.historyFrom;
     const [rows, total] = await this.messages.findAndCount({
-      where: { conversationId, isDeleted: false, threadId: IsNull() },
+      where: {
+        conversationId,
+        isDeleted: false,
+        threadId: IsNull(),
+        ...(cutoff ? { createdAt: MoreThanOrEqual(new Date(cutoff)) } : {}),
+      },
       order: { createdAt: sortDir },
       skip,
       take: safeLimit,
@@ -379,17 +415,31 @@ export class MessagesService {
     return viewed;
   }
 
-  async deleteMessage(messageId: string, orgId: string, userId: string) {
+  async deleteMessage(messageId: string, orgId: string, userId: string, orgRole?: string | null) {
     const message = await this.messages.findOne({ where: { id: messageId, isDeleted: false } });
     if (!message) throw new NotFoundException('Message not found');
     const conversation = await this.conversationForMember(message.conversationId, orgId, userId);
 
-    // A user may delete their own message; a channel owner/admin may delete any
-    // message in that channel (moderation).
+    // Deletion policy (org chat settings):
+    //  - an org admin/owner may delete ANY message when adminCanDeleteAny is on;
+    //  - a user may delete their OWN message unless the org turned that off;
+    //  - a channel owner/admin may always delete within their channel (moderation).
+    const settings = await this.chatSettings.load(orgId);
+    const isOrgAdmin = this.chatSettings.isAdmin(orgRole);
     const isOwn = message.senderId === userId;
     const requester = conversation.participants.find((p) => p.userId === userId);
-    const isModerator = !!requester && (requester.role === 'owner' || requester.role === 'admin');
-    if (!isOwn && !isModerator) {
+    const isChannelModerator =
+      !!requester && (requester.role === 'owner' || requester.role === 'admin');
+
+    const canDelete =
+      (isOrgAdmin && settings.adminCanDeleteAny) ||
+      (isOwn && (settings.allowDeleteOwn || isOrgAdmin)) ||
+      isChannelModerator;
+
+    if (!canDelete) {
+      if (isOwn && !settings.allowDeleteOwn) {
+        throw new ForbiddenException('Deleting messages is disabled by your organization.');
+      }
       throw new ForbiddenException('Can only delete your own messages');
     }
 
@@ -571,9 +621,15 @@ export class MessagesService {
 
   /** The conversation's pinned messages, newest-pinned first (participant-only). */
   async getPinnedMessages(conversationId: string, orgId: string, userId: string) {
-    await this.conversationForMember(conversationId, orgId, userId);
+    const conv = await this.conversationForMember(conversationId, orgId, userId);
+    const cutoff = conv.participants.find((p) => p.userId === userId)?.historyFrom;
     const rows = await this.messages.find({
-      where: { conversationId, isPinned: true, isDeleted: false },
+      where: {
+        conversationId,
+        isPinned: true,
+        isDeleted: false,
+        ...(cutoff ? { createdAt: MoreThanOrEqual(new Date(cutoff)) } : {}),
+      },
       order: { pinnedAt: 'DESC' },
     });
     return rows.map((m) => this.view(m));

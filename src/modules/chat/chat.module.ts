@@ -3,17 +3,22 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
+import { StorageModule } from '../../bootstrap/storage/storage.module';
 import { ConversationEntity } from './entities/conversation.entity';
 import { MessageEntity } from './entities/message.entity';
 import { ChatBookmarkEntity } from './entities/chat-bookmark.entity';
+import { OrgChatSettingEntity } from './entities/org-chat-setting.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { LeaveRequestEntity } from '../leave/entities/leave-request.entity';
 import { ConversationsService } from './services/conversations.service';
 import { MessagesService } from './services/messages.service';
 import { BookmarksService } from './services/bookmarks.service';
+import { ChatSettingsService } from './services/chat-settings.service';
+import { ChatRetentionService } from './services/chat-retention.service';
 import { ConversationsController } from './conversations.controller';
 import { MessagesController } from './messages.controller';
+import { ChatSettingsController } from './chat-settings.controller';
 import { PresenceService } from './realtime/presence.service';
 import { ChatGateway } from './realtime/chat.gateway';
 
@@ -36,17 +41,27 @@ import { ChatGateway } from './realtime/chat.gateway';
   imports: [
     AuthModule,
     NotificationModule,
+    StorageModule,
     TypeOrmModule.forFeature([
       ConversationEntity,
       MessageEntity,
       ChatBookmarkEntity,
+      OrgChatSettingEntity,
       UserEntity,
       OrgMembershipEntity,
       LeaveRequestEntity,
     ]),
   ],
-  controllers: [ConversationsController, MessagesController],
-  providers: [ConversationsService, MessagesService, BookmarksService, PresenceService, ChatGateway],
-  exports: [ConversationsService, MessagesService, BookmarksService, PresenceService],
+  controllers: [ConversationsController, MessagesController, ChatSettingsController],
+  providers: [
+    ConversationsService,
+    MessagesService,
+    BookmarksService,
+    ChatSettingsService,
+    ChatRetentionService,
+    PresenceService,
+    ChatGateway,
+  ],
+  exports: [ConversationsService, MessagesService, BookmarksService, ChatSettingsService, PresenceService],
 })
 export class ChatModule {}
