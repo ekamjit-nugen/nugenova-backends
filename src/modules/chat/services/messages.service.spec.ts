@@ -5,6 +5,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { MessagesService } from './messages.service';
+import { ChatSettingsService } from './chat-settings.service';
 import { ConversationsService } from './conversations.service';
 import { ConversationEntity } from '../entities/conversation.entity';
 import { MessageEntity, Mention } from '../entities/message.entity';
@@ -45,6 +46,13 @@ describe('MessagesService (isolation + send guards)', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         MessagesService,
+        {
+          provide: ChatSettingsService,
+          useValue: {
+            load: jest.fn().mockResolvedValue({ allowDeleteOwn: true, adminCanDeleteAny: true }),
+            isAdmin: () => false,
+          },
+        },
         {
           provide: getRepositoryToken(MessageEntity),
           useValue: {
@@ -190,6 +198,13 @@ describe('MessagesService (mentions)', () => {
       providers: [
         MessagesService,
         {
+          provide: ChatSettingsService,
+          useValue: {
+            load: jest.fn().mockResolvedValue({ allowDeleteOwn: true, adminCanDeleteAny: true }),
+            isAdmin: () => false,
+          },
+        },
+        {
           provide: getRepositoryToken(MessageEntity),
           useValue: { findOne: jest.fn().mockResolvedValue(null), save: messageSave, create: (x: any) => x },
         },
@@ -306,5 +321,101 @@ describe('MessagesService (mentions)', () => {
     );
     expect(res.id).toBe('msg1');
     expect(messageSave).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * History filtering (a member added without shared history sees only messages
+ * from their cutoff) and the org delete policy (allowDeleteOwn / adminCanDeleteAny).
+ */
+describe('MessagesService — history filtering + delete policy', () => {
+  const boot = async (settings: Record<string, unknown>, isAdmin = false) => {
+    const findAndCount = jest.fn().mockResolvedValue([[], 0]);
+    const messageFindOne = jest.fn();
+    const messageSave = jest.fn().mockImplementation((m) => m);
+    const convFindOne = jest.fn();
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        MessagesService,
+        {
+          provide: ChatSettingsService,
+          useValue: { load: jest.fn().mockResolvedValue(settings), isAdmin: () => isAdmin },
+        },
+        {
+          provide: getRepositoryToken(MessageEntity),
+          useValue: { findAndCount, findOne: messageFindOne, save: messageSave, find: jest.fn() },
+        },
+        { provide: getRepositoryToken(ConversationEntity), useValue: { findOne: convFindOne } },
+        { provide: ConversationsService, useValue: { markAsRead: jest.fn() } },
+        { provide: NotifierService, useValue: { notify: jest.fn() } },
+        { provide: PresenceService, useValue: { isOnline: jest.fn() } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile();
+    return {
+      service: moduleRef.get(MessagesService),
+      findAndCount,
+      messageFindOne,
+      convFindOne,
+    };
+  };
+
+  it('getMessages filters by the caller\'s historyFrom cutoff', async () => {
+    const cutoff = '2026-09-01T00:00:00.000Z';
+    const { service, findAndCount, convFindOne } = await boot({});
+    convFindOne.mockResolvedValue({
+      id: 'c1',
+      organizationId: 'orgA',
+      isDeleted: false,
+      participants: [{ userId: 'bob', historyFrom: cutoff }],
+    });
+    await service.getMessages('c1', 'orgA', 'bob', 1, 50, 'asc');
+    const where = findAndCount.mock.calls[0][0].where;
+    expect(where.createdAt.type).toBe('moreThanOrEqual');
+    expect(where.createdAt.value.getTime()).toBe(new Date(cutoff).getTime());
+  });
+
+  it('getMessages applies NO cutoff for a full-history member', async () => {
+    const { service, findAndCount, convFindOne } = await boot({});
+    convFindOne.mockResolvedValue({
+      id: 'c1',
+      organizationId: 'orgA',
+      isDeleted: false,
+      participants: [{ userId: 'bob', historyFrom: null }],
+    });
+    await service.getMessages('c1', 'orgA', 'bob', 1, 50, 'asc');
+    expect(findAndCount.mock.calls[0][0].where.createdAt).toBeUndefined();
+  });
+
+  it('deleteMessage is refused when the org disables member self-deletion', async () => {
+    const { service, messageFindOne, convFindOne } = await boot({
+      allowDeleteOwn: false,
+      adminCanDeleteAny: true,
+    });
+    messageFindOne.mockResolvedValue({ id: 'm1', conversationId: 'c1', senderId: 'bob', isDeleted: false });
+    convFindOne.mockResolvedValue({
+      id: 'c1', organizationId: 'orgA', isDeleted: false,
+      participants: [{ userId: 'bob', role: 'member' }],
+    });
+    await expect(service.deleteMessage('m1', 'orgA', 'bob', 'member')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('deleteMessage lets an org admin remove ANY message when adminCanDeleteAny is on', async () => {
+    const { service, messageFindOne, convFindOne } = await boot(
+      { allowDeleteOwn: true, adminCanDeleteAny: true },
+      true, // isAdmin
+    );
+    messageFindOne.mockResolvedValue({
+      id: 'm1', conversationId: 'c1', senderId: 'someone-else', isDeleted: false, readBy: [],
+    });
+    convFindOne.mockResolvedValue({
+      id: 'c1', organizationId: 'orgA', isDeleted: false,
+      participants: [{ userId: 'admin', role: 'member' }],
+    });
+    await expect(service.deleteMessage('m1', 'orgA', 'admin', 'owner')).resolves.toMatchObject({
+      message: 'Message deleted successfully',
+    });
   });
 });

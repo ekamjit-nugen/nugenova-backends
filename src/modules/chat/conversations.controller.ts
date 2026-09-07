@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ConversationsService } from './services/conversations.service';
+import { ChatSettingsService } from './services/chat-settings.service';
 import {
   AddParticipantsDto,
   ConvertToGroupDto,
@@ -23,6 +24,7 @@ import {
   CreateGroupDto,
   MarkUnreadDto,
   UpdateChannelDto,
+  UpdateGroupDto,
 } from './dto';
 
 /**
@@ -34,7 +36,10 @@ import {
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
 export class ConversationsController {
-  constructor(private readonly conversations: ConversationsService) {}
+  constructor(
+    private readonly conversations: ConversationsService,
+    private readonly settings: ChatSettingsService,
+  ) {}
 
   private orgId(req: any): string {
     const id = req.user?.organizationId;
@@ -49,23 +54,28 @@ export class ConversationsController {
   @Post('conversations/direct')
   @HttpCode(HttpStatus.CREATED)
   async createDirect(@Body() dto: CreateDirectDto, @Req() req: any) {
-    const data = await this.conversations.createDirect(
+    const orgId = this.orgId(req);
+    await this.settings.assertCanDirectMessage(
+      orgId,
+      req.user.orgRole,
       req.user.userId,
       dto.targetUserId,
-      this.orgId(req),
     );
+    const data = await this.conversations.createDirect(req.user.userId, dto.targetUserId, orgId);
     return { success: true, message: 'Direct conversation created', data };
   }
 
   @Post('conversations/group')
   @HttpCode(HttpStatus.CREATED)
   async createGroup(@Body() dto: CreateGroupDto, @Req() req: any) {
+    const orgId = this.orgId(req);
+    await this.settings.assertCanCreate(orgId, req.user.orgRole, 'group');
     const data = await this.conversations.createGroup(
       dto.name,
       dto.description,
       dto.memberIds,
       req.user.userId,
-      this.orgId(req),
+      orgId,
     );
     return { success: true, message: 'Group created successfully', data };
   }
@@ -73,11 +83,13 @@ export class ConversationsController {
   @Post('conversations/channel')
   @HttpCode(HttpStatus.CREATED)
   async createChannel(@Body() dto: CreateChannelDto, @Req() req: any) {
+    const orgId = this.orgId(req);
+    await this.settings.assertCanCreate(orgId, req.user.orgRole, 'channel');
     const data = await this.conversations.createChannel(
       dto.name,
       dto.description,
       req.user.userId,
-      this.orgId(req),
+      orgId,
       dto.memberIds,
       dto.channelType,
       dto.topic,
@@ -146,6 +158,7 @@ export class ConversationsController {
       this.orgId(req),
       dto.userIds,
       req.user.userId,
+      { shareHistory: dto.shareHistory, orgRole: req.user.orgRole },
     );
     return { success: true, message: 'Participants added successfully', data };
   }
@@ -161,8 +174,21 @@ export class ConversationsController {
       this.orgId(req),
       userId,
       req.user.userId,
+      req.user.orgRole,
     );
     return { success: true, message: 'Participant removed successfully', data };
+  }
+
+  @Patch('conversations/:id/group')
+  async updateGroup(@Param('id') id: string, @Body() dto: UpdateGroupDto, @Req() req: any) {
+    const data = await this.conversations.updateGroup(
+      id,
+      this.orgId(req),
+      req.user.userId,
+      req.user.orgRole,
+      dto,
+    );
+    return { success: true, message: 'Group updated', data };
   }
 
   @Post('conversations/:id/leave')

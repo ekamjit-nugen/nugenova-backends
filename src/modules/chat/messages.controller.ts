@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StorageService } from '../../bootstrap/storage/storage.service';
 import { MessagesService } from './services/messages.service';
 import { BookmarksService } from './services/bookmarks.service';
+import { ChatSettingsService } from './services/chat-settings.service';
 import {
   EditMessageDto,
   ForwardMessageDto,
@@ -47,6 +48,7 @@ export class MessagesController {
     private readonly messages: MessagesService,
     private readonly bookmarks: BookmarksService,
     private readonly storage: StorageService,
+    private readonly settings: ChatSettingsService,
   ) {}
 
   private orgId(req: any): string {
@@ -77,6 +79,13 @@ export class MessagesController {
     if (!file || !file.buffer?.length) {
       throw new BadRequestException('No file provided');
     }
+    // Org attachment policy: enabled? within the org's size cap? allowed type?
+    await this.settings.assertAttachmentAllowed(
+      this.orgId(req),
+      req.user.orgRole,
+      file.originalname,
+      file.size,
+    );
     const meta = await this.storage.save({
       organizationId: this.orgId(req),
       originalName: file.originalname,
@@ -147,6 +156,22 @@ export class MessagesController {
   @Post('conversations/:id/messages')
   @HttpCode(HttpStatus.CREATED)
   async send(@Param('id') id: string, @Body() dto: SendMessageDto, @Req() req: any) {
+    const orgId = this.orgId(req);
+    // Org policy gates (members only; admins/owners bypass): chat must be on, an
+    // attachment must satisfy the attachment policy, and a broadcast mention may
+    // be admin-gated.
+    await this.settings.assertChatEnabled(orgId, req.user.orgRole);
+    if (dto.fileId || dto.fileUrl) {
+      await this.settings.assertAttachmentAllowed(
+        orgId,
+        req.user.orgRole,
+        dto.fileName ?? '',
+        dto.fileSize ?? 0,
+      );
+    }
+    if ((dto.mentions ?? []).some((m) => m?.type === 'here' || m?.type === 'all')) {
+      await this.settings.assertCanBroadcast(orgId, req.user.orgRole);
+    }
     // Attachment contract: the client uploads via POST /chat/upload then echoes
     // back `fileId` (+ fileName/fileSize/fileMimeType) — it does NOT send a
     // `fileUrl` (URLs are resolved on demand by GET /chat/files/:fileId). Gate on
@@ -196,13 +221,20 @@ export class MessagesController {
 
   @Put('messages/:id')
   async edit(@Param('id') id: string, @Body() dto: EditMessageDto, @Req() req: any) {
-    const data = await this.messages.editMessage(id, this.orgId(req), req.user.userId, dto.content);
+    const orgId = this.orgId(req);
+    await this.settings.assertCanEditOwn(orgId, req.user.orgRole);
+    const data = await this.messages.editMessage(id, orgId, req.user.userId, dto.content);
     return { success: true, message: 'Message edited successfully', data };
   }
 
   @Delete('messages/:id')
   async remove(@Param('id') id: string, @Req() req: any) {
-    const result = await this.messages.deleteMessage(id, this.orgId(req), req.user.userId);
+    const result = await this.messages.deleteMessage(
+      id,
+      this.orgId(req),
+      req.user.userId,
+      req.user.orgRole,
+    );
     return { success: true, ...result };
   }
 

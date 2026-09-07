@@ -4,6 +4,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MessagesController } from './messages.controller';
 import { MessagesService } from './services/messages.service';
 import { BookmarksService } from './services/bookmarks.service';
+import { ChatSettingsService } from './services/chat-settings.service';
 import { StorageService } from '../../bootstrap/storage/storage.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -53,6 +54,16 @@ describe('MessagesController (attachments)', () => {
         { provide: MessagesService, useValue: { userCanAccessFile, sendMessage } },
         { provide: BookmarksService, useValue: {} },
         { provide: StorageService, useValue: { save, getMeta, openStream } },
+        {
+          provide: ChatSettingsService,
+          useValue: {
+            isAdmin: () => false,
+            assertChatEnabled: jest.fn(),
+            assertAttachmentAllowed: jest.fn(),
+            assertCanBroadcast: jest.fn(),
+            assertCanEditOwn: jest.fn(),
+          },
+        },
       ],
     })
       .overrideGuard(JwtAuthGuard)

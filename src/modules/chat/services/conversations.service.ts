@@ -11,6 +11,8 @@ import { In, Repository } from 'typeorm';
 import { ConversationEntity, Participant } from '../entities/conversation.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { ChatSettingsService } from './chat-settings.service';
+import { NotifierService } from '../../notification/notifier.service';
 
 /**
  * ConversationsService — direct/group/channel/self threads. Ported from the
@@ -37,7 +39,65 @@ export class ConversationsService {
     private readonly users: Repository<UserEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
+    private readonly chatSettings: ChatSettingsService,
+    private readonly notifier: NotifierService,
   ) {}
+
+  /** Best-effort membership-change notifications (never break the write). */
+  private async notifyMembership(
+    conv: ConversationEntity,
+    userIds: string[],
+    actorId: string,
+    kind: 'added' | 'removed',
+  ): Promise<void> {
+    try {
+      const recipients = userIds.filter((id) => id && id !== actorId);
+      if (!recipients.length) return;
+      const actor = (await this.nameMap([actorId])).get(actorId);
+      const who = actor ? `${actor.firstName} ${actor.lastName}`.trim() || 'Someone' : 'Someone';
+      const where = conv.name || 'a group';
+      for (const userId of recipients) {
+        await this.notifier.notify({
+          organizationId: conv.organizationId || '',
+          userId,
+          actorId,
+          type: kind === 'added' ? 'chat_group_added' : 'chat_group_removed',
+          title: kind === 'added' ? `Added to ${where}` : `Removed from ${where}`,
+          body:
+            kind === 'added'
+              ? `${who} added you to ${where}.`
+              : `${who} removed you from ${where}.`,
+          data:
+            kind === 'added'
+              ? { actionUrl: `/chat?conversation=${conv.id}`, conversationId: conv.id }
+              : { actionUrl: `/chat`, conversationId: conv.id },
+        });
+      }
+    } catch (err) {
+      this.logger.error(`notifyMembership (${kind}) failed for ${conv.id}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Gate group/channel management (add/remove members, rename, picture) on the
+   * org's `whoCanManageGroups` policy. Throws ForbiddenException when the caller
+   * isn't allowed. DMs/self threads have no management surface.
+   */
+  private async assertCanManage(
+    conv: ConversationEntity,
+    userId: string,
+    orgRole: string | null | undefined,
+  ): Promise<void> {
+    const settings = await this.chatSettings.load(conv.organizationId || '');
+    const me = conv.participants.find((p) => p.userId === userId);
+    const ok = this.chatSettings.canManageGroup(
+      settings,
+      orgRole,
+      conv.createdBy === userId,
+      me?.role,
+    );
+    if (!ok) throw new ForbiddenException('You are not allowed to manage this conversation.');
+  }
 
   /**
    * The people the caller can start a conversation with / @mention: every ACTIVE
@@ -61,6 +121,7 @@ export class ConversationsService {
         email: m.email,
         firstName: n?.firstName ?? null,
         lastName: n?.lastName ?? null,
+        avatar: n?.avatar ?? null,
         role: m.role,
         status: m.status,
       };
@@ -73,13 +134,18 @@ export class ConversationsService {
     return new Date().toISOString();
   }
 
-  private newParticipant(userId: string, role = 'member'): Participant {
+  private newParticipant(
+    userId: string,
+    role = 'member',
+    historyFrom: string | null = null,
+  ): Participant {
     const now = this.nowIso();
     return {
       userId,
       role,
       memberStatus: 'active',
       joinedAt: now,
+      historyFrom,
       lastReadAt: now,
       lastReadMessageId: null,
       muted: false,
@@ -119,19 +185,23 @@ export class ConversationsService {
     return conv;
   }
 
-  /** Resolve firstName/lastName for a set of user ids in one query. */
+  /** Resolve firstName/lastName/avatar for a set of user ids in one query. */
   private async nameMap(
     userIds: string[],
-  ): Promise<Map<string, { firstName: string; lastName: string }>> {
+  ): Promise<Map<string, { firstName: string; lastName: string; avatar: string | null }>> {
     const ids = Array.from(new Set(userIds.filter(Boolean)));
-    const map = new Map<string, { firstName: string; lastName: string }>();
+    const map = new Map<string, { firstName: string; lastName: string; avatar: string | null }>();
     if (!ids.length) return map;
     const rows = await this.users.find({
       where: { id: In(ids) },
-      select: ['id', 'firstName', 'lastName'],
+      select: ['id', 'firstName', 'lastName', 'avatar'],
     });
     for (const u of rows) {
-      map.set(u.id, { firstName: u.firstName ?? '', lastName: u.lastName ?? '' });
+      map.set(u.id, {
+        firstName: u.firstName ?? '',
+        lastName: u.lastName ?? '',
+        avatar: u.avatar ?? null,
+      });
     }
     return map;
   }
@@ -145,11 +215,17 @@ export class ConversationsService {
   private present(
     conv: ConversationEntity,
     viewerId: string,
-    names: Map<string, { firstName: string; lastName: string }>,
+    names: Map<string, { firstName: string; lastName: string; avatar: string | null }>,
   ): Record<string, unknown> {
     const participants = conv.participants.map((p) => {
       const n = names.get(p.userId);
-      return { ...p, firstName: n?.firstName ?? '', lastName: n?.lastName ?? '' };
+      return {
+        ...p,
+        firstName: n?.firstName ?? '',
+        lastName: n?.lastName ?? '',
+        avatar: n?.avatar ?? null,
+        historyFrom: p.historyFrom ?? null,
+      };
     });
     const me = participants.find((p) => p.userId === viewerId);
 
@@ -344,34 +420,76 @@ export class ConversationsService {
 
   // ── participants ────────────────────────────────────────────────────────────
 
-  async addParticipants(conversationId: string, orgId: string, userIds: string[], addedBy: string) {
+  async addParticipants(
+    conversationId: string,
+    orgId: string,
+    userIds: string[],
+    addedBy: string,
+    opts: { shareHistory?: boolean; orgRole?: string | null } = {},
+  ) {
     const conv = await this.loadForMember(conversationId, orgId, addedBy);
     if (conv.type === 'direct') {
       throw new ForbiddenException('Cannot add participants to a direct conversation');
     }
+    await this.assertCanManage(conv, addedBy, opts.orgRole);
     const existing = new Set(conv.participants.map((p) => p.userId));
     const toAdd = (userIds ?? []).filter((id) => id && !existing.has(id));
     if (!toAdd.length) return this.view(conv, addedBy);
 
-    conv.participants = [...conv.participants, ...toAdd.map((id) => this.newParticipant(id))];
+    // Share prior history unless told not to (falling back to the org default).
+    const settings = await this.chatSettings.load(orgId);
+    const share = opts.shareHistory ?? settings.shareHistoryDefault;
+    const historyFrom = share ? null : this.nowIso();
+
+    conv.participants = [
+      ...conv.participants,
+      ...toAdd.map((id) => this.newParticipant(id, 'member', historyFrom)),
+    ];
     this.syncParticipantIds(conv);
     const saved = await this.conversations.save(conv);
+    this.notifyMembership(saved, toAdd, addedBy, 'added').catch(() => undefined);
     return this.view(saved, addedBy);
   }
 
-  async removeParticipant(conversationId: string, orgId: string, userId: string, removedBy: string) {
+  async removeParticipant(
+    conversationId: string,
+    orgId: string,
+    userId: string,
+    removedBy: string,
+    orgRole?: string | null,
+  ) {
     const conv = await this.loadForMember(conversationId, orgId, removedBy);
     if (conv.type === 'direct') {
       throw new ForbiddenException('Cannot remove participants from a direct conversation');
     }
-    const remover = conv.participants.find((p) => p.userId === removedBy);
-    if (remover!.role !== 'owner' && remover!.role !== 'admin') {
-      throw new ForbiddenException('Only owners and admins can remove participants');
-    }
+    await this.assertCanManage(conv, removedBy, orgRole);
     conv.participants = conv.participants.filter((p) => p.userId !== userId);
     this.syncParticipantIds(conv);
     const saved = await this.conversations.save(conv);
+    this.notifyMembership(saved, [userId], removedBy, 'removed').catch(() => undefined);
     return this.view(saved, removedBy);
+  }
+
+  /** Rename a group/channel and/or change its picture (policy-gated). */
+  async updateGroup(
+    conversationId: string,
+    orgId: string,
+    userId: string,
+    orgRole: string | null | undefined,
+    updates: { name?: string; avatar?: string | null },
+  ) {
+    const conv = await this.loadForMember(conversationId, orgId, userId);
+    if (conv.type !== 'group' && conv.type !== 'channel') {
+      throw new BadRequestException('Only groups and channels can be renamed.');
+    }
+    await this.assertCanManage(conv, userId, orgRole);
+    if (updates.name !== undefined) {
+      const trimmed = updates.name.trim();
+      if (trimmed) conv.name = trimmed;
+    }
+    if (updates.avatar !== undefined) conv.avatar = updates.avatar || null;
+    const saved = await this.conversations.save(conv);
+    return this.view(saved, userId);
   }
 
   async leave(conversationId: string, orgId: string, userId: string) {
