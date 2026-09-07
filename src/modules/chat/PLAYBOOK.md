@@ -242,11 +242,10 @@ migration**. Run with `npm run migration:run`.
   On-holiday flow), `group-info-panel` (roster, add w/ share-history, remove,
   rename), plus the chat settings page and the avatar/chat components.
 
-> Shared-DB note: at migration time the Supabase e2e DB was being used
-> concurrently by another agent. The chat e2e run passed **5/6**; the one
-> failure was a transient `TypeORMError: Driver not Connected` thrown inside the
-> auth guard's `isRevoked` query (a mid-run connection-pool drop), **not** a
-> chat-logic assertion. Re-run sequentially at review to confirm 6/6.
+> e2e run: **12/12 passing** against the shared Supabase DB (~410s — each test
+> does real round-trips, ~30s apiece). New migrations/entities MUST be added to
+> `test/global-setup.ts` (hardcoded lists) or a fresh CI DB is missing their
+> tables — `OrgChatSettings` is registered there.
 
 ## Deferred (follow-ups)
 
