@@ -716,7 +716,13 @@ export class AttendanceService {
     rows = await this.filterByDepartment(rows, c.orgId, q.departmentId);
     const named = await this.attachEmployeeNames(rows);
     const filtered = q.search
-      ? named.filter((r: any) => (r.employeeName || '').toLowerCase().includes(q.search!.toLowerCase()))
+      ? named.filter((r: any) => {
+          const s = q.search!.toLowerCase();
+          return (
+            (r.employeeName || '').toLowerCase().includes(s) ||
+            (r.employeeEmail || '').toLowerCase().includes(s)
+          );
+        })
       : named;
     return this.attachPolicyWindow(c.orgId, filtered);
   }
@@ -1632,16 +1638,18 @@ export class AttendanceService {
   /** Attach `employeeName` to rows from the user directory (by auth userId). */
   private async attachEmployeeNames(
     rows: AttendanceEntity[],
-  ): Promise<Array<AttendanceEntity & { employeeName: string }>> {
+  ): Promise<Array<AttendanceEntity & { employeeName: string; employeeEmail: string | null }>> {
     if (!rows.length) return rows as any;
     const ids = [...new Set(rows.map((r) => r.employeeId))];
     const users = await this.users.find({ where: { id: In(ids) } });
     const nameById = new Map(
       users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim() || u.email]),
     );
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
     return rows.map((r) => ({
       ...r,
       employeeName: nameById.get(r.employeeId) || 'Unknown',
+      employeeEmail: emailById.get(r.employeeId) ?? null,
     })) as any;
   }
 
