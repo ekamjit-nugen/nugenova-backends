@@ -166,6 +166,13 @@ export class MembershipService {
       where: staffScope({ organizationId: orgId }),
       order: { createdAt: 'ASC' },
     });
+    // Default ordering: active (and any non-deactivated) members first, then
+    // deactivated ones at the bottom. Stable sort preserves join order within
+    // each group (Array.prototype.sort is stable in modern Node).
+    const isDeactivated = (s: string) => s === 'deactivated';
+    memberships.sort(
+      (a, b) => Number(isDeactivated(a.status)) - Number(isDeactivated(b.status)),
+    );
     const userIds = memberships.map((m) => m.userId).filter(Boolean) as string[];
     const users = userIds.length
       ? await this.userRepo.find({ where: { id: In(userIds) } })
