@@ -48,11 +48,14 @@ export function buildLlmProvider(config: ConfigService): LlmProvider {
       const baseUrl =
         config.get<string>('RUNPOD_BASE_URL')?.trim() ||
         `https://api.runpod.ai/v2/${endpointId}/openai/v1`;
+      const timeoutMs =
+        Number(config.get<string>('RUNPOD_TIMEOUT_MS')) || 180_000; // cold-start headroom
       return new OpenAiProvider(
         model,
         config.get<string>('RUNPOD_API_KEY') || config.get<string>('LLM_API_KEY') || '',
         baseUrl,
         'runpod',
+        timeoutMs,
       );
     }
   }

@@ -44,17 +44,26 @@ export class KnowledgeRetrievalService {
 
     // organization_id is the FIRST bound param — the tenant boundary is enforced
     // inside the SQL, never post-filtered in app code.
+    // Recall-oriented query: a conversational question shouldn't require EVERY
+    // word to appear. Take plainto_tsquery (which already stems + drops
+    // stopwords + sanitizes) and flip its `&` (AND) to `|` (OR) so ANY term
+    // matches; ts_rank_cd then ranks by how many/how strongly. Empty query →
+    // empty tsquery → no rows (and no cross-tenant leak).
     const rows = await this.chunks.query(
       `
+      WITH q AS (
+        SELECT replace(plainto_tsquery('english', $2)::text, ' & ', ' | ')::tsquery AS tsq
+      )
       SELECT
         source_id   AS "sourceId",
         source_name AS "sourceName",
         chunk_index AS "chunkIndex",
         content     AS "content",
-        ts_rank_cd(search_vector, plainto_tsquery('english', $2)) AS "rank"
-      FROM knowledge_chunks
+        ts_rank_cd(search_vector, q.tsq) AS "rank"
+      FROM knowledge_chunks, q
       WHERE organization_id = $1
-        AND search_vector @@ plainto_tsquery('english', $2)
+        AND q.tsq IS NOT NULL
+        AND search_vector @@ q.tsq
       ORDER BY "rank" DESC, chunk_index ASC
       LIMIT $3
       `,

@@ -25,6 +25,9 @@ export class OpenAiProvider implements LlmProvider {
     // Attribution label for the usage ledger — 'openai' by default, 'runpod' when
     // this adapter is pointed at the RunPod vLLM OpenAI-compatible route.
     name = 'openai',
+    // Per-adapter request timeout. RunPod Serverless cold-starts a GPU worker on
+    // the first call, so it needs a longer ceiling than the hosted default.
+    private readonly defaultTimeoutMs = DEFAULT_TIMEOUT_MS,
   ) {
     this.name = name;
   }
@@ -32,7 +35,7 @@ export class OpenAiProvider implements LlmProvider {
   async complete(messages: LlmMessage[], opts: LlmCompleteOptions = {}): Promise<LlmCompletion> {
     const model = opts.model || this.defaultModel;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? this.defaultTimeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
