@@ -14,6 +14,7 @@ import { UserEntity } from '../../auth/entities/user.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
 import { AddMemberDto } from '../dto';
 import { ROLE_NAME_TO_TIER } from '../default-roles';
+import { OrgLimitsService } from './org-limits.service';
 
 export interface MemberView {
   membershipId: string;
@@ -44,6 +45,7 @@ export class MembershipService {
     private readonly userRepo: Repository<UserEntity>,
     @InjectRepository(RoleEntity)
     private readonly roleRepo: Repository<RoleEntity>,
+    private readonly limits: OrgLimitsService,
   ) {}
 
   /**
@@ -119,6 +121,10 @@ export class MembershipService {
     if (existing) {
       throw new ConflictException('This person is already a member of the organization');
     }
+
+    // Seat cap (super-admin allocation): a genuinely NEW member must fit under
+    // the org's member limit. Re-adds hit the conflict above and never count.
+    await this.limits.assertSeatAvailable(orgId);
 
     // Resolve the enforced tier from the (optional) custom role + validate the
     // department↔role relation before writing the membership.

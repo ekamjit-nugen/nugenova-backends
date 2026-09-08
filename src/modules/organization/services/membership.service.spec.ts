@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 
 import { MembershipService } from './membership.service';
+import { OrgLimitsService } from './org-limits.service';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
@@ -21,6 +22,7 @@ describe('MembershipService (unit, no DB)', () => {
   let membershipRepo: any;
   let userRepo: any;
   let roleRepo: any;
+  let limits: any;
 
   const passthrough = () => ({
     findOne: jest.fn(),
@@ -34,12 +36,14 @@ describe('MembershipService (unit, no DB)', () => {
     membershipRepo = passthrough();
     userRepo = passthrough();
     roleRepo = passthrough();
+    limits = { assertSeatAvailable: jest.fn().mockResolvedValue(undefined) };
     const moduleRef = await Test.createTestingModule({
       providers: [
         MembershipService,
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
         { provide: getRepositoryToken(UserEntity), useValue: userRepo },
         { provide: getRepositoryToken(RoleEntity), useValue: roleRepo },
+        { provide: OrgLimitsService, useValue: limits },
       ],
     }).compile();
     service = moduleRef.get(MembershipService);

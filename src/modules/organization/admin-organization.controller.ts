@@ -6,13 +6,15 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/guards/platform-admin.guard';
 import { OrganizationService } from './services/organization.service';
-import { CreateOrganizationDto } from './dto';
+import { OrgLimitsService } from './services/org-limits.service';
+import { CreateOrganizationDto, UpdateOrgLimitsDto } from './dto';
 
 /**
  * Platform-admin organization provisioning. Effective paths (global prefix):
@@ -22,7 +24,10 @@ import { CreateOrganizationDto } from './dto';
 @Controller('admin/organizations')
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
 export class AdminOrganizationController {
-  constructor(private readonly orgService: OrganizationService) {}
+  constructor(
+    private readonly orgService: OrganizationService,
+    private readonly limits: OrgLimitsService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -76,5 +81,27 @@ export class AdminOrganizationController {
       message: `Invitation re-sent to ${data.email}`,
       data,
     };
+  }
+
+  /**
+   * Per-org limits + live usage: storage allocation (Team-Drive GB, default
+   * per-user My-Drive GB) and the member seat cap, with current usage/counts.
+   */
+  @Get(':id/limits')
+  async getLimits(@Param('id') id: string) {
+    const data = await this.limits.getOrgLimits(id);
+    return { success: true, data };
+  }
+
+  /** Set this org's storage allocation and/or member seat cap. */
+  @Put(':id/limits')
+  @HttpCode(HttpStatus.OK)
+  async setLimits(
+    @Param('id') id: string,
+    @Body() dto: UpdateOrgLimitsDto,
+    @Req() req: any,
+  ) {
+    const data = await this.limits.setOrgLimits(id, dto, req.user.userId);
+    return { success: true, message: 'Organization limits updated', data };
   }
 }

@@ -24,6 +24,7 @@ import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
 import { CreateOrganizationDto } from '../dto';
 import { PolicyService } from '../../policy/policy.service';
 import { OrgRoleService } from './org-role.service';
+import { OrgLimitsService } from './org-limits.service';
 
 export interface OrgPublic {
   id: string;
@@ -92,6 +93,7 @@ export class OrganizationService {
     private readonly policies: PolicyService,
     private readonly roles: OrgRoleService,
     private readonly notifier: NotifierService,
+    private readonly limits: OrgLimitsService,
   ) {}
 
   private frontendUrl(): string {
@@ -250,6 +252,10 @@ export class OrganizationService {
     if (owner.setupStage !== 'complete') owner.setupStage = 'complete';
     owner.isActive = true;
     await this.userRepo.save(owner);
+
+    // Seed the org's storage allocation from the platform defaults so the new
+    // tenant reflects the super admin's chosen defaults from day one.
+    await this.limits.provisionNewOrg(org.id);
 
     // Seed the org's default work-timing policy so a policy governs every
     // employee's clock-in from day one — attendance sits behind policy, and a

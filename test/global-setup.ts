@@ -59,6 +59,8 @@ import { Guardian1788034000000 } from '../src/bootstrap/database/migrations/1788
 import { ChatBookmark1788040000000 } from '../src/bootstrap/database/migrations/1788040000000-ChatBookmark';
 import { OrgChatSettings1788050000000 } from '../src/bootstrap/database/migrations/1788050000000-OrgChatSettings';
 import { CloudDrive1788080000000 } from '../src/bootstrap/database/migrations/1788080000000-CloudDrive';
+import { PlatformLimits1788090000000 } from '../src/bootstrap/database/migrations/1788090000000-PlatformLimits';
+import { PlatformSettingsEntity } from '../src/modules/admin-platform/entities/platform-settings.entity';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -154,6 +156,7 @@ module.exports = async function globalSetup(): Promise<void> {
       MessageEntity,
       ChatBookmarkEntity,
       OrgChatSettingEntity,
+      PlatformSettingsEntity,
       AcademicYearEntity,
       TermEntity,
       CourseEntity,
@@ -212,6 +215,7 @@ module.exports = async function globalSetup(): Promise<void> {
       ChatBookmark1788040000000,
       OrgChatSettings1788050000000,
       CloudDrive1788080000000,
+      PlatformLimits1788090000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

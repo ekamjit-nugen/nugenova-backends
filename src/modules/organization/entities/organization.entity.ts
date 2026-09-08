@@ -87,6 +87,18 @@ export class OrganizationEntity extends PgBaseEntity {
   @Column({ type: 'jsonb', nullable: true, default: null })
   settings: Record<string, unknown> | null;
 
+  /**
+   * Per-org PLATFORM limits set by the super admin (§ admin control plane). Only
+   * the seat cap lives here; storage allocation lives in `drive_quotas` (the
+   * physical enforcement point). `null` / absent field = inherit the platform
+   * default (`platform_settings`). `maxMembers` counts the owner + all staff
+   * members; `null` = unlimited.
+   */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  limits: {
+    maxMembers?: number | null;
+  } | null;
+
   /** Owner setup-wizard progress (0 = not started; 1..5 = current step). */
   @Column({ type: 'int', default: 0 })
   onboardingStep: number;

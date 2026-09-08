@@ -14,6 +14,7 @@ import { MailService } from '../../../bootstrap/mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { PolicyService } from '../../policy/policy.service';
 import { OrgRoleService } from './org-role.service';
+import { OrgLimitsService } from './org-limits.service';
 import { NotifierService } from '../../notification/notifier.service';
 
 /**
@@ -99,6 +100,10 @@ describe('OrganizationService (unit, no DB)', () => {
         {
           provide: NotifierService,
           useValue: { notify: jest.fn(), notifyManagers: jest.fn() },
+        },
+        {
+          provide: OrgLimitsService,
+          useValue: { provisionNewOrg: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
