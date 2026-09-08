@@ -63,6 +63,7 @@ import { PlatformLimits1788090000000 } from '../src/bootstrap/database/migration
 import { PlatformSettingsEntity } from '../src/modules/admin-platform/entities/platform-settings.entity';
 import { DriveGrants1788110000000 } from '../src/bootstrap/database/migrations/1788110000000-DriveGrants';
 import { DriveGrantEntity } from '../src/modules/storage/entities/drive-grant.entity';
+import { Assessment1788100000000 } from '../src/bootstrap/database/migrations/1788100000000-Assessment';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -89,6 +90,8 @@ import { TermEntity } from '../src/modules/academic/entities/term.entity';
 import { CourseEntity } from '../src/modules/lms/entities/course.entity';
 import { ClassSectionEntity } from '../src/modules/lms/entities/class-section.entity';
 import { EnrolmentEntity } from '../src/modules/lms/entities/enrolment.entity';
+import { AssessmentEntity } from '../src/modules/assessment/entities/assessment.entity';
+import { MarkEntity } from '../src/modules/assessment/entities/mark.entity';
 import { GuardianLinkEntity } from '../src/modules/guardian/entities/guardian-link.entity';
 import { ConsentLedgerEntity } from '../src/modules/guardian/entities/consent-ledger.entity';
 import { DriveFolderEntity } from '../src/modules/storage/entities/drive-folder.entity';
@@ -164,6 +167,8 @@ module.exports = async function globalSetup(): Promise<void> {
       CourseEntity,
       ClassSectionEntity,
       EnrolmentEntity,
+      AssessmentEntity,
+      MarkEntity,
       GuardianLinkEntity,
       ConsentLedgerEntity,
       DriveFolderEntity,
@@ -219,6 +224,7 @@ module.exports = async function globalSetup(): Promise<void> {
       OrgChatSettings1788050000000,
       CloudDrive1788080000000,
       PlatformLimits1788090000000,
+      Assessment1788100000000,
       DriveGrants1788110000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
