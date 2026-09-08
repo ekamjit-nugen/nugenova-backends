@@ -25,6 +25,7 @@ import { CloudDriveAccessGuard } from './cloud-drive-access.guard';
 import type { DriveScope } from './entities/drive-folder.entity';
 import {
   CreateFolderDto,
+  CreateGrantDto,
   CreateShareDto,
   MoveFileDto,
   MoveFolderDto,
@@ -294,6 +295,73 @@ export class DriveController {
       req.user.userId,
     );
     return { deleted: true };
+  }
+
+  /**
+   * Replace a file's CONTENT (an editor uploading a new version). Owner or an
+   * `edit` grant. The drive row (name/folder/owner) is unchanged.
+   */
+  @Put('files/:id/content')
+  @UseGuards(CloudDriveAccessGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  async replaceContent(
+    @Req() req: any,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    return this.drive.replaceFileContent({
+      organizationId: req.user.organizationId,
+      fileId: id,
+      userId: req.user.userId,
+      contentType: file.mimetype,
+      body: file.buffer,
+    });
+  }
+
+  // ─── Internal grants (share with org members) ────────────────────
+
+  /** Grant view/download/edit access on a file/folder to org members. */
+  @Post('grants')
+  @UseGuards(CloudDriveAccessGuard)
+  async grant(@Req() req: any, @Body() body: CreateGrantDto) {
+    return this.drive.grantAccess({
+      organizationId: req.user.organizationId,
+      actorId: req.user.userId,
+      actorName: this.displayName(req),
+      targetType: body.targetType,
+      targetId: body.targetId,
+      granteeUserIds: body.granteeUserIds,
+      permission: body.permission,
+    });
+  }
+
+  /** Who currently has access to a target (for the manage-access panel). */
+  @Get('grants')
+  @UseGuards(CloudDriveAccessGuard)
+  async listGrants(
+    @Req() req: any,
+    @Query('targetType') targetType?: string,
+    @Query('targetId') targetId?: string,
+  ) {
+    if ((targetType !== 'file' && targetType !== 'folder') || !targetId) {
+      throw new BadRequestException('targetType and targetId are required');
+    }
+    return this.drive.listGrants(req.user.organizationId, targetType, targetId);
+  }
+
+  @Delete('grants/:id')
+  @UseGuards(CloudDriveAccessGuard)
+  async revokeGrant(@Req() req: any, @Param('id') id: string) {
+    await this.drive.revokeGrant(req.user.organizationId, id, req.user.userId);
+    return { revoked: true };
+  }
+
+  /** Files + folders shared WITH the current user. */
+  @Get('shared-with-me')
+  @UseGuards(CloudDriveAccessGuard)
+  async sharedWithMe(@Req() req: any) {
+    return this.drive.listSharedWithMe(req.user.organizationId, req.user.userId);
   }
 
   // ─── External shares (management) ────────────────────────────────

@@ -17,6 +17,7 @@ import { DriveFolderEntity, DriveScope } from './entities/drive-folder.entity';
 import { DriveFileEntity } from './entities/drive-file.entity';
 import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
+import { DriveGrantEntity, GrantPermission } from './entities/drive-grant.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
 import { ConversationEntity } from '../chat/entities/conversation.entity';
@@ -63,6 +64,8 @@ export class DriveService {
     private readonly shares: Repository<DriveShareEntity>,
     @InjectRepository(DriveQuotaEntity)
     private readonly quotas: Repository<DriveQuotaEntity>,
+    @InjectRepository(DriveGrantEntity)
+    private readonly grants: Repository<DriveGrantEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(DocumentFileEntity)
@@ -639,6 +642,17 @@ export class DriveService {
         },
       )
       .execute();
+
+    // Drop internal grants pointing at any deleted folder/file in the subtree.
+    const grantTargets = [...folderIds, ...fileIds];
+    if (grantTargets.length) {
+      await this.grants
+        .createQueryBuilder()
+        .delete()
+        .where('organization_id = :orgId', { orgId: organizationId })
+        .andWhere('target_id IN (:...ids)', { ids: grantTargets })
+        .execute();
+    }
   }
 
   private async collectSubtreeFolderIds(
@@ -1093,8 +1107,8 @@ export class DriveService {
     if (!clean || clean.length > 255) {
       throw new BadRequestException('Invalid file name');
     }
-    const ownerId = this.ownerFor(scope, userId);
-    const file = await this.getOwnedFile(organizationId, fileId, scope, ownerId);
+    // Owner OR an org member with an 'edit' grant may rename.
+    const file = await this.resolveFileForWrite(organizationId, fileId, userId);
     file.name = clean;
     return this.files.save(file);
   }
@@ -1185,6 +1199,279 @@ export class DriveService {
       { organizationId, targetType: 'file', targetId: fileId },
       { revoked: true },
     );
+    // Also drop any internal grants (they'd otherwise dangle in "Shared with me").
+    await this.grants.delete({ organizationId, targetType: 'file', targetId: fileId });
+  }
+
+  // ─── Internal grants (share with org members) ────────────────────
+  //
+  // Give another org member view/download/edit access to a file/folder WITHOUT a
+  // public link. The grant is the discoverability record ("Shared with me") and
+  // authorizes a non-owner on the authenticated endpoints. `edit` additionally
+  // permits rename + content replace (delete/move stay owner-only).
+
+  /** The owner (or team) of a target may manage its grants. */
+  private async assertCanManageShares(
+    organizationId: string,
+    targetType: 'file' | 'folder',
+    targetId: string,
+    userId: string,
+  ): Promise<DriveScope> {
+    if (targetType === 'file') {
+      const f = await this.files.findOne({
+        where: { id: targetId, organizationId, isDeleted: false },
+      });
+      if (!f) throw new NotFoundException('File not found');
+      if (f.scope === 'personal' && f.ownerId !== userId) {
+        throw new ForbiddenException('Only the owner can share this file');
+      }
+      return f.scope;
+    }
+    const fo = await this.folders.findOne({
+      where: { id: targetId, organizationId, isDeleted: false },
+    });
+    if (!fo) throw new NotFoundException('Folder not found');
+    if (fo.scope === 'personal' && fo.ownerId !== userId) {
+      throw new ForbiddenException('Only the owner can share this folder');
+    }
+    return fo.scope;
+  }
+
+  async grantAccess(opts: {
+    organizationId: string;
+    actorId: string;
+    actorName?: string | null;
+    targetType: 'file' | 'folder';
+    targetId: string;
+    granteeUserIds: string[];
+    permission: GrantPermission;
+  }): Promise<{ granted: number }> {
+    const scope = await this.assertCanManageShares(
+      opts.organizationId,
+      opts.targetType,
+      opts.targetId,
+      opts.actorId,
+    );
+    const grantees = [...new Set(opts.granteeUserIds)].filter(
+      (u) => u && u !== opts.actorId,
+    );
+    let granted = 0;
+    for (const granteeUserId of grantees) {
+      const member = await this.memberships.findOne({
+        where: { organizationId: opts.organizationId, userId: granteeUserId },
+      });
+      if (!member) continue; // never grant to a non-member
+      // Sharing an item with someone means they must be able to open it — so
+      // ensure the grantee has Cloud Drive access (they'd otherwise be blocked by
+      // CloudDriveAccessGuard and never see the "Shared with me" item).
+      const cd = (member.cloudDrive as any) || {};
+      if (!cd.enabled) {
+        member.cloudDrive = {
+          ...cd,
+          enabled: true,
+          grantedAt: new Date().toISOString(),
+          grantedBy: opts.actorId,
+          viaShare: true,
+        };
+        await this.memberships.save(member);
+      }
+      const existing = await this.grants.findOne({
+        where: {
+          organizationId: opts.organizationId,
+          targetType: opts.targetType,
+          targetId: opts.targetId,
+          granteeUserId,
+        },
+      });
+      if (existing) {
+        existing.permission = opts.permission;
+        existing.grantedBy = opts.actorId;
+        existing.grantedByName = opts.actorName ?? existing.grantedByName ?? null;
+        await this.grants.save(existing);
+      } else {
+        await this.grants.save(
+          this.grants.create({
+            organizationId: opts.organizationId,
+            targetType: opts.targetType,
+            targetId: opts.targetId,
+            scope,
+            granteeUserId,
+            permission: opts.permission,
+            grantedBy: opts.actorId,
+            grantedByName: opts.actorName ?? null,
+          }),
+        );
+      }
+      granted++;
+      // Best-effort in-app notification to the grantee.
+      const name =
+        opts.targetType === 'file'
+          ? (await this.files.findOne({ where: { id: opts.targetId } }))?.name
+          : (await this.folders.findOne({ where: { id: opts.targetId } }))?.name;
+      void this.notifier
+        .notify({
+          userId: granteeUserId,
+          organizationId: opts.organizationId,
+          actorId: opts.actorId,
+          type: 'drive_shared',
+          title: 'A file was shared with you',
+          body: `${opts.actorName || 'A teammate'} shared "${name ?? 'an item'}" with you`,
+          data: { actionUrl: '/storage' },
+          priority: 'normal',
+        })
+        .catch(() => undefined);
+    }
+    return { granted };
+  }
+
+  /** Who currently has an internal grant on a target (for the manage-access UI). */
+  async listGrants(
+    organizationId: string,
+    targetType: 'file' | 'folder',
+    targetId: string,
+  ): Promise<
+    Array<{ id: string; granteeUserId: string; permission: GrantPermission }>
+  > {
+    const rows = await this.grants.find({
+      where: { organizationId, targetType, targetId },
+      order: { createdAt: 'ASC' },
+    });
+    return rows.map((g) => ({
+      id: g.id,
+      granteeUserId: g.granteeUserId,
+      permission: g.permission,
+    }));
+  }
+
+  async revokeGrant(
+    organizationId: string,
+    grantId: string,
+    actorId: string,
+  ): Promise<void> {
+    const g = await this.grants.findOne({ where: { id: grantId, organizationId } });
+    if (!g) throw new NotFoundException('Grant not found');
+    // The grantor, the owner of the target, or the grantee themselves may revoke.
+    let canManage = g.grantedBy === actorId || g.granteeUserId === actorId;
+    if (!canManage) {
+      try {
+        await this.assertCanManageShares(organizationId, g.targetType, g.targetId, actorId);
+        canManage = true;
+      } catch {
+        /* not the owner */
+      }
+    }
+    if (!canManage) throw new ForbiddenException('You cannot revoke this share');
+    await this.grants.delete({ id: grantId, organizationId });
+  }
+
+  /** Files + folders shared WITH the current user (the "Shared with me" surface). */
+  async listSharedWithMe(
+    organizationId: string,
+    userId: string,
+  ): Promise<{
+    files: Array<
+      DriveFileEntity & { permission: GrantPermission; sharedByName: string | null; grantId: string }
+    >;
+    folders: Array<{
+      id: string;
+      name: string;
+      permission: GrantPermission;
+      sharedByName: string | null;
+      grantId: string;
+    }>;
+  }> {
+    const rows = await this.grants.find({
+      where: { organizationId, granteeUserId: userId },
+      order: { createdAt: 'DESC' },
+    });
+    const files: any[] = [];
+    const folders: any[] = [];
+    for (const g of rows) {
+      if (g.targetType === 'file') {
+        const f = await this.files.findOne({
+          where: { id: g.targetId, organizationId, isDeleted: false },
+        });
+        if (f) files.push({ ...f, permission: g.permission, sharedByName: g.grantedByName, grantId: g.id });
+      } else {
+        const fo = await this.folders.findOne({
+          where: { id: g.targetId, organizationId, isDeleted: false },
+        });
+        if (fo)
+          folders.push({
+            id: fo.id,
+            name: fo.name,
+            permission: g.permission,
+            sharedByName: g.grantedByName,
+            grantId: g.id,
+          });
+      }
+    }
+    return { files, folders };
+  }
+
+  /**
+   * Resolve a file the user may WRITE to (rename / replace content): the owner of
+   * a personal file, anyone for a team file, or a member holding an `edit` grant.
+   * Throws 403 otherwise.
+   */
+  private async resolveFileForWrite(
+    organizationId: string,
+    fileId: string,
+    userId: string,
+  ): Promise<DriveFileEntity> {
+    const file = await this.files.findOne({
+      where: { id: fileId, organizationId, isDeleted: false },
+    });
+    if (!file) throw new NotFoundException('File not found');
+    const isOwner = file.scope === 'team' ? true : file.ownerId === userId;
+    if (isOwner) return file;
+    const grant = await this.grants.findOne({
+      where: { organizationId, targetType: 'file', targetId: fileId, granteeUserId: userId },
+    });
+    if (grant && grant.permission === 'edit') return file;
+    throw new ForbiddenException('You do not have edit access to this file');
+  }
+
+  /**
+   * Replace a file's CONTENT with new bytes (an editor uploading a new version).
+   * The drive row (name, folder, scope, owner) is unchanged; only the bytes +
+   * size + mime are swapped. Requires ownership or an `edit` grant.
+   */
+  async replaceFileContent(opts: {
+    organizationId: string;
+    fileId: string;
+    userId: string;
+    contentType?: string;
+    body: Buffer;
+  }): Promise<DriveFileEntity> {
+    if (!opts.body?.length) throw new BadRequestException('Empty file');
+    const file = await this.resolveFileForWrite(
+      opts.organizationId,
+      opts.fileId,
+      opts.userId,
+    );
+    // Quota is checked against the owner's scope for the delta.
+    const delta = opts.body.length - file.size;
+    if (delta > 0) {
+      await this.assertScopeQuota(
+        opts.organizationId,
+        file.scope,
+        file.ownerId ?? opts.userId,
+        delta,
+      );
+    }
+    const stored = await this.storage.save({
+      organizationId: opts.organizationId,
+      originalName: file.name,
+      mimeType: opts.contentType || file.mimeType,
+      buffer: opts.body,
+      uploadedBy: opts.userId,
+      category: 'drive',
+    });
+    file.storageFileId = stored.id;
+    file.size = stored.size;
+    file.mimeType = stored.mimeType;
+    return this.files.save(file);
   }
 
   // ─── External shares (management) ────────────────────────────────

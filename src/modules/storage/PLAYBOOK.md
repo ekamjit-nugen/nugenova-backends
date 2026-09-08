@@ -84,6 +84,30 @@ Indexing is idempotent per **(storageFileId, scope, ownerId)**.
 - **Seam:** deleting a chat message doesn't live-unbridge its attachment; the
   next backfill prunes it. A message-deleted → prune listener could close this.
 
+## Internal sharing (share with org members)
+
+Distinct from the external `drive_shares` token links: a **grant** (`drive_grants`)
+gives another org member access to a file/folder WITHOUT a public link.
+
+- Permissions: `view`, `download`, `edit`. **edit** = view + download + rename +
+  replace content (`PUT /storage/files/:id/content`). Delete and move stay with
+  the owner — an editor can change a document, not relocate or destroy it.
+- The grant is the discoverability + authorization record: the grantee finds the
+  item under **`GET /storage/shared-with-me`**, and `renameFile` /
+  `replaceFileContent` authorize a non-owner holding an `edit` grant
+  (`resolveFileForWrite`). View/download already work for any org member via the
+  org-scoped byte endpoints.
+- **Granting auto-enables the grantee's Cloud Drive access** (`cloudDrive.enabled`,
+  `viaShare: true`) — you can't meaningfully share with someone who is then blocked
+  by `CloudDriveAccessGuard`.
+- Only the target's owner (personal) — or any member for a team item — may grant
+  (`assertCanManageShares`). Grantor, owner, or the grantee themselves may revoke.
+- Grants are cleaned up when the file/folder is deleted.
+- Routes: `POST /storage/grants` · `GET /storage/grants?targetType=&targetId=` ·
+  `DELETE /storage/grants/:id` · `GET /storage/shared-with-me`.
+- Seam: browsing a shared *folder's* contents as a grantee isn't wired yet
+  (listFiles is owner-scoped); shared files are fully functional.
+
 ## Access control
 
 `CloudDriveAccessGuard` (runs after `JwtAuthGuard`) gates the authenticated

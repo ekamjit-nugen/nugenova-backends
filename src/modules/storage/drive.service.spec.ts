@@ -11,6 +11,7 @@ import { DriveFolderEntity } from './entities/drive-folder.entity';
 import { DriveFileEntity } from './entities/drive-file.entity';
 import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
+import { DriveGrantEntity } from './entities/drive-grant.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
 import { ConversationEntity } from '../chat/entities/conversation.entity';
@@ -33,6 +34,7 @@ describe('DriveService', () => {
   let fileRepo: any;
   let shareRepo: any;
   let quotaRepo: any;
+  let grantRepo: any;
   let membershipRepo: any;
   let documentFileRepo: any;
   let conversationRepo: any;
@@ -83,6 +85,14 @@ describe('DriveService', () => {
       create: jest.fn().mockImplementation((x) => x),
       save: jest.fn().mockImplementation(async (x) => x),
     };
+    grantRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockImplementation((x) => x),
+      save: jest.fn().mockImplementation(async (x) => ({ id: 'grant1', ...x })),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      createQueryBuilder: jest.fn().mockReturnValue(makeQb({})),
+    };
     membershipRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       find: jest.fn().mockResolvedValue([]),
@@ -115,6 +125,7 @@ describe('DriveService', () => {
         { provide: getRepositoryToken(DriveFileEntity), useValue: fileRepo },
         { provide: getRepositoryToken(DriveShareEntity), useValue: shareRepo },
         { provide: getRepositoryToken(DriveQuotaEntity), useValue: quotaRepo },
+        { provide: getRepositoryToken(DriveGrantEntity), useValue: grantRepo },
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
         { provide: getRepositoryToken(DocumentFileEntity), useValue: documentFileRepo },
         { provide: getRepositoryToken(ConversationEntity), useValue: conversationRepo },
@@ -394,6 +405,62 @@ describe('DriveService', () => {
       const res = await service.getPreviewPdf('orgA', 'file1');
       expect(res.name).toBe('report.pdf');
       expect(storage.openStream).toHaveBeenCalled();
+    });
+  });
+
+  describe('internal grants (share with org members)', () => {
+    it('grants access to a member on a file the actor owns', async () => {
+      fileRepo.findOne.mockResolvedValue({ id: 'f1', organizationId: 'orgA', scope: 'personal', ownerId: 'owner1', name: 'doc.pdf' });
+      membershipRepo.findOne.mockResolvedValue({ userId: 'bob' }); // bob is a member
+      grantRepo.findOne.mockResolvedValue(null); // no existing grant
+      const res = await service.grantAccess({
+        organizationId: 'orgA', actorId: 'owner1', actorName: 'Owner',
+        targetType: 'file', targetId: 'f1', granteeUserIds: ['bob', 'owner1'], permission: 'edit',
+      });
+      expect(res.granted).toBe(1); // self (owner1) is skipped
+      expect(grantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ granteeUserId: 'bob', permission: 'edit', scope: 'personal' }),
+      );
+    });
+
+    it('refuses to share a personal file the actor does not own', async () => {
+      fileRepo.findOne.mockResolvedValue({ id: 'f1', organizationId: 'orgA', scope: 'personal', ownerId: 'someone-else' });
+      await expect(
+        service.grantAccess({
+          organizationId: 'orgA', actorId: 'intruder', targetType: 'file', targetId: 'f1',
+          granteeUserIds: ['bob'], permission: 'view',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets an edit-grantee rename, but blocks a view-grantee', async () => {
+      // Non-owner file; grantee holds an edit grant → rename allowed.
+      fileRepo.findOne.mockResolvedValue({ id: 'f1', organizationId: 'orgA', scope: 'personal', ownerId: 'owner1', name: 'old' });
+      grantRepo.findOne.mockResolvedValue({ permission: 'edit', granteeUserId: 'bob' });
+      const renamed = await service.renameFile('orgA', 'f1', 'personal', 'bob', 'new');
+      expect(renamed.name).toBe('new');
+
+      // Same file, only a view grant → rename forbidden.
+      grantRepo.findOne.mockResolvedValue({ permission: 'view', granteeUserId: 'bob' });
+      await expect(service.renameFile('orgA', 'f1', 'personal', 'bob', 'x')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lists items shared with me with permission + sharer', async () => {
+      grantRepo.find.mockResolvedValue([
+        { id: 'g1', targetType: 'file', targetId: 'f1', permission: 'download', grantedByName: 'Alice' },
+        { id: 'g2', targetType: 'folder', targetId: 'fo1', permission: 'edit', grantedByName: 'Alice' },
+      ]);
+      fileRepo.findOne.mockResolvedValue({ id: 'f1', name: 'shared.pdf', organizationId: 'orgA', isDeleted: false });
+      folderRepo.findOne.mockResolvedValue({ id: 'fo1', name: 'Shared folder', organizationId: 'orgA', isDeleted: false });
+      const res = await service.listSharedWithMe('orgA', 'bob');
+      expect(res.files[0]).toMatchObject({ id: 'f1', permission: 'download', sharedByName: 'Alice', grantId: 'g1' });
+      expect(res.folders[0]).toMatchObject({ id: 'fo1', permission: 'edit', sharedByName: 'Alice' });
+    });
+
+    it('lets the grantee revoke their own grant', async () => {
+      grantRepo.findOne.mockResolvedValue({ id: 'g1', organizationId: 'orgA', grantedBy: 'owner1', granteeUserId: 'bob', targetType: 'file', targetId: 'f1' });
+      await service.revokeGrant('orgA', 'g1', 'bob');
+      expect(grantRepo.delete).toHaveBeenCalledWith({ id: 'g1', organizationId: 'orgA' });
     });
   });
 });

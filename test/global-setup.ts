@@ -61,6 +61,8 @@ import { OrgChatSettings1788050000000 } from '../src/bootstrap/database/migratio
 import { CloudDrive1788080000000 } from '../src/bootstrap/database/migrations/1788080000000-CloudDrive';
 import { PlatformLimits1788090000000 } from '../src/bootstrap/database/migrations/1788090000000-PlatformLimits';
 import { PlatformSettingsEntity } from '../src/modules/admin-platform/entities/platform-settings.entity';
+import { DriveGrants1788110000000 } from '../src/bootstrap/database/migrations/1788110000000-DriveGrants';
+import { DriveGrantEntity } from '../src/modules/storage/entities/drive-grant.entity';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -168,6 +170,7 @@ module.exports = async function globalSetup(): Promise<void> {
       DriveFileEntity,
       DriveShareEntity,
       DriveQuotaEntity,
+      DriveGrantEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -216,6 +219,7 @@ module.exports = async function globalSetup(): Promise<void> {
       OrgChatSettings1788050000000,
       CloudDrive1788080000000,
       PlatformLimits1788090000000,
+      DriveGrants1788110000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

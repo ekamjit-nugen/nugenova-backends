@@ -13,6 +13,7 @@ import { DriveFolderEntity } from './entities/drive-folder.entity';
 import { DriveFileEntity } from './entities/drive-file.entity';
 import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
+import { DriveGrantEntity } from './entities/drive-grant.entity';
 import { DriveService } from './drive.service';
 import { DriveController } from './drive.controller';
 import { DrivePublicController } from './drive-public.controller';
@@ -47,6 +48,7 @@ import {
       DriveFileEntity,
       DriveShareEntity,
       DriveQuotaEntity,
+      DriveGrantEntity, // internal share grants (share with org members)
       OrgMembershipEntity, // per-user grant + quota override (cloudDrive jsonb)
       DocumentFileEntity, // shared byte store — read to bridge chat/onboarding files
       ConversationEntity, // read-only: route a chat file by DM vs group

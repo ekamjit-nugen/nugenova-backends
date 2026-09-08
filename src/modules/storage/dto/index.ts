@@ -152,3 +152,22 @@ export class SetSettingsDto {
   @Max(10_000)
   quotaGb?: number;
 }
+
+// ── internal grants (share with org members) ────────────────────────────────
+
+const GRANT_PERMS = ['view', 'download', 'edit'] as const;
+
+export class CreateGrantDto {
+  @IsIn(['file', 'folder'])
+  targetType: 'file' | 'folder';
+
+  @IsString()
+  targetId: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  granteeUserIds: string[];
+
+  @IsIn(GRANT_PERMS)
+  permission: 'view' | 'download' | 'edit';
+}
