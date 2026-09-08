@@ -44,6 +44,32 @@ matches the chat/media private-byte posture and is a deliberate divergence from
 the legacy Mongo module (which returned presigned GETs for both in-app preview
 and share downloads).
 
+## Bridge: files shared elsewhere in the app
+
+Chat attachments, onboarding docs, etc. are uploaded through the shared
+`StorageService` and land in `document_files` — they would otherwise never show
+up in Cloud Drive, which by design is the one vault for *all* the org's files. So
+the drive **indexes** those existing bytes: one `drive_files` row per
+`document_files` row, pointing at the **same `storageFileId`** (no byte copy).
+They land in **Team Drive** under a per-source root folder (`Shared in Chat`,
+`Onboarding`, else `Org Files`) so the whole org sees them.
+
+- **Live** — `DriveChatBridge` (`@OnEvent(CHAT_MESSAGE_NEW)`, same in-process
+  `EventEmitter2` bus the chat gateway uses) indexes an attachment the moment its
+  message is sent. Chat stays decoupled: it emits, the drive reacts. Best-effort;
+  a bridge error never affects message delivery.
+- **Backfill** — `POST /storage/backfill` (DriveAdminGuard) walks the org's
+  `document_files` and indexes everything not yet bridged. Idempotent per
+  `storageFileId`, so live + backfill can race or repeat with no duplicates.
+- Bridged rows are `systemManaged: false` (so they're browsable) and `team`
+  scope. Deleting one soft-deletes the *index* row only; the underlying
+  `document_files` bytes are untouched (still owned by chat/onboarding).
+- **Trade-off / seam:** a chat DM attachment becomes org-visible via Team Drive.
+  That matches the current ask ("show every file shared in the org"); a future
+  refinement could route DM attachments to the participants' My Drive instead.
+- Tenant isolation still holds: the bridge only ever indexes a `document_files`
+  row whose `organizationId` matches, so another tenant's files never leak in.
+
 ## Access control
 
 `CloudDriveAccessGuard` (runs after `JwtAuthGuard`) gates the authenticated
@@ -84,7 +110,8 @@ Authenticated (JwtAuthGuard + CloudDriveAccessGuard unless noted):
   `PATCH files/:id/move` · `GET files/:id/raw` (inline byte stream) ·
   `GET files/:id/pdf` (preview) · `DELETE files/:id`.
 - `POST shares` · `GET shares` · `DELETE shares/:id`.
-- Admin (DriveAdminGuard): `GET access` · `PUT access/:userId` · `PUT settings`.
+- Admin (DriveAdminGuard): `GET access` · `PUT access/:userId` · `PUT settings` ·
+  `POST backfill` (index existing chat/onboarding files — see Bridge above).
 
 Public (no login — org from the token):
 

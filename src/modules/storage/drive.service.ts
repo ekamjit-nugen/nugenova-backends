@@ -18,6 +18,7 @@ import { DriveFileEntity } from './entities/drive-file.entity';
 import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
 import { StorageService } from '../../bootstrap/storage/storage.service';
 import { NotifierService } from '../notification/notifier.service';
 import {
@@ -61,6 +62,8 @@ export class DriveService {
     private readonly quotas: Repository<DriveQuotaEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
+    @InjectRepository(DocumentFileEntity)
+    private readonly documentFiles: Repository<DocumentFileEntity>,
     private readonly storage: StorageService,
     private readonly notifier: NotifierService,
     @Inject(OFFICE_CONVERT_PROVIDER)
@@ -706,6 +709,150 @@ export class DriveService {
       isDeleted: false,
     });
     return this.files.save(file);
+  }
+
+  // ─── Bridge from the shared byte store (chat / onboarding / …) ────
+  //
+  // Files uploaded elsewhere in the app (chat attachments, onboarding docs)
+  // live in `document_files` via the shared StorageService and would otherwise
+  // never surface in Cloud Drive. The drive is meant to be the single vault for
+  // "all the storage files", so we INDEX those existing bytes here: one
+  // `drive_files` row per `document_files` row, pointing at the SAME
+  // `storageFileId` (no byte copy). They land in Team Drive under a per-source
+  // system folder so the whole org can see them.
+  //
+  // Trade-off (documented seam): a chat DM attachment becomes visible to the
+  // org via Team Drive. That matches the current product ask ("show every file
+  // shared in the org"); a future refinement could route DM attachments to the
+  // participants' My Drive instead of the team pool.
+
+  private readonly SYSTEM_ACTOR = 'system';
+
+  /** Stable Team-Drive landing folder for a bridged file's source category. */
+  private bridgeFolderName(category: string | null | undefined): string {
+    switch (category) {
+      case 'chat':
+        return 'Shared in Chat';
+      case 'onboarding':
+        return 'Onboarding';
+      default:
+        return 'Org Files';
+    }
+  }
+
+  /**
+   * Find (or create) a browsable Team-Drive root folder by name. Used only for
+   * the bridge landing folders; created as `systemManaged: false` so members can
+   * actually see the bridged files when they open Team Drive.
+   */
+  private async ensureTeamFolder(
+    organizationId: string,
+    name: string,
+  ): Promise<DriveFolderEntity> {
+    const existing = await this.folders.findOne({
+      where: {
+        organizationId,
+        scope: 'team',
+        ownerId: IsNull(),
+        parentFolderId: IsNull(),
+        name,
+        isDeleted: false,
+      },
+    });
+    if (existing) return existing;
+    return this.folders.save(
+      this.folders.create({
+        organizationId,
+        name,
+        scope: 'team',
+        ownerId: null,
+        parentFolderId: null,
+        path: `/${name}`,
+        createdBy: this.SYSTEM_ACTOR,
+        createdByName: 'System',
+        systemManaged: false,
+        isDeleted: false,
+      }),
+    );
+  }
+
+  /**
+   * Idempotently index ONE `document_files` row into Team Drive. Keyed on
+   * `storageFileId`, so re-running (backfill + the live listener racing, repeat
+   * backfills) never creates duplicates. Returns the drive row, or null when the
+   * source doc is missing/deleted.
+   */
+  async bridgeDocumentFile(
+    documentFileId: string,
+    opts: { organizationId?: string } = {},
+  ): Promise<DriveFileEntity | null> {
+    const existing = await this.files.findOne({
+      where: { storageFileId: documentFileId, isDeleted: false },
+    });
+    if (existing) return existing;
+
+    const doc = await this.documentFiles.findOne({
+      where: { id: documentFileId, isDeleted: false },
+    });
+    if (!doc) return null;
+    if (opts.organizationId && doc.organizationId !== opts.organizationId) {
+      // Cross-org guard: never index another tenant's bytes.
+      return null;
+    }
+    // Files already born in the drive are indexed at upload time — skip.
+    if (doc.category === 'drive') return null;
+
+    const folder = await this.ensureTeamFolder(
+      doc.organizationId,
+      this.bridgeFolderName(doc.category),
+    );
+    return this.files.save(
+      this.files.create({
+        organizationId: doc.organizationId,
+        name: doc.originalName,
+        size: doc.size,
+        mimeType: doc.mimeType,
+        storageFileId: doc.id,
+        scope: 'team',
+        ownerId: null,
+        folderId: folder.id,
+        uploadedBy: doc.uploadedBy || this.SYSTEM_ACTOR,
+        uploadedByName: null,
+        tags: doc.category ? [doc.category] : [],
+        systemManaged: false,
+        isDeleted: false,
+      }),
+    );
+  }
+
+  /**
+   * One-shot backfill: index every not-yet-bridged `document_files` row for an
+   * org into Team Drive. Safe to re-run (idempotent per `storageFileId`).
+   */
+  async backfillFromStorage(
+    organizationId: string,
+  ): Promise<{ scanned: number; linked: number; skipped: number }> {
+    const docs = await this.documentFiles.find({
+      where: { organizationId, isDeleted: false },
+    });
+    let linked = 0;
+    let skipped = 0;
+    for (const doc of docs) {
+      const already = await this.files.findOne({
+        where: { storageFileId: doc.id, isDeleted: false },
+      });
+      if (already || doc.category === 'drive') {
+        skipped++;
+        continue;
+      }
+      const row = await this.bridgeDocumentFile(doc.id, { organizationId });
+      if (row) linked++;
+      else skipped++;
+    }
+    this.log.log(
+      `backfillFromStorage(${organizationId}): scanned=${docs.length} linked=${linked} skipped=${skipped}`,
+    );
+    return { scanned: docs.length, linked, skipped };
   }
 
   private async resolveTargetFolder(

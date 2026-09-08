@@ -363,4 +363,16 @@ export class DriveController {
     await this.drive.setOrgStorageSettings(req.user.organizationId, body);
     return { ok: true };
   }
+
+  /**
+   * Backfill: index every existing shared file (chat attachments, onboarding
+   * docs) for this org into Team Drive. Idempotent — safe to re-run. New chat
+   * uploads are bridged live, so this is only needed once (or after importing
+   * legacy data).
+   */
+  @Post('backfill')
+  @UseGuards(DriveAdminGuard)
+  async backfill(@Req() req: any) {
+    return this.drive.backfillFromStorage(req.user.organizationId);
+  }
 }

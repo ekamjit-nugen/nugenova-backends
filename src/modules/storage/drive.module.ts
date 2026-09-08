@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { StorageModule } from '../../bootstrap/storage/storage.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
 
 import { DriveFolderEntity } from './entities/drive-folder.entity';
 import { DriveFileEntity } from './entities/drive-file.entity';
@@ -15,6 +16,7 @@ import { DriveController } from './drive.controller';
 import { DrivePublicController } from './drive-public.controller';
 import { CloudDriveAccessGuard } from './cloud-drive-access.guard';
 import { DriveAdminGuard } from './drive-admin.guard';
+import { DriveChatBridge } from './drive-chat-bridge';
 import {
   NoopOfficeConvertProvider,
   OFFICE_CONVERT_PROVIDER,
@@ -44,11 +46,13 @@ import {
       DriveShareEntity,
       DriveQuotaEntity,
       OrgMembershipEntity, // per-user grant + quota override (cloudDrive jsonb)
+      DocumentFileEntity, // shared byte store — read to bridge chat/onboarding files
     ]),
   ],
   controllers: [DriveController, DrivePublicController],
   providers: [
     DriveService,
+    DriveChatBridge, // indexes chat attachments into Team Drive as they're sent
     CloudDriveAccessGuard,
     DriveAdminGuard,
     { provide: OFFICE_CONVERT_PROVIDER, useClass: NoopOfficeConvertProvider },
