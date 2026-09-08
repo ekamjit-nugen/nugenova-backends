@@ -13,6 +13,7 @@ import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
 import { DriveGrantEntity } from './entities/drive-grant.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { UserEntity } from '../auth/entities/user.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
 import { ConversationEntity } from '../chat/entities/conversation.entity';
 import { MessageEntity } from '../chat/entities/message.entity';
@@ -36,6 +37,7 @@ describe('DriveService', () => {
   let quotaRepo: any;
   let grantRepo: any;
   let membershipRepo: any;
+  let userRepo: any;
   let documentFileRepo: any;
   let conversationRepo: any;
   let messageRepo: any;
@@ -98,6 +100,7 @@ describe('DriveService', () => {
       find: jest.fn().mockResolvedValue([]),
       save: jest.fn().mockImplementation(async (x) => x),
     };
+    userRepo = { find: jest.fn().mockResolvedValue([]) };
     documentFileRepo = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
@@ -127,6 +130,7 @@ describe('DriveService', () => {
         { provide: getRepositoryToken(DriveQuotaEntity), useValue: quotaRepo },
         { provide: getRepositoryToken(DriveGrantEntity), useValue: grantRepo },
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
+        { provide: getRepositoryToken(UserEntity), useValue: userRepo },
         { provide: getRepositoryToken(DocumentFileEntity), useValue: documentFileRepo },
         { provide: getRepositoryToken(ConversationEntity), useValue: conversationRepo },
         { provide: getRepositoryToken(MessageEntity), useValue: messageRepo },

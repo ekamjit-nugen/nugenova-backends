@@ -8,7 +8,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { Readable } from 'stream';
 import * as bcrypt from 'bcrypt';
@@ -19,6 +19,7 @@ import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
 import { DriveGrantEntity, GrantPermission } from './entities/drive-grant.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { UserEntity } from '../auth/entities/user.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
 import { ConversationEntity } from '../chat/entities/conversation.entity';
 import { MessageEntity } from '../chat/entities/message.entity';
@@ -68,6 +69,8 @@ export class DriveService {
     private readonly grants: Repository<DriveGrantEntity>,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
+    @InjectRepository(UserEntity)
+    private readonly users: Repository<UserEntity>,
     @InjectRepository(DocumentFileEntity)
     private readonly documentFiles: Repository<DocumentFileEntity>,
     @InjectRepository(ConversationEntity)
@@ -1074,7 +1077,31 @@ export class DriveService {
       skip: (Math.max(1, page) - 1) * take,
       take,
     });
+    await this.fillUploaderNames(data);
     return { data, total };
+  }
+
+  /**
+   * Fill `uploadedByName` from the users table for rows that only have the
+   * uploader's id (e.g. bridged chat/onboarding files were stored with a null
+   * name). Batched by distinct uploader id; falls back to the email, then the id.
+   */
+  async fillUploaderNames(files: DriveFileEntity[]): Promise<void> {
+    const missing = [
+      ...new Set(files.filter((f) => !f.uploadedByName && f.uploadedBy).map((f) => f.uploadedBy)),
+    ];
+    if (!missing.length) return;
+    const users = await this.users.find({ where: { id: In(missing) } });
+    const nameById = new Map<string, string>();
+    for (const u of users) {
+      const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+      nameById.set(u.id, name || u.email || u.id);
+    }
+    for (const f of files) {
+      if (!f.uploadedByName && f.uploadedBy) {
+        f.uploadedByName = nameById.get(f.uploadedBy) ?? f.uploadedByName;
+      }
+    }
   }
 
   private async getOwnedFile(
@@ -1406,6 +1433,7 @@ export class DriveService {
           });
       }
     }
+    await this.fillUploaderNames(files);
     return { files, folders };
   }
 

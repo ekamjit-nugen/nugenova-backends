@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { StorageModule } from '../../bootstrap/storage/storage.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { UserEntity } from '../auth/entities/user.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
 import { ConversationEntity } from '../chat/entities/conversation.entity';
 import { MessageEntity } from '../chat/entities/message.entity';
@@ -50,6 +51,8 @@ import {
       DriveQuotaEntity,
       DriveGrantEntity, // internal share grants (share with org members)
       OrgMembershipEntity, // per-user grant + quota override (cloudDrive jsonb)
+      UserEntity, // resolve uploader display names for the file listing
+
       DocumentFileEntity, // shared byte store — read to bridge chat/onboarding files
       ConversationEntity, // read-only: route a chat file by DM vs group
       MessageEntity, // read-only: message-driven backfill of sent attachments
