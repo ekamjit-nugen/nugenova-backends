@@ -11,6 +11,7 @@ import { OrgMembershipEntity } from './org-membership.entity';
 import { UserEntity } from './user.entity';
 import { RoleEntity } from './role.entity';
 import { MembershipService } from '../../organization/services/membership.service';
+import { OrgLimitsService } from '../../organization/services/org-limits.service';
 
 /**
  * The education-vertical guard. `staffScope()` narrows any OrgMembership query to
@@ -82,6 +83,7 @@ describe('person-type / staffScope (unit, no DB)', () => {
           { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
           { provide: getRepositoryToken(UserEntity), useValue: userRepo },
           { provide: getRepositoryToken(RoleEntity), useValue: roleRepo },
+          { provide: OrgLimitsService, useValue: { assertSeatAvailable: jest.fn() } },
         ],
       }).compile();
       const service = moduleRef.get(MembershipService);
