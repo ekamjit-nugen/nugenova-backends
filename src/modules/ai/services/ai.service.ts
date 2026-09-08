@@ -52,7 +52,13 @@ export class AiService {
    */
   async complete(
     messages: LlmMessage[],
-    opts: LlmCompleteOptions & { feature?: AiUsageFeature } = {},
+    opts: LlmCompleteOptions & {
+      feature?: AiUsageFeature;
+      /** Requested AI tier (0–3, default 1) — checked against the org ceiling. */
+      tier?: number;
+      /** Learner membership id → gates on guardian consent when present. */
+      subjectMembershipId?: string | null;
+    } = {},
     caller: AiCaller = {},
   ): Promise<AiCompletionResult> {
     const feature: AiUsageFeature = opts.feature ?? 'complete';
@@ -62,13 +68,15 @@ export class AiService {
       feature,
     };
 
-    // ── 1. policy gate (tier ceiling / consent seam) ──
+    // ── 1. policy gate (tier ceiling / consent / usage ceiling) ──
     const decision = await this.policy.check({
       organizationId: ctx.organizationId ?? null,
       userId: ctx.userId ?? null,
       feature,
       model: opts.model || this.provider.defaultModel,
       approxPromptChars: messages.reduce((n, m) => n + (m.content?.length || 0), 0),
+      tier: opts.tier ?? 1,
+      subjectMembershipId: opts.subjectMembershipId ?? null,
     });
     if (!decision.allowed) {
       throw new ForbiddenException(decision.reason || 'AI usage is not permitted for this organization.');

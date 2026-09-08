@@ -36,11 +36,16 @@ export class AiUsage1788120000000 implements MigrationInterface {
         "status" character varying NOT NULL DEFAULT 'success',
         "prompt" text,
         "output" text,
+        "retain_until" TIMESTAMP WITH TIME ZONE,
         CONSTRAINT "PK_ai_usage_events" PRIMARY KEY ("id")
       )
     `);
     await queryRunner.query(
       `CREATE INDEX "ix_ai_usage_events_org_created" ON "ai_usage_events" ("organization_id", "created_at")`,
+    );
+    // Purge scan lookup: rows whose PII TTL has elapsed.
+    await queryRunner.query(
+      `CREATE INDEX "ix_ai_usage_events_retain_until" ON "ai_usage_events" ("retain_until")`,
     );
     await queryRunner.query(
       `CREATE INDEX "ix_ai_usage_events_org_user" ON "ai_usage_events" ("organization_id", "user_id")`,
@@ -74,6 +79,7 @@ export class AiUsage1788120000000 implements MigrationInterface {
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP INDEX IF EXISTS "public"."uq_ai_usage_counters_org_period"`);
     await queryRunner.query(`DROP TABLE "ai_usage_counters"`);
+    await queryRunner.query(`DROP INDEX IF EXISTS "public"."ix_ai_usage_events_retain_until"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "public"."ix_ai_usage_events_org_feature"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "public"."ix_ai_usage_events_org_user"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "public"."ix_ai_usage_events_org_created"`);

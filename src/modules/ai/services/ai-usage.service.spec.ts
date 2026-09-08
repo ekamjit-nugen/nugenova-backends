@@ -1,9 +1,12 @@
 import { Test } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { AiUsageService, promptFromMessages } from './ai-usage.service';
 import { AiUsageEventEntity } from '../entities/ai-usage-event.entity';
 import { AiUsageCounterEntity } from '../entities/ai-usage-counter.entity';
+import { UserEntity } from '../../auth/entities/user.entity';
+import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 
 /**
  * Unit specs for AiUsageService — the credit-metering ledger. Repos are mocked
@@ -40,6 +43,20 @@ describe('AiUsageService', () => {
             find: counterFind,
             manager: { query: counterQuery },
           },
+        },
+        {
+          provide: getRepositoryToken(UserEntity),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: getRepositoryToken(OrgMembershipEntity),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          // Default config → redacted storage, so record() writes '' for the
+          // absent prompt/output (matching the pre-existing cost/token pins).
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue(undefined) },
         },
       ],
     }).compile();

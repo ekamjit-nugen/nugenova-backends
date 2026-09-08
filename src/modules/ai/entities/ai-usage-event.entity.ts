@@ -86,11 +86,24 @@ export class AiUsageEventEntity extends PgBaseEntity {
   @Column({ type: 'varchar', default: 'success' })
   status: 'success' | 'error';
 
-  /** Full input sent to the model (system+user serialised). '' when not captured. */
+  /**
+   * Stored input sent to the model (system+user serialised). Subject to the
+   * retention/redaction policy (see AiUsageService + AI_PROMPT_STORAGE): by
+   * default TRUNCATED, not the full plaintext legacy stored forever. '' when
+   * storage is disabled or not captured.
+   */
   @Column({ type: 'text', nullable: true, default: null })
   prompt: string | null;
 
-  /** Full text the model generated. '' on error / when not captured. */
+  /** Stored text the model generated — same retention/redaction as `prompt`. */
   @Column({ type: 'text', nullable: true, default: null })
   output: string | null;
+
+  /**
+   * PII TTL — after this instant the row's prompt/output may be purged
+   * (AiUsageService.purgeExpiredEvents). Set from `AI_PROMPT_RETENTION_DAYS` at
+   * write time; `null` means "retain indefinitely" (retention disabled).
+   */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  retainUntil: Date | null;
 }

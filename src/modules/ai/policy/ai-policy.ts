@@ -28,13 +28,31 @@ export interface AiPolicyContext {
   model?: string;
   /** Rough size hint (chars of prompt) for a policy that wants to pre-estimate. */
   approxPromptChars?: number;
+  /**
+   * Requested AI tier for this call (0–3). Defaults to 1 when the caller omits
+   * it. Compared against the org's vertical-pack `aiTierCeiling`.
+   */
+  tier?: number;
+  /**
+   * Optional learner membership id whose data this call processes. When present,
+   * the policy gates on guardian consent for the AI purpose (regulated / LMS
+   * verticals). Omit for ordinary calls — the consent check is then skipped.
+   */
+  subjectMembershipId?: string | null;
 }
 
-/** A deny carries a human-readable reason surfaced to the caller (HTTP 403). */
+/**
+ * A deny carries a human-readable reason surfaced to the caller (HTTP 403).
+ *
+ * Deny `code`s the real policy ({@link TierConsentUsagePolicy}) can return:
+ *   - `tier_ceiling`  — requested tier exceeds the org's vertical-pack ceiling.
+ *   - `not_consented` — a subject was named but has no active guardian consent.
+ *   - `usage_ceiling` — the org's current-period tokens/cost exceeds its cap.
+ */
 export interface AiPolicyDecision {
   allowed: boolean;
   reason?: string;
-  /** Optional machine-readable code, e.g. 'tier_ceiling' | 'not_consented'. */
+  /** Machine-readable code, e.g. 'tier_ceiling' | 'not_consented' | 'usage_ceiling'. */
   code?: string;
 }
 
