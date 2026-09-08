@@ -24,6 +24,8 @@ export type AiUsageFeature =
   | 'project_plan'
   // knowledge module (/ai/ask — org document RAG)
   | 'org_qa'
+  // ai-chat module (/ai/chat/* — async RAG-grounded chatbot conversations)
+  | 'chatbot'
   // catch-all for a caller that did not name a feature
   | 'other';
 

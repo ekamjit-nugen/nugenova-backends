@@ -27,6 +27,7 @@ import { PlatformEventsModule } from './modules/platform-events/platform-events.
 import { DriveModule } from './modules/storage/drive.module';
 import { AiModule } from './modules/ai/ai.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
+import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 
 /**
  * Nugenova backend root module.
@@ -70,6 +71,7 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
     DriveModule,
     AiModule,
     KnowledgeModule,
+    AiChatModule,
   ],
 })
 export class AppModule {}
