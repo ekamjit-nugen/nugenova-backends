@@ -25,6 +25,7 @@ import { VerticalModule } from './modules/vertical/vertical.module';
 import { GuardianModule } from './modules/guardian/guardian.module';
 import { PlatformEventsModule } from './modules/platform-events/platform-events.module';
 import { DriveModule } from './modules/storage/drive.module';
+import { AiModule } from './modules/ai/ai.module';
 
 /**
  * Nugenova backend root module.
@@ -66,6 +67,7 @@ import { DriveModule } from './modules/storage/drive.module';
     VerticalModule,
     GuardianModule,
     DriveModule,
+    AiModule,
   ],
 })
 export class AppModule {}
