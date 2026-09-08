@@ -64,6 +64,11 @@ import { PlatformSettingsEntity } from '../src/modules/admin-platform/entities/p
 import { DriveGrants1788110000000 } from '../src/bootstrap/database/migrations/1788110000000-DriveGrants';
 import { DriveGrantEntity } from '../src/modules/storage/entities/drive-grant.entity';
 import { Assessment1788100000000 } from '../src/bootstrap/database/migrations/1788100000000-Assessment';
+// AI usage migration renumbered 1788090000000 -> 1788120000000 to avoid the
+// timestamp collision with PlatformLimits1788090000000.
+import { AiUsage1788120000000 } from '../src/bootstrap/database/migrations/1788120000000-AiUsage';
+import { KnowledgeChunks1788130000000 } from '../src/bootstrap/database/migrations/1788130000000-KnowledgeChunks';
+import { AiChat1788140000000 } from '../src/bootstrap/database/migrations/1788140000000-AiChat';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -98,6 +103,12 @@ import { DriveFolderEntity } from '../src/modules/storage/entities/drive-folder.
 import { DriveFileEntity } from '../src/modules/storage/entities/drive-file.entity';
 import { DriveShareEntity } from '../src/modules/storage/entities/drive-share.entity';
 import { DriveQuotaEntity } from '../src/modules/storage/entities/drive-quota.entity';
+import { AiUsageEventEntity } from '../src/modules/ai/entities/ai-usage-event.entity';
+import { AiUsageCounterEntity } from '../src/modules/ai/entities/ai-usage-counter.entity';
+import { KnowledgeChunkEntity } from '../src/modules/knowledge/entities/knowledge-chunk.entity';
+import { AiConversationEntity } from '../src/modules/ai-chat/entities/ai-conversation.entity';
+import { AiMessageEntity } from '../src/modules/ai-chat/entities/ai-message.entity';
+import { AiJobEntity } from '../src/modules/ai-chat/entities/ai-job.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -176,6 +187,12 @@ module.exports = async function globalSetup(): Promise<void> {
       DriveShareEntity,
       DriveQuotaEntity,
       DriveGrantEntity,
+      AiUsageEventEntity,
+      AiUsageCounterEntity,
+      KnowledgeChunkEntity,
+      AiConversationEntity,
+      AiMessageEntity,
+      AiJobEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -226,6 +243,9 @@ module.exports = async function globalSetup(): Promise<void> {
       PlatformLimits1788090000000,
       Assessment1788100000000,
       DriveGrants1788110000000,
+      AiUsage1788120000000,
+      KnowledgeChunks1788130000000,
+      AiChat1788140000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
