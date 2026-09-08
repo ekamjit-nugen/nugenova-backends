@@ -28,6 +28,16 @@ export interface MemberView {
   departmentId: string | null;
   status: string;
   joinedAt: Date | null;
+  // Profile + HR attributes (for the member detail view).
+  avatar: string | null;
+  phoneNumber: string | null;
+  jobTitle: string | null;
+  location: string | null;
+  timezone: string | null;
+  dateOfBirth: Date | null;
+  employeeCode: string | null;
+  employmentType: string | null;
+  joiningDate: Date | null;
 }
 
 /**
@@ -269,6 +279,15 @@ export class MembershipService {
       departmentId: m.departmentId ?? null,
       status: m.status,
       joinedAt: m.joinedAt,
+      avatar: user?.avatar ?? null,
+      phoneNumber: user?.phoneNumber ?? null,
+      jobTitle: user?.jobTitle ?? null,
+      location: user?.location ?? null,
+      timezone: user?.timezone ?? null,
+      dateOfBirth: user?.dateOfBirth ?? null,
+      employeeCode: m.employeeCode ?? null,
+      employmentType: m.employmentType ?? null,
+      joiningDate: m.joiningDate ?? null,
     };
   }
 }
