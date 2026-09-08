@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { staffScope } from '../auth/entities/person-type';
 import { RoleEntity } from '../auth/entities/role.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { permMapAllows } from '../organization/guards/require-permission.decorator';
@@ -238,8 +239,11 @@ export class NotifierService {
     resource: string,
     action: string,
   ): Promise<string[]> {
+    // staffScope: approvers/managers are STAFF. Students/guardians can never
+    // hold a staff permission, but scope the enumeration to staff by construction
+    // so a future custom-role grant can't route staff approvals to a non-staff.
     const members = await this.memberships.find({
-      where: { organizationId: orgId, status: 'active' },
+      where: staffScope({ organizationId: orgId, status: 'active' }),
     });
     const out = new Set<string>();
     const roleCache = new Map<string, RoleEntity | null>();

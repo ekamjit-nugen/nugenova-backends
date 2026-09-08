@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { staffScope } from '../../auth/entities/person-type';
 import { SessionEntity } from '../../auth/entities/session.entity';
 import { DepartmentEntity } from '../entities/department.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
@@ -23,6 +24,7 @@ import { orgInviteEmail } from '../../../bootstrap/mail/email-layout';
 import { CreateOrganizationDto } from '../dto';
 import { PolicyService } from '../../policy/policy.service';
 import { OrgRoleService } from './org-role.service';
+import { OrgLimitsService } from './org-limits.service';
 
 export interface OrgPublic {
   id: string;
@@ -91,6 +93,7 @@ export class OrganizationService {
     private readonly policies: PolicyService,
     private readonly roles: OrgRoleService,
     private readonly notifier: NotifierService,
+    private readonly limits: OrgLimitsService,
   ) {}
 
   private frontendUrl(): string {
@@ -250,6 +253,10 @@ export class OrganizationService {
     owner.isActive = true;
     await this.userRepo.save(owner);
 
+    // Seed the org's storage allocation from the platform defaults so the new
+    // tenant reflects the super admin's chosen defaults from day one.
+    await this.limits.provisionNewOrg(org.id);
+
     // Seed the org's default work-timing policy so a policy governs every
     // employee's clock-in from day one — attendance sits behind policy, and a
     // required work-timing policy must apply to every employee. Best-effort.
@@ -343,7 +350,11 @@ export class OrganizationService {
     const pub = this.toPublic(org);
     const now = new Date();
 
-    const memberships = await this.membershipRepo.find({ where: { organizationId: id } });
+    // staffScope: account-level member counts + security signals are STAFF seats;
+    // students/guardians must not inflate them (mirrors the platform seat metric).
+    const memberships = await this.membershipRepo.find({
+      where: staffScope({ organizationId: id }),
+    });
     const active = memberships.filter((m) => m.status === 'active');
     const invited = memberships.filter((m) => m.status !== 'active');
     const userIds = [...new Set(memberships.map((m) => m.userId).filter((x): x is string => !!x))];

@@ -165,7 +165,9 @@ export class AdminTermsController {
     return { success: true, message: 'Terms & Conditions deleted' };
   }
 
-  /** Stream a T&C's PDF for the super-admin preview. */
+  /** Open a T&C for the super-admin preview — a PDF's bytes, or an HTML doc
+   *  rendered as an inline page (both served `inline` so the browser displays
+   *  them in a new tab rather than downloading). */
   @Get(':id/document')
   async document(@Param('id') id: string, @Res() res: Response) {
     const { buffer, mimeType, filename } = await this.terms.getDocumentBytes(id);

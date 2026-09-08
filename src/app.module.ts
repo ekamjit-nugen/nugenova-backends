@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PostgresModule } from './bootstrap/database/postgres.module';
 import { MailModule } from './bootstrap/mail/mail.module';
 import { StorageModule } from './bootstrap/storage/storage.module';
@@ -19,6 +18,13 @@ import { TimesheetModule } from './modules/timesheet/timesheet.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { AcademicModule } from './modules/academic/academic.module';
+import { LmsModule } from './modules/lms/lms.module';
+import { AssessmentModule } from './modules/assessment/assessment.module';
+import { VerticalModule } from './modules/vertical/vertical.module';
+import { GuardianModule } from './modules/guardian/guardian.module';
+import { PlatformEventsModule } from './modules/platform-events/platform-events.module';
+import { DriveModule } from './modules/storage/drive.module';
 
 /**
  * Nugenova backend root module.
@@ -32,10 +38,11 @@ import { ChatModule } from './modules/chat/chat.module';
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     PostgresModule,
     ScheduleModule.forRoot(),
-    // In-process event bus — chat message broadcasts flow gateway-ward through
-    // this (MessagesService emits, ChatGateway @OnEvent listens) to avoid a
-    // service↔gateway circular dependency. Registered once here.
-    EventEmitterModule.forRoot(),
+    // Global domain event bus (§08 layer 1) — registers EventEmitterModule.forRoot()
+    // ONCE (like ScheduleModule) and exposes DomainEventsService. Also serves chat's
+    // in-process bus: MessagesService emits and ChatGateway @OnEvent listens through
+    // this same EventEmitter2, avoiding a service↔gateway circular dependency.
+    PlatformEventsModule,
     MailModule,
     StorageModule,
     TermsModule,
@@ -53,6 +60,12 @@ import { ChatModule } from './modules/chat/chat.module';
     NotificationModule,
     AdminPlatformModule,
     ChatModule,
+    AcademicModule,
+    LmsModule,
+    AssessmentModule,
+    VerticalModule,
+    GuardianModule,
+    DriveModule,
   ],
 })
 export class AppModule {}

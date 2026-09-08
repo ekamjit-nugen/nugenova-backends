@@ -12,6 +12,7 @@ import {
   Min,
   MinLength,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 
 const trimLowerEmail = ({ value }: { value: unknown }) =>
@@ -261,4 +262,58 @@ export class AddMemberDto {
   @IsString()
   @MaxLength(80)
   lastName?: string;
+}
+
+/**
+ * Super-admin: platform-wide defaults applied to new orgs + used as the fallback
+ * for any org without an explicit override. All fields optional (partial update).
+ */
+export class UpdatePlatformSettingsDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  defaultOrgStorageGb?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  defaultUserQuotaGb?: number;
+
+  // Seat cap for a new org (owner + members). null = unlimited.
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  defaultMaxMembers?: number | null;
+}
+
+/**
+ * Super-admin: per-org limit overrides. Storage writes `drive_quotas`; the seat
+ * cap writes `organizations.limits`. Any field omitted = leave unchanged; send
+ * `maxMembers: null` to clear the override back to the platform default…
+ * unlimited only if the platform default is unlimited.
+ */
+export class UpdateOrgLimitsDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  teamQuotaGb?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  defaultUserQuotaGb?: number;
+
+  // null clears the per-org override (inherit platform default).
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  maxMembers?: number | null;
 }

@@ -9,6 +9,7 @@ import { HolidayEntity } from '../entities/holiday.entity';
 import { WfhRequestEntity } from '../entities/wfh-request.entity';
 import { OrganizationEntity } from '../../organization/entities/organization.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { staffScope } from '../../auth/entities/person-type';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
 import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
@@ -373,9 +374,14 @@ export class AttendanceCronService {
     return dow === 0 || dow === 6;
   }
 
-  /** Active members who actually clock time (excludes owner/admin/super-admin). */
+  /** Active STAFF who actually clock time (excludes owner/admin/super-admin). */
   private async trackableMembers(orgId: string): Promise<OrgMembershipEntity[]> {
-    const members = await this.memberships.find({ where: { organizationId: orgId, status: 'active' } });
+    // staffScope: the absence/nudge/digest roster tracks STAFF attendance only —
+    // students must never land in the staff attendance roster (the same class of
+    // defect as the past null-org attendance leak).
+    const members = await this.memberships.find({
+      where: staffScope({ organizationId: orgId, status: 'active' }),
+    });
     return members.filter((m) => m.userId && !NON_TRACKED_ROLES.has((m.role || '').toLowerCase()));
   }
 

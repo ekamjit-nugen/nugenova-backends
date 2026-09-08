@@ -23,6 +23,30 @@ export class OrganizationEntity extends PgBaseEntity {
   status: string; // active | suspended  (suspended = manually halted)
 
   /**
+   * Which VERTICAL this tenant runs as — §04/§12. The vertical is a CONFIG
+   * choice, not a fork: the same platform serves a `company` (default, so every
+   * existing org is unchanged), a `school`, a `college` or a `coaching` centre.
+   * It selects the default vertical pack (vocabulary, enabled modules, AI tier
+   * ceiling) resolved by `VerticalPackService`.
+   */
+  @Column({ type: 'varchar', length: 16, default: 'company' })
+  orgType: string; // company | school | college | coaching
+
+  /**
+   * Per-org OVERRIDES on top of the orgType's default pack (§12). Shape:
+   * `{ vocabulary?: Record<string,string>, enabledModules?: string[],
+   * aiTierCeiling?: number }`. Null = use the orgType default verbatim. The
+   * resolver deep-merges this over the default so an org can rename a term or
+   * cap its AI tier without forking anything.
+   */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  verticalPack: {
+    vocabulary?: Record<string, string>;
+    enabledModules?: string[];
+    aiTierCeiling?: number;
+  } | null;
+
+  /**
    * The Terms & Conditions document (from the T&C library) this org must accept.
    * Chosen by the super admin at creation. Required in practice; nullable only
    * for defensive back-compat. See `PlatformTermsEntity`.
@@ -62,6 +86,18 @@ export class OrganizationEntity extends PgBaseEntity {
    */
   @Column({ type: 'jsonb', nullable: true, default: null })
   settings: Record<string, unknown> | null;
+
+  /**
+   * Per-org PLATFORM limits set by the super admin (§ admin control plane). Only
+   * the seat cap lives here; storage allocation lives in `drive_quotas` (the
+   * physical enforcement point). `null` / absent field = inherit the platform
+   * default (`platform_settings`). `maxMembers` counts the owner + all staff
+   * members; `null` = unlimited.
+   */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  limits: {
+    maxMembers?: number | null;
+  } | null;
 
   /** Owner setup-wizard progress (0 = not started; 1..5 = current step). */
   @Column({ type: 'int', default: 0 })

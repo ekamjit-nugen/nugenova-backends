@@ -51,8 +51,19 @@ import { NotificationEmailChannel1787990000000 } from '../src/bootstrap/database
 import { OrgNotificationSettings1788000000000 } from '../src/bootstrap/database/migrations/1788000000000-OrgNotificationSettings';
 import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/migrations/1788010000000-OrgNotificationTypes';
 import { Chat1788020000000 } from '../src/bootstrap/database/migrations/1788020000000-Chat';
+import { MembershipPersonType1788030000000 } from '../src/bootstrap/database/migrations/1788030000000-MembershipPersonType';
+import { Academic1788031000000 } from '../src/bootstrap/database/migrations/1788031000000-Academic';
+import { Lms1788032000000 } from '../src/bootstrap/database/migrations/1788032000000-Lms';
+import { VerticalPack1788033000000 } from '../src/bootstrap/database/migrations/1788033000000-VerticalPack';
+import { Guardian1788034000000 } from '../src/bootstrap/database/migrations/1788034000000-Guardian';
 import { ChatBookmark1788040000000 } from '../src/bootstrap/database/migrations/1788040000000-ChatBookmark';
 import { OrgChatSettings1788050000000 } from '../src/bootstrap/database/migrations/1788050000000-OrgChatSettings';
+import { CloudDrive1788080000000 } from '../src/bootstrap/database/migrations/1788080000000-CloudDrive';
+import { PlatformLimits1788090000000 } from '../src/bootstrap/database/migrations/1788090000000-PlatformLimits';
+import { PlatformSettingsEntity } from '../src/modules/admin-platform/entities/platform-settings.entity';
+import { DriveGrants1788110000000 } from '../src/bootstrap/database/migrations/1788110000000-DriveGrants';
+import { DriveGrantEntity } from '../src/modules/storage/entities/drive-grant.entity';
+import { Assessment1788100000000 } from '../src/bootstrap/database/migrations/1788100000000-Assessment';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -74,6 +85,19 @@ import { ConversationEntity } from '../src/modules/chat/entities/conversation.en
 import { MessageEntity } from '../src/modules/chat/entities/message.entity';
 import { ChatBookmarkEntity } from '../src/modules/chat/entities/chat-bookmark.entity';
 import { OrgChatSettingEntity } from '../src/modules/chat/entities/org-chat-setting.entity';
+import { AcademicYearEntity } from '../src/modules/academic/entities/academic-year.entity';
+import { TermEntity } from '../src/modules/academic/entities/term.entity';
+import { CourseEntity } from '../src/modules/lms/entities/course.entity';
+import { ClassSectionEntity } from '../src/modules/lms/entities/class-section.entity';
+import { EnrolmentEntity } from '../src/modules/lms/entities/enrolment.entity';
+import { AssessmentEntity } from '../src/modules/assessment/entities/assessment.entity';
+import { MarkEntity } from '../src/modules/assessment/entities/mark.entity';
+import { GuardianLinkEntity } from '../src/modules/guardian/entities/guardian-link.entity';
+import { ConsentLedgerEntity } from '../src/modules/guardian/entities/consent-ledger.entity';
+import { DriveFolderEntity } from '../src/modules/storage/entities/drive-folder.entity';
+import { DriveFileEntity } from '../src/modules/storage/entities/drive-file.entity';
+import { DriveShareEntity } from '../src/modules/storage/entities/drive-share.entity';
+import { DriveQuotaEntity } from '../src/modules/storage/entities/drive-quota.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -137,6 +161,21 @@ module.exports = async function globalSetup(): Promise<void> {
       MessageEntity,
       ChatBookmarkEntity,
       OrgChatSettingEntity,
+      PlatformSettingsEntity,
+      AcademicYearEntity,
+      TermEntity,
+      CourseEntity,
+      ClassSectionEntity,
+      EnrolmentEntity,
+      AssessmentEntity,
+      MarkEntity,
+      GuardianLinkEntity,
+      ConsentLedgerEntity,
+      DriveFolderEntity,
+      DriveFileEntity,
+      DriveShareEntity,
+      DriveQuotaEntity,
+      DriveGrantEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -176,8 +215,17 @@ module.exports = async function globalSetup(): Promise<void> {
       OrgNotificationSettings1788000000000,
       OrgNotificationTypes1788010000000,
       Chat1788020000000,
+      MembershipPersonType1788030000000,
+      Academic1788031000000,
+      Lms1788032000000,
+      VerticalPack1788033000000,
+      Guardian1788034000000,
       ChatBookmark1788040000000,
       OrgChatSettings1788050000000,
+      CloudDrive1788080000000,
+      PlatformLimits1788090000000,
+      Assessment1788100000000,
+      DriveGrants1788110000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

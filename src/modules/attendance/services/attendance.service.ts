@@ -17,6 +17,7 @@ import {
 } from '../entities/attendance.entity';
 import { HolidayEntity } from '../entities/holiday.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { staffScope } from '../../auth/entities/person-type';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
 import { PolicyService } from '../../policy/policy.service';
@@ -329,12 +330,14 @@ export class AttendanceService {
    */
   private async departmentScopeIds(c: Caller): Promise<Set<string> | null> {
     if (!c.permScoped || !c.departmentScopeId) return null;
+    // staffScope: a department-scoped lead's attendance surface is their STAFF
+    // team — never students who may later share the department.
     const members = await this.memberships.find({
-      where: {
+      where: staffScope({
         organizationId: c.orgId,
         departmentId: c.departmentScopeId,
         status: 'active',
-      },
+      }),
     });
     const ids = new Set(
       members.map((m) => m.userId).filter(Boolean) as string[],

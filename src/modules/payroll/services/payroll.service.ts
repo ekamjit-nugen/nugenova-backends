@@ -13,6 +13,7 @@ import { SalaryStructureEntity, SalaryComponent, RecurringDeduction } from '../e
 import { PayslipEntity, PayslipLine } from '../entities/payslip.entity';
 import { PayrollRunEntity, PayrollRunStatus } from '../entities/payroll-run.entity';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
+import { staffScope } from '../../auth/entities/person-type';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { OrganizationEntity } from '../../organization/entities/organization.entity';
 import { DepartmentEntity } from '../../organization/entities/department.entity';
@@ -73,8 +74,12 @@ export class PayrollService {
 
   /** Set (or revise) an employee's monthly salary — supersedes the active one. */
   async setSalary(orgId: string, userId: string, dto: SetSalaryDto, actorId: string) {
+    // staffScope: only STAFF may be put on payroll. This is the single entry
+    // point that creates a salary row, so gating it here keeps students (and
+    // guardians) off the payroll roster by construction — the roster reads only
+    // salaried members, and a non-staff member can never acquire a salary.
     const member = await this.memberships.findOne({
-      where: { organizationId: orgId, userId, status: 'active' },
+      where: staffScope({ organizationId: orgId, userId, status: 'active' }),
     });
     if (!member) throw new NotFoundException('That member is not in your organization');
 

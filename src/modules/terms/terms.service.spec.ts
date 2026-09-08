@@ -13,8 +13,10 @@ import { StorageService } from '../../bootstrap/storage/storage.service';
 describe('TermsService (unit, no DB)', () => {
   let service: TermsService;
   let repo: any;
+  let storage: any;
 
   const build = async () => {
+    storage = { getMeta: jest.fn(), getBytes: jest.fn() };
     repo = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
@@ -34,7 +36,7 @@ describe('TermsService (unit, no DB)', () => {
       providers: [
         TermsService,
         { provide: getRepositoryToken(PlatformTermsEntity), useValue: repo },
-        { provide: StorageService, useValue: { getMeta: jest.fn(), getBytes: jest.fn() } },
+        { provide: StorageService, useValue: storage },
       ],
     }).compile();
     service = moduleRef.get(TermsService);
@@ -142,6 +144,43 @@ describe('TermsService (unit, no DB)', () => {
       await service.remove('t1');
       expect(repo.delete).toHaveBeenCalledWith({ id: 't1' });
       expect(service.getVersion('t1')).toBeNull();
+    });
+  });
+
+  describe('getDocumentBytes', () => {
+    it('renders an HTML T&C as an inline text/html page (not a 404)', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 't1', title: 'Master Agreement', version: 2, kind: 'html',
+        text: '<h2>Section 1</h2><p>Body</p>', fileId: null, isActive: true, updatedAt: new Date(),
+      });
+      const out = await service.getDocumentBytes('t1');
+      expect(out.mimeType).toMatch(/text\/html/);
+      const html = out.buffer.toString('utf-8');
+      expect(html).toContain('<h2>Section 1</h2>'); // the actual terms body is rendered
+      expect(html).toContain('Master Agreement');
+      expect(html).toContain('Version 2');
+    });
+
+    it('escapes the title in the rendered page', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 't2', title: '<script>x</script>', version: 1, kind: 'html',
+        text: 'ok', fileId: null, isActive: false, updatedAt: new Date(),
+      });
+      const html = (await service.getDocumentBytes('t2')).buffer.toString('utf-8');
+      expect(html).toContain('&lt;script&gt;');
+      expect(html).not.toContain('<title><script>');
+    });
+
+    it('serves a PDF T&C from the byte store', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 't3', title: 'PDF Terms', version: 1, kind: 'pdf',
+        text: null, fileId: 'file9', isActive: false, updatedAt: new Date(),
+      });
+      storage.getMeta.mockResolvedValue({ id: 'file9', mimeType: 'application/pdf', originalName: 'terms.pdf' });
+      storage.getBytes.mockResolvedValue(Buffer.from('%PDF-1.4'));
+      const out = await service.getDocumentBytes('t3');
+      expect(out.mimeType).toBe('application/pdf');
+      expect(out.filename).toBe('terms.pdf');
     });
   });
 });

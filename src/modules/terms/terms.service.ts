@@ -297,18 +297,59 @@ export class TermsService implements OnModuleInit {
     return this.get(termsId);
   }
 
-  /** Raw bytes of a T&C's PDF (by id), for the streaming endpoints. */
+  /**
+   * A T&C document's bytes for the super-admin preview endpoint — for BOTH kinds:
+   *   - `pdf`  → the stored PDF bytes.
+   *   - `html` → the document's HTML wrapped in a minimal readable page, served as
+   *     `text/html` so the browser renders it in a new tab (opening the actual
+   *     terms, not a download). Previously this threw for html docs, so clicking
+   *     an HTML T&C opened nothing.
+   */
   async getDocumentBytes(termsId: string): Promise<{
     buffer: Buffer;
     mimeType: string;
     filename: string;
   }> {
     const doc = await this.get(termsId);
-    if (doc.kind !== 'pdf' || !doc.fileId) {
-      throw new NotFoundException('This terms document is not a PDF');
+
+    if (doc.kind === 'pdf') {
+      if (!doc.fileId) {
+        throw new NotFoundException('This terms document has no PDF file');
+      }
+      const file = await this.storage.getMeta(doc.fileId);
+      const buffer = await this.storage.getBytes(file);
+      return { buffer, mimeType: file.mimeType, filename: file.originalName };
     }
-    const file = await this.storage.getMeta(doc.fileId);
-    const buffer = await this.storage.getBytes(file);
-    return { buffer, mimeType: file.mimeType, filename: file.originalName };
+
+    // html kind — render the stored HTML as a standalone, readable page.
+    const title = doc.title || 'Terms & Conditions';
+    const safeTitle = title.replace(
+      /[&<>"']/g,
+      (ch) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] as string,
+    );
+    const page =
+      `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+      `<title>${safeTitle} · v${doc.version}</title>` +
+      `<style>` +
+      `body{margin:0;background:#f1f5f9;color:#0f172a;` +
+      `font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}` +
+      `.wrap{max-width:820px;margin:0 auto;padding:40px 24px}` +
+      `.card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:40px 44px;` +
+      `box-shadow:0 1px 3px rgba(15,23,42,.06)}` +
+      `h1{font-size:24px;margin:0 0 4px}.meta{color:#64748b;font-size:13px;margin:0 0 24px}` +
+      `.doc h1,.doc h2,.doc h3{line-height:1.3}.doc img{max-width:100%}` +
+      `.doc table{border-collapse:collapse}.doc td,.doc th{border:1px solid #e2e8f0;padding:6px 10px}` +
+      `</style></head><body><div class="wrap"><div class="card">` +
+      `<h1>${safeTitle}</h1><p class="meta">Version ${doc.version}</p>` +
+      `<div class="doc">${doc.text ?? ''}</div>` +
+      `</div></div></body></html>`;
+
+    return {
+      buffer: Buffer.from(page, 'utf-8'),
+      mimeType: 'text/html; charset=utf-8',
+      filename: `${(title || 'terms').replace(/[^\w.\-]+/g, '_')}.html`,
+    };
   }
 }
