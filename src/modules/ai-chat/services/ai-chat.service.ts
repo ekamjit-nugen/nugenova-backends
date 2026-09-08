@@ -269,6 +269,7 @@ export class AiChatService implements OnModuleInit {
       const sources: AiMessageSource[] = chunks.map((c) => ({
         sourceId: c.sourceId,
         sourceName: c.sourceName,
+        sourceType: c.sourceType,
         chunkIndex: c.chunkIndex,
       }));
 

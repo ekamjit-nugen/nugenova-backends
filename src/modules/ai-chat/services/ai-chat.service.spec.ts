@@ -45,7 +45,14 @@ describe('AiChatService', () => {
     const ai = { complete };
 
     search = jest.fn().mockResolvedValue([
-      { sourceId: 's1', sourceName: 'Handbook', chunkIndex: 0, content: 'policy text', rank: 0.9 },
+      {
+        sourceId: 's1',
+        sourceName: 'Handbook',
+        sourceType: 'drive_file',
+        chunkIndex: 0,
+        content: 'policy text',
+        rank: 0.9,
+      },
     ]);
     const retrieval = { search };
 
@@ -109,7 +116,9 @@ describe('AiChatService', () => {
     expect(msg.status).toBe('done');
     expect(msg.content).toBe('the grounded answer');
     expect(msg.grounded).toBe(true);
-    expect(msg.sources).toEqual([{ sourceId: 's1', sourceName: 'Handbook', chunkIndex: 0 }]);
+    expect(msg.sources).toEqual([
+      { sourceId: 's1', sourceName: 'Handbook', sourceType: 'drive_file', chunkIndex: 0 },
+    ]);
   });
 
   it('grounded-with-fallback: no chunks → grounded=false, empty sources, still done', async () => {

@@ -6,6 +6,13 @@ export interface AiMessageSource {
   sourceId: string;
   sourceName: string;
   chunkIndex: number;
+  /**
+   * Which byte store the source lives in, so the client can open it: a
+   * Cloud-Drive file (`/storage/files/:id/raw`) or a raw document
+   * (`/media/files/:id/download`). Optional for backward-compat with rows
+   * written before this field existed — the client defaults to 'drive_file'.
+   */
+  sourceType?: 'drive_file' | 'document_file';
 }
 
 /** Lifecycle of an assistant message produced by the async worker. */

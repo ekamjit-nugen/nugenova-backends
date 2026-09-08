@@ -8,6 +8,8 @@ import { KnowledgeChunkEntity } from './entities/knowledge-chunk.entity';
 export interface RetrievedChunk {
   sourceId: string;
   sourceName: string;
+  /** Which byte store the source lives in — lets the client open the citation. */
+  sourceType: 'drive_file' | 'document_file';
   chunkIndex: number;
   content: string;
   rank: number;
@@ -57,6 +59,7 @@ export class KnowledgeRetrievalService {
       SELECT
         source_id   AS "sourceId",
         source_name AS "sourceName",
+        source_type AS "sourceType",
         chunk_index AS "chunkIndex",
         content     AS "content",
         ts_rank_cd(search_vector, q.tsq) AS "rank"
@@ -73,6 +76,7 @@ export class KnowledgeRetrievalService {
     return (rows as Array<Record<string, unknown>>).map((r) => ({
       sourceId: String(r.sourceId),
       sourceName: String(r.sourceName),
+      sourceType: r.sourceType === 'document_file' ? 'document_file' : 'drive_file',
       chunkIndex: Number(r.chunkIndex),
       content: String(r.content),
       rank: Number(r.rank),
