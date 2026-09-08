@@ -21,6 +21,7 @@ import { AcademicModule } from './modules/academic/academic.module';
 import { LmsModule } from './modules/lms/lms.module';
 import { VerticalModule } from './modules/vertical/vertical.module';
 import { GuardianModule } from './modules/guardian/guardian.module';
+import { PlatformEventsModule } from './modules/platform-events/platform-events.module';
 
 /**
  * Nugenova backend root module.
@@ -34,6 +35,8 @@ import { GuardianModule } from './modules/guardian/guardian.module';
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     PostgresModule,
     ScheduleModule.forRoot(),
+    // Global domain event bus (§08 layer 1) — registered once, like ScheduleModule.
+    PlatformEventsModule,
     MailModule,
     StorageModule,
     TermsModule,

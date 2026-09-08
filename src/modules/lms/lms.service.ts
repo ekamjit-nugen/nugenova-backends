@@ -4,10 +4,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
+import { DomainEventsService } from '../platform-events/domain-events.service';
+import { DOMAIN_EVENTS } from '../platform-events/domain-events';
 import { CourseEntity } from './entities/course.entity';
 import { ClassSectionEntity } from './entities/class-section.entity';
 import { EnrolmentEntity } from './entities/enrolment.entity';
@@ -113,6 +116,10 @@ export class LmsService {
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    // §08 layer-1 proof point: emit `enrolment.created`. @Optional so the DB-less
+    // unit spec (which provides no bus) still constructs the service; the booted
+    // app always has the global PlatformEventsModule provider.
+    @Optional() private readonly events?: DomainEventsService,
   ) {}
 
   // ── courses ─────────────────────────────────────────────────────────────────
@@ -358,6 +365,7 @@ export class LmsService {
     // The personType guard, the OTHER way round: only students enrol.
     await this.assertMembershipIsStudent(orgId, dto.studentMembershipId);
 
+    let wasNew = false;
     const saved = await this.enrolments.manager.transaction(async (tx) => {
       // Serialize concurrent enrolments to THIS class so capacity can't be raced.
       await tx.findOne(ClassSectionEntity, {
@@ -390,6 +398,7 @@ export class LmsService {
         return tx.save(EnrolmentEntity, existing);
       }
 
+      wasNew = true;
       return tx.save(
         EnrolmentEntity,
         tx.create(EnrolmentEntity, {
@@ -406,6 +415,18 @@ export class LmsService {
     this.logger.log(
       `Student ${dto.studentMembershipId} enrolled in class ${classId} (enrolment ${saved.id})`,
     );
+    // §08 layer-1: announce a fresh enrolment (re-enrol of a withdrawn row is a
+    // status transition, not a new enrolment, so it does not re-fire). Emitting
+    // never throws — a bus error can't fail the enrolment.
+    if (wasNew) {
+      this.events?.emit(DOMAIN_EVENTS.ENROLMENT_CREATED, {
+        organizationId: orgId,
+        enrolmentId: saved.id,
+        classId: klass.id,
+        studentMembershipId: dto.studentMembershipId,
+        actorId,
+      });
+    }
     return this.toEnrolmentView(saved);
   }
 
