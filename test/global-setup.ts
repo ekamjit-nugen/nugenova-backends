@@ -50,11 +50,14 @@ import { TermsActive1787980000000 } from '../src/bootstrap/database/migrations/1
 import { NotificationEmailChannel1787990000000 } from '../src/bootstrap/database/migrations/1787990000000-NotificationEmailChannel';
 import { OrgNotificationSettings1788000000000 } from '../src/bootstrap/database/migrations/1788000000000-OrgNotificationSettings';
 import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/migrations/1788010000000-OrgNotificationTypes';
+import { Chat1788020000000 } from '../src/bootstrap/database/migrations/1788020000000-Chat';
 import { MembershipPersonType1788030000000 } from '../src/bootstrap/database/migrations/1788030000000-MembershipPersonType';
 import { Academic1788031000000 } from '../src/bootstrap/database/migrations/1788031000000-Academic';
 import { Lms1788032000000 } from '../src/bootstrap/database/migrations/1788032000000-Lms';
 import { VerticalPack1788033000000 } from '../src/bootstrap/database/migrations/1788033000000-VerticalPack';
 import { Guardian1788034000000 } from '../src/bootstrap/database/migrations/1788034000000-Guardian';
+import { ChatBookmark1788040000000 } from '../src/bootstrap/database/migrations/1788040000000-ChatBookmark';
+import { OrgChatSettings1788050000000 } from '../src/bootstrap/database/migrations/1788050000000-OrgChatSettings';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -72,6 +75,10 @@ import { TaxDeclarationEntity } from '../src/modules/payroll/entities/tax-declar
 import { LeaveRequestEntity } from '../src/modules/leave/entities/leave-request.entity';
 import { LeaveBalanceEntity } from '../src/modules/leave/entities/leave-balance.entity';
 import { TimesheetEntity } from '../src/modules/timesheet/entities/timesheet.entity';
+import { ConversationEntity } from '../src/modules/chat/entities/conversation.entity';
+import { MessageEntity } from '../src/modules/chat/entities/message.entity';
+import { ChatBookmarkEntity } from '../src/modules/chat/entities/chat-bookmark.entity';
+import { OrgChatSettingEntity } from '../src/modules/chat/entities/org-chat-setting.entity';
 import { AcademicYearEntity } from '../src/modules/academic/entities/academic-year.entity';
 import { TermEntity } from '../src/modules/academic/entities/term.entity';
 import { CourseEntity } from '../src/modules/lms/entities/course.entity';
@@ -138,6 +145,10 @@ module.exports = async function globalSetup(): Promise<void> {
       PayslipEntity,
       PayrollRunEntity,
       TaxDeclarationEntity,
+      ConversationEntity,
+      MessageEntity,
+      ChatBookmarkEntity,
+      OrgChatSettingEntity,
       AcademicYearEntity,
       TermEntity,
       CourseEntity,
@@ -183,11 +194,14 @@ module.exports = async function globalSetup(): Promise<void> {
       NotificationEmailChannel1787990000000,
       OrgNotificationSettings1788000000000,
       OrgNotificationTypes1788010000000,
+      Chat1788020000000,
       MembershipPersonType1788030000000,
       Academic1788031000000,
       Lms1788032000000,
       VerticalPack1788033000000,
       Guardian1788034000000,
+      ChatBookmark1788040000000,
+      OrgChatSettings1788050000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

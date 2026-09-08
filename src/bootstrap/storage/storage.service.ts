@@ -8,12 +8,12 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
+import { Readable } from 'stream';
 import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { DocumentFileEntity } from './document-file.entity';
 
@@ -48,8 +48,10 @@ const MIME_TO_EXT: Record<string, string> = {
 
 /**
  * Pluggable file storage. Ported from the monolith's UploadService S3 mechanics
- * (`<orgId>/<uuid>.<ext>` keys, PutObject, presigned GET at 1h, private bucket)
- * but with a Postgres-`bytea` fallback so dev/CI run with no S3 at all.
+ * (`<orgId>/<uuid>.<ext>` keys, PutObject, private bucket) but with a
+ * Postgres-`bytea` fallback so dev/CI run with no S3 at all. Bytes are served
+ * ONLY via the authenticated byte-proxy (`getBytes`); no presigned URL is ever
+ * handed to a client.
  *
  * Driver selection is by whether S3 creds are present (`S3_ACCESS_KEY` +
  * `S3_SECRET_KEY`), mirroring the monolith's `s3Enabled` gate — the moment those
@@ -171,13 +173,51 @@ export class StorageService {
     throw new NotFoundException('File content unavailable');
   }
 
-  /** Presigned GET (S3 driver only), 1h — for clients that fetch S3 directly. */
-  async getPresignedUrl(f: DocumentFileEntity): Promise<string | null> {
-    if (f.driver !== 's3' || !f.storageKey || !this.s3Client) return null;
-    return getSignedUrl(
-      this.s3Client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: f.storageKey }),
-      { expiresIn: 3600 },
-    );
+  // NOTE: presigned-URL generation is intentionally NOT provided. Confidential
+  // documents must be served only through the authenticated byte-proxy
+  // (`getBytes` behind JwtAuthGuard) or the auth'd `openStream` below; a
+  // presigned S3 URL is auth-free and copy-pasteable from the Network tab,
+  // which the product must never expose.
+
+  /**
+   * Open a stored file as an authenticated, server-side byte STREAM — the reusable
+   * "auth'd stream, never a shareable URL" resolver. Confidential files must only
+   * ever be served through an authenticated endpoint, so we NEVER hand the caller
+   * a presigned URL (that would be auth-free and copy-pasteable). Instead:
+   *   - S3    → the app issues `GetObjectCommand` with its OWN credentials and
+   *             returns the response Body stream to pipe to the client. The bucket
+   *             key + presigned URL never leave the server.
+   *   - bytea → the stored bytes wrapped as a Readable.
+   * `size` is the stored byte length (for Content-Length) when known.
+   *
+   * Follow-up (not v1): honour HTTP Range requests for seekable media (pass the
+   * client Range to `GetObjectCommand.Range` / slice the buffer).
+   */
+  async openStream(f: DocumentFileEntity): Promise<{
+    stream: Readable;
+    mimeType: string;
+    filename: string;
+    size: number | null;
+  }> {
+    if (f.driver === 's3' && f.storageKey && this.s3Client) {
+      const res = await this.s3Client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: f.storageKey }),
+      );
+      return {
+        stream: res.Body as Readable,
+        mimeType: f.mimeType,
+        filename: f.originalName,
+        size: f.size ?? (typeof res.ContentLength === 'number' ? res.ContentLength : null),
+      };
+    }
+    if (f.content) {
+      return {
+        stream: Readable.from(f.content),
+        mimeType: f.mimeType,
+        filename: f.originalName,
+        size: f.size ?? f.content.length,
+      };
+    }
+    throw new NotFoundException('File content unavailable');
   }
 }

@@ -51,6 +51,7 @@ export function categoryForType(type: string): string {
   if (t.startsWith('payroll') || t.startsWith('tax_declaration')) return 'payroll';
   if (t.startsWith('onboarding')) return 'onboarding';
   if (t.startsWith('policy') || t.startsWith('policies')) return 'policy';
+  if (t.startsWith('chat')) return 'chat';
   return 'system';
 }
 

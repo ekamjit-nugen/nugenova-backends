@@ -17,6 +17,7 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { TimesheetModule } from './modules/timesheet/timesheet.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { AcademicModule } from './modules/academic/academic.module';
 import { LmsModule } from './modules/lms/lms.module';
 import { VerticalModule } from './modules/vertical/vertical.module';
@@ -35,7 +36,10 @@ import { PlatformEventsModule } from './modules/platform-events/platform-events.
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     PostgresModule,
     ScheduleModule.forRoot(),
-    // Global domain event bus (§08 layer 1) — registered once, like ScheduleModule.
+    // Global domain event bus (§08 layer 1) — registers EventEmitterModule.forRoot()
+    // ONCE (like ScheduleModule) and exposes DomainEventsService. Also serves chat's
+    // in-process bus: MessagesService emits and ChatGateway @OnEvent listens through
+    // this same EventEmitter2, avoiding a service↔gateway circular dependency.
     PlatformEventsModule,
     MailModule,
     StorageModule,
@@ -53,6 +57,7 @@ import { PlatformEventsModule } from './modules/platform-events/platform-events.
     TimesheetModule,
     NotificationModule,
     AdminPlatformModule,
+    ChatModule,
     AcademicModule,
     LmsModule,
     VerticalModule,
