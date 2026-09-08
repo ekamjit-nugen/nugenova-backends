@@ -31,13 +31,16 @@ export const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 export const DEFAULT_OLLAMA_MODEL = 'llama3.1';
 
 /**
- * Default RunPod (Serverless vLLM, OpenAI-compatible) model — production ran
- * `qwen/qwen3-14b`. RunPod is the DEFAULT provider (legacy `CHATBOT_LLM_PROVIDER=
- * runpod`). Endpoint id from `RUNPOD_AI_ENDPOINT_ID` (default `hq45nwa2xq0p5b`),
- * key from `RUNPOD_API_KEY`. Self-hosted → usage cost is recorded null.
+ * Default RunPod (Serverless vLLM, OpenAI-compatible) endpoint + model — the
+ * legacy production `common/llm` values, confirmed active. RunPod is the DEFAULT
+ * provider (legacy `CHATBOT_LLM_PROVIDER=runpod`). We call the OpenAI-compatible
+ * route `https://api.runpod.ai/v2/<id>/openai/v1/chat/completions` (what legacy
+ * production used and parsed), NOT the generic `/runsync` job API. Endpoint id
+ * from `RUNPOD_AI_ENDPOINT_ID`, model from `RUNPOD_AI_MODEL`, key from
+ * `RUNPOD_API_KEY`/`LLM_API_KEY`. Self-hosted → usage cost recorded 0.
  */
-export const DEFAULT_RUNPOD_MODEL = 'qwen/qwen3-14b';
-export const DEFAULT_RUNPOD_ENDPOINT_ID = 'hq45nwa2xq0p5b';
+export const DEFAULT_RUNPOD_MODEL = 'qwen/qwen2.5-7b-instruct';
+export const DEFAULT_RUNPOD_ENDPOINT_ID = 'r7q754t01akevf';
 
 /** Anthropic Messages API version pinned on every request. */
 export const ANTHROPIC_API_VERSION = '2023-06-01';
