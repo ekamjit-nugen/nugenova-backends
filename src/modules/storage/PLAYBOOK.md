@@ -49,26 +49,40 @@ and share downloads).
 Chat attachments, onboarding docs, etc. are uploaded through the shared
 `StorageService` and land in `document_files` — they would otherwise never show
 up in Cloud Drive, which by design is the one vault for *all* the org's files. So
-the drive **indexes** those existing bytes: one `drive_files` row per
-`document_files` row, pointing at the **same `storageFileId`** (no byte copy).
-They land in **Team Drive** under a per-source root folder (`Shared in Chat`,
-`Onboarding`, else `Org Files`) so the whole org sees them.
+the drive **indexes** those existing bytes: a `drive_files` row pointing at the
+**same `storageFileId`** (no byte copy).
+
+**Routing — who sees a bridged file:**
+
+- **Chat in a DIRECT (1:1) conversation → each participant's My Drive** (personal
+  scope, one row per participant, in *their* `Shared in Chat` folder). A private
+  DM attachment stays private to the two people — never the whole org.
+- **Chat in a group/channel → Team Drive** (`Shared in Chat`), visible org-wide.
+- **Onboarding / other categories → Team Drive** under a category folder
+  (`Onboarding`, else `Org Files`).
+
+Landing folders are `systemManaged: false` (so bridged files are browsable).
+Indexing is idempotent per **(storageFileId, scope, ownerId)**.
 
 - **Live** — `DriveChatBridge` (`@OnEvent(CHAT_MESSAGE_NEW)`, same in-process
-  `EventEmitter2` bus the chat gateway uses) indexes an attachment the moment its
-  message is sent. Chat stays decoupled: it emits, the drive reacts. Best-effort;
-  a bridge error never affects message delivery.
-- **Backfill** — `POST /storage/backfill` (DriveAdminGuard) walks the org's
-  `document_files` and indexes everything not yet bridged. Idempotent per
-  `storageFileId`, so live + backfill can race or repeat with no duplicates.
-- Bridged rows are `systemManaged: false` (so they're browsable) and `team`
-  scope. Deleting one soft-deletes the *index* row only; the underlying
+  `EventEmitter2` bus the chat gateway uses) calls `bridgeChatMessage`, which
+  looks up the conversation and routes DM vs group. Chat stays decoupled: it
+  emits, the drive reacts. Best-effort; a bridge error never affects delivery.
+- **Backfill** — `POST /storage/backfill` (DriveAdminGuard) is
+  **message-driven** for chat (only files in a *live, non-deleted* sent message
+  are bridged) and document-driven for other categories. It is **self-healing**:
+  it re-routes a file to its correct scope and **prunes** any `Shared in Chat`
+  index row no longer backed by a message at that scope — e.g. a DM file that an
+  older build mirrored to Team Drive, or the attachment of a since-deleted
+  message. Safe to run repeatedly.
+- Deleting a bridged row soft-deletes the *index* only; the underlying
   `document_files` bytes are untouched (still owned by chat/onboarding).
-- **Trade-off / seam:** a chat DM attachment becomes org-visible via Team Drive.
-  That matches the current ask ("show every file shared in the org"); a future
-  refinement could route DM attachments to the participants' My Drive instead.
-- Tenant isolation still holds: the bridge only ever indexes a `document_files`
-  row whose `organizationId` matches, so another tenant's files never leak in.
+- A DM-routed file counts against each participant's **My Drive** quota (it's in
+  their drive); a group/onboarding file counts against the **Team** pool.
+- Tenant isolation holds: the bridge only ever indexes a `document_files` row
+  whose `organizationId` matches, so another tenant's files never leak in.
+- **Seam:** deleting a chat message doesn't live-unbridge its attachment; the
+  next backfill prunes it. A message-deleted → prune listener could close this.
 
 ## Access control
 

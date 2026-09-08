@@ -13,6 +13,8 @@ import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
+import { ConversationEntity } from '../chat/entities/conversation.entity';
+import { MessageEntity } from '../chat/entities/message.entity';
 import { StorageService } from '../../bootstrap/storage/storage.service';
 import { NotifierService } from '../notification/notifier.service';
 import { NoopOfficeConvertProvider, OFFICE_CONVERT_PROVIDER } from './office-convert.provider';
@@ -33,6 +35,8 @@ describe('DriveService', () => {
   let quotaRepo: any;
   let membershipRepo: any;
   let documentFileRepo: any;
+  let conversationRepo: any;
+  let messageRepo: any;
   let storage: { save: jest.Mock; getMeta: jest.Mock; openStream: jest.Mock; getBytes: jest.Mock };
   let notifier: { notify: jest.Mock };
 
@@ -88,6 +92,14 @@ describe('DriveService', () => {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
     };
+    conversationRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    messageRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     storage = {
       save: jest.fn().mockResolvedValue({ id: 'doc1', originalName: 'a.txt', mimeType: 'text/plain', size: 10, createdAt: new Date() }),
       getMeta: jest.fn().mockResolvedValue({ id: 'doc1' }),
@@ -105,6 +117,8 @@ describe('DriveService', () => {
         { provide: getRepositoryToken(DriveQuotaEntity), useValue: quotaRepo },
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
         { provide: getRepositoryToken(DocumentFileEntity), useValue: documentFileRepo },
+        { provide: getRepositoryToken(ConversationEntity), useValue: conversationRepo },
+        { provide: getRepositoryToken(MessageEntity), useValue: messageRepo },
         { provide: StorageService, useValue: storage },
         { provide: NotifierService, useValue: notifier },
         { provide: OFFICE_CONVERT_PROVIDER, useClass: NoopOfficeConvertProvider },
@@ -158,7 +172,7 @@ describe('DriveService', () => {
     });
   });
 
-  describe('bridge (chat/onboarding → Team Drive)', () => {
+  describe('bridge (chat routing + onboarding)', () => {
     const doc = (over: any = {}) => ({
       id: 'doc9',
       organizationId: 'orgA',
@@ -171,56 +185,127 @@ describe('DriveService', () => {
       ...over,
     });
 
-    it('indexes a document_files row into Team Drive under the category folder', async () => {
-      documentFileRepo.findOne.mockResolvedValue(doc());
-      const row = await service.bridgeDocumentFile('doc9', { organizationId: 'orgA' });
-      // Landed the "Shared in Chat" team folder + a team-scope drive file.
-      expect(folderRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'Shared in Chat', scope: 'team', ownerId: null }),
-      );
-      expect(row).toMatchObject({
-        storageFileId: 'doc9',
-        scope: 'team',
-        ownerId: null,
-        name: 'secret.png',
-        systemManaged: false,
+    it('routes a DM attachment into EACH participant’s My Drive (personal scope)', async () => {
+      conversationRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        organizationId: 'orgA',
+        type: 'direct',
+        participantIds: ['uA', 'uB'],
       });
+      documentFileRepo.findOne.mockResolvedValue(doc({ category: 'chat' }));
+
+      await service.bridgeChatMessage({
+        organizationId: 'orgA',
+        conversationId: 'c1',
+        fileIds: ['doc9'],
+      });
+
+      // One personal-scope drive file per participant, each in their own folder.
+      const savedScopes = fileRepo.save.mock.calls.map(([x]: any[]) => ({
+        scope: x.scope,
+        ownerId: x.ownerId,
+      }));
+      expect(savedScopes).toEqual([
+        { scope: 'personal', ownerId: 'uA' },
+        { scope: 'personal', ownerId: 'uB' },
+      ]);
+      expect(folderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Shared in Chat', scope: 'personal', ownerId: 'uA' }),
+      );
     });
 
-    it('is idempotent — an existing drive row for the same bytes is reused, not duplicated', async () => {
-      fileRepo.findOne.mockResolvedValue({ id: 'existing', storageFileId: 'doc9' });
-      const row = await service.bridgeDocumentFile('doc9');
-      expect(row).toMatchObject({ id: 'existing' });
-      expect(fileRepo.save).not.toHaveBeenCalled();
-      expect(documentFileRepo.findOne).not.toHaveBeenCalled();
+    it('routes a group/channel attachment into Team Drive (team scope)', async () => {
+      conversationRepo.findOne.mockResolvedValue({
+        id: 'c2',
+        organizationId: 'orgA',
+        type: 'group',
+        participantIds: ['uA', 'uB', 'uC'],
+      });
+      documentFileRepo.findOne.mockResolvedValue(doc({ category: 'chat' }));
+
+      await service.bridgeChatMessage({
+        organizationId: 'orgA',
+        conversationId: 'c2',
+        fileIds: ['doc9'],
+      });
+
+      expect(fileRepo.save).toHaveBeenCalledTimes(1);
+      expect(fileRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: 'team', ownerId: null }),
+      );
     });
 
-    it('never re-indexes a drive-native file, and guards cross-org', async () => {
+    it('reconciles: a DM file previously mirrored to Team Drive gets that stale row pruned', async () => {
+      conversationRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        organizationId: 'orgA',
+        type: 'direct',
+        participantIds: ['uA', 'uB'],
+      });
+      documentFileRepo.findOne.mockResolvedValue(doc({ category: 'chat' }));
+      let n = 0;
+      fileRepo.save.mockImplementation(async (x: any) => ({ id: `k${++n}`, ...x }));
+      // After the two personal rows are created, the file has a stale team row too.
+      fileRepo.find.mockResolvedValue([
+        { id: 'team_old', storageFileId: 'doc9' },
+        { id: 'k1', storageFileId: 'doc9' },
+        { id: 'k2', storageFileId: 'doc9' },
+      ]);
+      const qb = fileRepo.createQueryBuilder();
+
+      await service.bridgeChatMessage({
+        organizationId: 'orgA',
+        conversationId: 'c1',
+        fileIds: ['doc9'],
+      });
+
+      // Only the wrongly-scoped team mirror is soft-deleted; the personal rows stay.
+      expect(qb.whereInIds).toHaveBeenCalledWith(['team_old']);
+    });
+
+    it('bridgeDocumentFile indexes onboarding to Team Drive, and skips chat/drive/cross-org', async () => {
+      documentFileRepo.findOne.mockResolvedValue(doc({ category: 'onboarding' }));
+      const row = await service.bridgeDocumentFile('doc9', { organizationId: 'orgA' });
+      expect(row).toMatchObject({ scope: 'team', ownerId: null });
+      expect(folderRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Onboarding' }),
+      );
+
+      documentFileRepo.findOne.mockResolvedValue(doc({ category: 'chat' }));
+      expect(await service.bridgeDocumentFile('doc9')).toBeNull(); // chat → message path
       documentFileRepo.findOne.mockResolvedValue(doc({ category: 'drive' }));
       expect(await service.bridgeDocumentFile('doc9')).toBeNull();
       documentFileRepo.findOne.mockResolvedValue(doc({ organizationId: 'orgB' }));
       expect(await service.bridgeDocumentFile('doc9', { organizationId: 'orgA' })).toBeNull();
+    });
+
+    it('is idempotent — an existing row for the same (file, scope, owner) is reused', async () => {
+      documentFileRepo.findOne.mockResolvedValue(doc({ category: 'onboarding' }));
+      fileRepo.findOne.mockResolvedValue({ id: 'existing', storageFileId: 'doc9' });
+      const row = await service.bridgeDocumentFile('doc9');
+      expect(row).toMatchObject({ id: 'existing' });
       expect(fileRepo.save).not.toHaveBeenCalled();
     });
 
-    it('backfill scans the org, linking only not-yet-bridged non-drive files', async () => {
-      documentFileRepo.find.mockResolvedValue([
-        doc({ id: 'd1', category: 'chat' }),
-        doc({ id: 'd2', category: 'drive' }), // already drive-native → skip
-        doc({ id: 'd3', category: 'onboarding' }),
+    it('backfill is message-driven: DM→My Drive, group→Team, and reports counts', async () => {
+      messageRepo.find.mockResolvedValue([
+        { conversationId: 'c1', fileId: 'd1', attachments: [] },
+        { conversationId: 'c2', fileId: 'd2', attachments: [] },
       ]);
-      // d1 has no existing row; d3 already bridged.
-      fileRepo.findOne.mockImplementation(async ({ where }: any) =>
-        where.storageFileId === 'd3' ? { id: 'already' } : null,
+      conversationRepo.findOne.mockImplementation(async ({ where }: any) =>
+        where.id === 'c1'
+          ? { id: 'c1', organizationId: 'orgA', type: 'direct', participantIds: ['uA', 'uB'] }
+          : { id: 'c2', organizationId: 'orgA', type: 'group', participantIds: ['uA', 'uB', 'uC'] },
       );
-      // bridgeDocumentFile re-fetches the source doc by id.
       documentFileRepo.findOne.mockImplementation(async ({ where }: any) =>
         doc({ id: where.id, category: 'chat' }),
       );
+      documentFileRepo.find.mockResolvedValue([]); // no non-chat docs
+
       const res = await service.backfillFromStorage('orgA');
-      expect(res.scanned).toBe(3);
-      expect(res.linked).toBe(1); // only d1
-      expect(res.skipped).toBe(2); // d2 (drive) + d3 (already)
+      expect(res.scanned).toBe(2);
+      expect(res.linked).toBe(3); // d1 → 2 personal, d2 → 1 team
+      expect(res.pruned).toBe(0);
     });
   });
 

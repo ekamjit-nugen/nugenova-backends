@@ -19,6 +19,8 @@ import { DriveShareEntity } from './entities/drive-share.entity';
 import { DriveQuotaEntity } from './entities/drive-quota.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
+import { ConversationEntity } from '../chat/entities/conversation.entity';
+import { MessageEntity } from '../chat/entities/message.entity';
 import { StorageService } from '../../bootstrap/storage/storage.service';
 import { NotifierService } from '../notification/notifier.service';
 import {
@@ -64,6 +66,10 @@ export class DriveService {
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(DocumentFileEntity)
     private readonly documentFiles: Repository<DocumentFileEntity>,
+    @InjectRepository(ConversationEntity)
+    private readonly conversations: Repository<ConversationEntity>,
+    @InjectRepository(MessageEntity)
+    private readonly chatMessages: Repository<MessageEntity>,
     private readonly storage: StorageService,
     private readonly notifier: NotifierService,
     @Inject(OFFICE_CONVERT_PROVIDER)
@@ -716,23 +722,23 @@ export class DriveService {
   // Files uploaded elsewhere in the app (chat attachments, onboarding docs)
   // live in `document_files` via the shared StorageService and would otherwise
   // never surface in Cloud Drive. The drive is meant to be the single vault for
-  // "all the storage files", so we INDEX those existing bytes here: one
-  // `drive_files` row per `document_files` row, pointing at the SAME
-  // `storageFileId` (no byte copy). They land in Team Drive under a per-source
-  // system folder so the whole org can see them.
+  // "all the storage files", so we INDEX those existing bytes here: a
+  // `drive_files` row pointing at the SAME `storageFileId` (no byte copy).
   //
-  // Trade-off (documented seam): a chat DM attachment becomes visible to the
-  // org via Team Drive. That matches the current product ask ("show every file
-  // shared in the org"); a future refinement could route DM attachments to the
-  // participants' My Drive instead of the team pool.
+  // ROUTING (who sees a bridged file):
+  //   - chat in a DIRECT (1:1) conversation → each participant's My Drive
+  //     (personal scope, one row per participant). A private DM attachment stays
+  //     private to the two people, never the whole org.
+  //   - chat in a group/channel             → Team Drive (org-visible).
+  //   - onboarding / other categories       → Team Drive under a category folder.
+  // All land in a browsable "Shared in Chat" / "Onboarding" / "Org Files" folder.
 
   private readonly SYSTEM_ACTOR = 'system';
+  private readonly CHAT_FOLDER = 'Shared in Chat';
 
-  /** Stable Team-Drive landing folder for a bridged file's source category. */
+  /** Stable landing-folder name for a NON-chat bridged file's category. */
   private bridgeFolderName(category: string | null | undefined): string {
     switch (category) {
-      case 'chat':
-        return 'Shared in Chat';
       case 'onboarding':
         return 'Onboarding';
       default:
@@ -741,19 +747,21 @@ export class DriveService {
   }
 
   /**
-   * Find (or create) a browsable Team-Drive root folder by name. Used only for
-   * the bridge landing folders; created as `systemManaged: false` so members can
-   * actually see the bridged files when they open Team Drive.
+   * Find (or create) a browsable bridge landing folder for a given scope/owner.
+   * Created `systemManaged: false` so bridged files actually show up in browse.
+   * Personal-scope folders are per-owner (each participant gets their own).
    */
-  private async ensureTeamFolder(
+  private async ensureBridgeFolder(
     organizationId: string,
+    scope: DriveScope,
+    ownerId: string | null,
     name: string,
   ): Promise<DriveFolderEntity> {
     const existing = await this.folders.findOne({
       where: {
         organizationId,
-        scope: 'team',
-        ownerId: IsNull(),
+        scope,
+        ownerId: ownerId === null ? IsNull() : ownerId,
         parentFolderId: IsNull(),
         name,
         isDeleted: false,
@@ -764,8 +772,8 @@ export class DriveService {
       this.folders.create({
         organizationId,
         name,
-        scope: 'team',
-        ownerId: null,
+        scope,
+        ownerId,
         parentFolderId: null,
         path: `/${name}`,
         createdBy: this.SYSTEM_ACTOR,
@@ -777,34 +785,31 @@ export class DriveService {
   }
 
   /**
-   * Idempotently index ONE `document_files` row into Team Drive. Keyed on
-   * `storageFileId`, so re-running (backfill + the live listener racing, repeat
-   * backfills) never creates duplicates. Returns the drive row, or null when the
-   * source doc is missing/deleted.
+   * Idempotently index one stored doc into a (scope, ownerId) drive location.
+   * Keyed on (storageFileId, scope, ownerId), so repeat backfills / a live
+   * listener racing never create duplicates.
    */
-  async bridgeDocumentFile(
-    documentFileId: string,
-    opts: { organizationId?: string } = {},
-  ): Promise<DriveFileEntity | null> {
+  private async indexBridge(
+    doc: DocumentFileEntity,
+    scope: DriveScope,
+    ownerId: string | null,
+    folderName: string,
+    tag: string | null,
+  ): Promise<DriveFileEntity> {
     const existing = await this.files.findOne({
-      where: { storageFileId: documentFileId, isDeleted: false },
+      where: {
+        storageFileId: doc.id,
+        scope,
+        ownerId: ownerId === null ? IsNull() : ownerId,
+        isDeleted: false,
+      },
     });
     if (existing) return existing;
-
-    const doc = await this.documentFiles.findOne({
-      where: { id: documentFileId, isDeleted: false },
-    });
-    if (!doc) return null;
-    if (opts.organizationId && doc.organizationId !== opts.organizationId) {
-      // Cross-org guard: never index another tenant's bytes.
-      return null;
-    }
-    // Files already born in the drive are indexed at upload time — skip.
-    if (doc.category === 'drive') return null;
-
-    const folder = await this.ensureTeamFolder(
+    const folder = await this.ensureBridgeFolder(
       doc.organizationId,
-      this.bridgeFolderName(doc.category),
+      scope,
+      ownerId,
+      folderName,
     );
     return this.files.save(
       this.files.create({
@@ -813,46 +818,211 @@ export class DriveService {
         size: doc.size,
         mimeType: doc.mimeType,
         storageFileId: doc.id,
-        scope: 'team',
-        ownerId: null,
+        scope,
+        ownerId,
         folderId: folder.id,
         uploadedBy: doc.uploadedBy || this.SYSTEM_ACTOR,
         uploadedByName: null,
-        tags: doc.category ? [doc.category] : [],
+        tags: tag ? [tag] : [],
         systemManaged: false,
         isDeleted: false,
       }),
     );
   }
 
+  /** Soft-delete every bridged index row for a storageFileId not in `keep`. */
+  private async pruneBridgeRows(
+    storageFileId: string,
+    keep: DriveFileEntity[],
+  ): Promise<void> {
+    const keepIds = new Set(keep.map((r) => r.id));
+    const rows = await this.files.find({
+      where: { storageFileId, isDeleted: false },
+    });
+    const stale = rows.filter((r) => !keepIds.has(r.id));
+    if (stale.length) {
+      await this.files
+        .createQueryBuilder()
+        .update()
+        .set({ isDeleted: true })
+        .whereInIds(stale.map((r) => r.id))
+        .execute();
+    }
+  }
+
   /**
-   * One-shot backfill: index every not-yet-bridged `document_files` row for an
-   * org into Team Drive. Safe to re-run (idempotent per `storageFileId`).
+   * Route one chat attachment into the drive based on its conversation:
+   * DM → both participants' My Drive; group/channel → Team Drive. Reconciles as
+   * it goes — indexing a file to its correct location prunes any row left at the
+   * wrong scope (e.g. a DM file previously mirrored to Team Drive).
+   */
+  private async applyChatBridge(
+    conv: ConversationEntity,
+    doc: DocumentFileEntity,
+  ): Promise<DriveFileEntity[]> {
+    const kept: DriveFileEntity[] = [];
+    if (conv.type === 'direct') {
+      const participants = (conv.participantIds || []).filter(Boolean);
+      for (const uid of participants) {
+        kept.push(
+          await this.indexBridge(doc, 'personal', uid, this.CHAT_FOLDER, 'chat'),
+        );
+      }
+    } else {
+      kept.push(
+        await this.indexBridge(doc, 'team', null, this.CHAT_FOLDER, 'chat'),
+      );
+    }
+    await this.pruneBridgeRows(doc.id, kept);
+    return kept;
+  }
+
+  /** File ids referenced by a chat message (flat column + attachments[] jsonb). */
+  private messageFileIds(msg: MessageEntity): string[] {
+    const ids = new Set<string>();
+    if (msg.fileId) ids.add(msg.fileId);
+    const attachments = Array.isArray((msg as any).attachments)
+      ? ((msg as any).attachments as Array<{ fileId?: string | null }>)
+      : [];
+    for (const a of attachments) if (a?.fileId) ids.add(a.fileId);
+    return [...ids];
+  }
+
+  /**
+   * Live entry point (called by DriveChatBridge on CHAT_MESSAGE_NEW): index a
+   * just-sent message's attachments into the right drive(s). Looks up the
+   * conversation itself so the caller stays thin. No-op when the message has no
+   * attachment or the conversation isn't found in this org.
+   */
+  async bridgeChatMessage(params: {
+    organizationId: string;
+    conversationId: string;
+    fileIds: string[];
+  }): Promise<void> {
+    const fileIds = (params.fileIds || []).filter(Boolean);
+    if (!fileIds.length) return;
+    const conv = await this.conversations.findOne({
+      where: { id: params.conversationId, organizationId: params.organizationId },
+    });
+    if (!conv) return;
+    for (const fileId of fileIds) {
+      const doc = await this.documentFiles.findOne({
+        where: { id: fileId, organizationId: params.organizationId, isDeleted: false },
+      });
+      if (doc && doc.category !== 'drive') await this.applyChatBridge(conv, doc);
+    }
+  }
+
+  /**
+   * Index one NON-chat stored doc (onboarding, …) into Team Drive. Chat files go
+   * through the conversation-aware {@link bridgeChatMessage} path instead.
+   * Idempotent; returns null for missing/cross-org/drive-native/chat docs.
+   */
+  async bridgeDocumentFile(
+    documentFileId: string,
+    opts: { organizationId?: string } = {},
+  ): Promise<DriveFileEntity | null> {
+    const doc = await this.documentFiles.findOne({
+      where: { id: documentFileId, isDeleted: false },
+    });
+    if (!doc) return null;
+    if (opts.organizationId && doc.organizationId !== opts.organizationId) return null;
+    if (doc.category === 'drive' || doc.category === 'chat') return null;
+    return this.indexBridge(
+      doc,
+      'team',
+      null,
+      this.bridgeFolderName(doc.category),
+      doc.category ?? null,
+    );
+  }
+
+  /**
+   * One-shot backfill for an org, safe to re-run (idempotent + self-healing):
+   *   - chat: rebuild from `chat_messages`, routing DM→My Drive / group→Team,
+   *     and prune any "Shared in Chat" index row no longer backed by a sent
+   *     message at the right scope.
+   *   - other categories (onboarding, …): index each `document_files` row.
    */
   async backfillFromStorage(
     organizationId: string,
-  ): Promise<{ scanned: number; linked: number; skipped: number }> {
-    const docs = await this.documentFiles.find({
+  ): Promise<{ scanned: number; linked: number; pruned: number }> {
+    let linked = 0;
+    let scanned = 0;
+
+    // ── chat: message-driven (only files in a LIVE sent message get bridged;
+    // a deleted message's attachment is pruned below, not re-indexed) ──
+    const messages = await this.chatMessages.find({
       where: { organizationId, isDeleted: false },
     });
-    let linked = 0;
-    let skipped = 0;
-    for (const doc of docs) {
-      const already = await this.files.findOne({
-        where: { storageFileId: doc.id, isDeleted: false },
-      });
-      if (already || doc.category === 'drive') {
-        skipped++;
-        continue;
+    const convCache = new Map<string, ConversationEntity | null>();
+    const desiredByFile = new Map<string, DriveFileEntity[]>();
+    for (const msg of messages) {
+      const fileIds = this.messageFileIds(msg);
+      if (!fileIds.length) continue;
+      let conv = convCache.get(msg.conversationId);
+      if (conv === undefined) {
+        conv = await this.conversations.findOne({
+          where: { id: msg.conversationId, organizationId },
+        });
+        convCache.set(msg.conversationId, conv);
       }
+      if (!conv) continue;
+      for (const fileId of fileIds) {
+        const doc = await this.documentFiles.findOne({
+          where: { id: fileId, organizationId, isDeleted: false },
+        });
+        if (!doc || doc.category === 'drive') continue;
+        scanned++;
+        const kept = await this.applyChatBridge(conv, doc);
+        linked += kept.length;
+        desiredByFile.set(doc.id, kept);
+      }
+    }
+
+    // Prune "Shared in Chat" rows whose file is no longer backed by a message
+    // at any scope (e.g. the old team mirror of an unsent draft, a deleted msg).
+    const chatFolders = await this.folders.find({
+      where: { organizationId, name: this.CHAT_FOLDER, isDeleted: false },
+    });
+    const chatFolderIds = new Set(chatFolders.map((f) => f.id));
+    let pruned = 0;
+    if (chatFolderIds.size) {
+      const chatRows = await this.files.find({
+        where: { organizationId, isDeleted: false },
+      });
+      const stale = chatRows.filter(
+        (r) =>
+          r.folderId &&
+          chatFolderIds.has(r.folderId) &&
+          !(desiredByFile.get(r.storageFileId) || []).some((k) => k.id === r.id),
+      );
+      if (stale.length) {
+        await this.files
+          .createQueryBuilder()
+          .update()
+          .set({ isDeleted: true })
+          .whereInIds(stale.map((r) => r.id))
+          .execute();
+        pruned = stale.length;
+      }
+    }
+
+    // ── non-chat categories (onboarding, …): document-driven ──
+    const otherDocs = await this.documentFiles.find({
+      where: { organizationId, isDeleted: false },
+    });
+    for (const doc of otherDocs) {
+      if (doc.category === 'chat' || doc.category === 'drive') continue;
+      scanned++;
       const row = await this.bridgeDocumentFile(doc.id, { organizationId });
       if (row) linked++;
-      else skipped++;
     }
+
     this.log.log(
-      `backfillFromStorage(${organizationId}): scanned=${docs.length} linked=${linked} skipped=${skipped}`,
+      `backfillFromStorage(${organizationId}): scanned=${scanned} linked=${linked} pruned=${pruned}`,
     );
-    return { scanned: docs.length, linked, skipped };
+    return { scanned, linked, pruned };
   }
 
   private async resolveTargetFolder(

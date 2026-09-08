@@ -6,6 +6,8 @@ import { NotificationModule } from '../notification/notification.module';
 import { StorageModule } from '../../bootstrap/storage/storage.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { DocumentFileEntity } from '../../bootstrap/storage/document-file.entity';
+import { ConversationEntity } from '../chat/entities/conversation.entity';
+import { MessageEntity } from '../chat/entities/message.entity';
 
 import { DriveFolderEntity } from './entities/drive-folder.entity';
 import { DriveFileEntity } from './entities/drive-file.entity';
@@ -47,6 +49,8 @@ import {
       DriveQuotaEntity,
       OrgMembershipEntity, // per-user grant + quota override (cloudDrive jsonb)
       DocumentFileEntity, // shared byte store — read to bridge chat/onboarding files
+      ConversationEntity, // read-only: route a chat file by DM vs group
+      MessageEntity, // read-only: message-driven backfill of sent attachments
     ]),
   ],
   controllers: [DriveController, DrivePublicController],

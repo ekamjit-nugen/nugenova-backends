@@ -9,14 +9,16 @@ import {
 
 /**
  * Live bridge: when a chat message with an attachment is sent, index that
- * attachment's bytes into Cloud Drive (Team Drive → "Shared in Chat") so files
- * shared in chat show up in the drive without a byte copy.
+ * attachment into Cloud Drive so files shared in chat show up in the drive
+ * without a byte copy. The service routes by conversation — a DM attachment
+ * lands in each participant's My Drive, a group/channel attachment in Team
+ * Drive.
  *
  * Listens on the same in-process `EventEmitter2` bus the chat gateway uses
  * (CHAT_MESSAGE_NEW), so chat stays fully decoupled from the drive — it emits,
  * we react. Fire-and-forget and swallow errors: a bridge hiccup must never
- * affect message delivery. Bridging is idempotent per `storageFileId`, so a
- * message re-delivery (or a later backfill) never double-indexes.
+ * affect message delivery. Bridging is idempotent per (storageFileId, scope,
+ * owner), so a message re-delivery (or a later backfill) never double-indexes.
  */
 @Injectable()
 export class DriveChatBridge {
@@ -29,9 +31,11 @@ export class DriveChatBridge {
     try {
       const msg = (payload?.message ?? {}) as Record<string, unknown>;
       const organizationId = msg.organizationId as string | undefined;
-      if (!organizationId) return;
+      const conversationId =
+        (msg.conversationId as string | undefined) ?? payload?.conversationId;
+      if (!organizationId || !conversationId) return;
 
-      // Flat attachment fields + the rich `attachments[]` array both carry a
+      // Flat attachment field + the rich `attachments[]` array both carry a
       // fileId; collect every distinct one referenced by this message.
       const ids = new Set<string>();
       if (typeof msg.fileId === 'string' && msg.fileId) ids.add(msg.fileId);
@@ -43,9 +47,13 @@ export class DriveChatBridge {
       }
       if (!ids.size) return;
 
-      for (const id of ids) {
-        await this.drive.bridgeDocumentFile(id, { organizationId });
-      }
+      // The service resolves the conversation and routes DM → My Drive /
+      // group → Team Drive.
+      await this.drive.bridgeChatMessage({
+        organizationId,
+        conversationId,
+        fileIds: [...ids],
+      });
     } catch (err) {
       this.log.warn(
         `chat→drive bridge skipped a message: ${(err as Error)?.message}`,
