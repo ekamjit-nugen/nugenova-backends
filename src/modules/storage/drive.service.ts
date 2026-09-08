@@ -31,6 +31,7 @@ import {
 const GB = 1024 * 1024 * 1024;
 export const DEFAULT_TEAM_QUOTA_GB = 50; // org / Team-Drive pool
 export const DEFAULT_USER_QUOTA_GB = 1; // per-user My Drive
+export const DEFAULT_SHARE_TTL_DAYS = 7; // a link with no explicit date expires in 7 days
 const ADMIN_ROLES = ['owner', 'admin'];
 
 /**
@@ -1216,8 +1217,13 @@ export class DriveService {
       );
     }
 
-    let expiresAt: Date | null = null;
-    if (opts.expiresAt) {
+    // Default the link to expire in 7 days when the caller doesn't pin a date,
+    // so a forgotten link doesn't live forever. An explicit null still means
+    // "never expires" (the client sends the sentinel to opt out).
+    let expiresAt: Date | null = new Date(Date.now() + DEFAULT_SHARE_TTL_DAYS * 86_400_000);
+    if (opts.expiresAt === null) {
+      expiresAt = null; // caller explicitly chose "never"
+    } else if (opts.expiresAt) {
       const d = new Date(opts.expiresAt);
       if (isNaN(d.getTime())) throw new BadRequestException('Invalid expiresAt');
       expiresAt = d;
