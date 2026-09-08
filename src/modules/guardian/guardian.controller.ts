@@ -79,7 +79,7 @@ export class GuardianController {
   // ── consent ─────────────────────────────────────────────────────────────────
 
   @Post('consent')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.CREATED)
   async recordConsent(@Body() dto: RecordConsentDto, @Req() req: any) {
     const data = await this.guardian.recordConsent(
       this.orgId(req),
