@@ -63,6 +63,10 @@ export class DrivePublicController {
       body?.password,
       body.fileId,
     );
+    // Streaming a file is a read → 200, not the POST-default 201 (this is a POST
+    // only so the password rides in the body, out of access logs). @Res() is
+    // library-mode, so set the status explicitly.
+    res.status(200);
     res.setHeader('Content-Type', f.mimeType || 'application/octet-stream');
     if (f.size) res.setHeader('Content-Length', String(f.size));
     const safe = f.filename.replace(/["\r\n]/g, '_');
