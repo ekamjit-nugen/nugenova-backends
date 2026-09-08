@@ -58,6 +58,7 @@ import { VerticalPack1788033000000 } from '../src/bootstrap/database/migrations/
 import { Guardian1788034000000 } from '../src/bootstrap/database/migrations/1788034000000-Guardian';
 import { ChatBookmark1788040000000 } from '../src/bootstrap/database/migrations/1788040000000-ChatBookmark';
 import { OrgChatSettings1788050000000 } from '../src/bootstrap/database/migrations/1788050000000-OrgChatSettings';
+import { Assessment1788100000000 } from '../src/bootstrap/database/migrations/1788100000000-Assessment';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -84,6 +85,8 @@ import { TermEntity } from '../src/modules/academic/entities/term.entity';
 import { CourseEntity } from '../src/modules/lms/entities/course.entity';
 import { ClassSectionEntity } from '../src/modules/lms/entities/class-section.entity';
 import { EnrolmentEntity } from '../src/modules/lms/entities/enrolment.entity';
+import { AssessmentEntity } from '../src/modules/assessment/entities/assessment.entity';
+import { MarkEntity } from '../src/modules/assessment/entities/mark.entity';
 import { GuardianLinkEntity } from '../src/modules/guardian/entities/guardian-link.entity';
 import { ConsentLedgerEntity } from '../src/modules/guardian/entities/consent-ledger.entity';
 
@@ -154,6 +157,8 @@ module.exports = async function globalSetup(): Promise<void> {
       CourseEntity,
       ClassSectionEntity,
       EnrolmentEntity,
+      AssessmentEntity,
+      MarkEntity,
       GuardianLinkEntity,
       ConsentLedgerEntity,
     ],
@@ -202,6 +207,7 @@ module.exports = async function globalSetup(): Promise<void> {
       Guardian1788034000000,
       ChatBookmark1788040000000,
       OrgChatSettings1788050000000,
+      Assessment1788100000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

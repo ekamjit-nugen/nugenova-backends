@@ -20,6 +20,7 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
 import { ChatModule } from './modules/chat/chat.module';
 import { AcademicModule } from './modules/academic/academic.module';
 import { LmsModule } from './modules/lms/lms.module';
+import { AssessmentModule } from './modules/assessment/assessment.module';
 import { VerticalModule } from './modules/vertical/vertical.module';
 import { GuardianModule } from './modules/guardian/guardian.module';
 import { PlatformEventsModule } from './modules/platform-events/platform-events.module';
@@ -60,6 +61,7 @@ import { PlatformEventsModule } from './modules/platform-events/platform-events.
     ChatModule,
     AcademicModule,
     LmsModule,
+    AssessmentModule,
     VerticalModule,
     GuardianModule,
   ],
