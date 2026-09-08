@@ -76,4 +76,4 @@ export interface LlmProvider {
 export const LLM_PROVIDER = Symbol('LLM_PROVIDER');
 
 /** Adapter ids understood by the factory / env selector. */
-export type ProviderName = 'anthropic' | 'openai' | 'ollama';
+export type ProviderName = 'anthropic' | 'openai' | 'ollama' | 'runpod';

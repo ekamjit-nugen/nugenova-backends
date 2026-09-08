@@ -15,14 +15,19 @@ import { DEFAULT_TIMEOUT_MS } from './llm-config';
  * is thin. Plain `fetch`, no SDK dep. Network only in `complete()`.
  */
 export class OpenAiProvider implements LlmProvider {
-  readonly name = 'openai';
+  readonly name: string;
   private readonly logger = new Logger(OpenAiProvider.name);
 
   constructor(
     readonly defaultModel: string,
     private readonly apiKey: string,
     private readonly baseUrl = 'https://api.openai.com/v1',
-  ) {}
+    // Attribution label for the usage ledger — 'openai' by default, 'runpod' when
+    // this adapter is pointed at the RunPod vLLM OpenAI-compatible route.
+    name = 'openai',
+  ) {
+    this.name = name;
+  }
 
   async complete(messages: LlmMessage[], opts: LlmCompleteOptions = {}): Promise<LlmCompletion> {
     const model = opts.model || this.defaultModel;

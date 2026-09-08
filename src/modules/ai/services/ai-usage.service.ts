@@ -161,7 +161,13 @@ export class AiUsageService {
     const promptTokens = usage?.promptTokens ?? 0;
     const completionTokens = usage?.completionTokens ?? 0;
     const totalTokens = usage?.totalTokens ?? promptTokens + completionTokens;
-    const costUsd = estimateCostUsd(model, promptTokens, completionTokens);
+    // Self-hosted vendors (RunPod vLLM, Ollama) have no per-token list price, so
+    // record $0 rather than the hosted-model fallback estimate — self-hosted qwen
+    // costs ~nothing per token. Only hosted vendors (Anthropic/OpenAI) get an estimate.
+    const SELF_HOSTED = new Set(['runpod', 'ollama']);
+    const costUsd = SELF_HOSTED.has(provider)
+      ? 0
+      : estimateCostUsd(model, promptTokens, completionTokens);
     const period = this.periodOf();
 
     // PII retention/redaction — legacy stored full plaintext forever; default is

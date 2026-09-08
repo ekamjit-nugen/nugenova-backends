@@ -30,6 +30,15 @@ export const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 /** Default local (Ollama) model tag. */
 export const DEFAULT_OLLAMA_MODEL = 'llama3.1';
 
+/**
+ * Default RunPod (Serverless vLLM, OpenAI-compatible) model — production ran
+ * `qwen/qwen3-14b`. RunPod is the DEFAULT provider (legacy `CHATBOT_LLM_PROVIDER=
+ * runpod`). Endpoint id from `RUNPOD_AI_ENDPOINT_ID` (default `hq45nwa2xq0p5b`),
+ * key from `RUNPOD_API_KEY`. Self-hosted → usage cost is recorded null.
+ */
+export const DEFAULT_RUNPOD_MODEL = 'qwen/qwen3-14b';
+export const DEFAULT_RUNPOD_ENDPOINT_ID = 'hq45nwa2xq0p5b';
+
 /** Anthropic Messages API version pinned on every request. */
 export const ANTHROPIC_API_VERSION = '2023-06-01';
 
@@ -44,13 +53,14 @@ export function selectProviderName(config: ConfigService): ProviderName {
   const raw = (
     config.get<string>('AI_PROVIDER') ||
     config.get<string>('CHATBOT_LLM_PROVIDER') ||
-    'anthropic'
+    'runpod' // production default (self-hosted RunPod vLLM)
   )
     .trim()
     .toLowerCase();
   if (raw === 'openai') return 'openai';
   if (raw === 'ollama' || raw === 'local') return 'ollama';
-  return 'anthropic';
+  if (raw === 'anthropic' || raw === 'claude') return 'anthropic';
+  return 'runpod';
 }
 
 /** The configured default model for a provider (env `AI_MODEL` wins if set). */
@@ -62,8 +72,13 @@ export function resolveDefaultModel(config: ConfigService, provider: ProviderNam
       return config.get<string>('OPENAI_MODEL')?.trim() || DEFAULT_OPENAI_MODEL;
     case 'ollama':
       return config.get<string>('OLLAMA_MODEL')?.trim() || DEFAULT_OLLAMA_MODEL;
+    case 'runpod':
+      return (
+        config.get<string>('RUNPOD_AI_MODEL')?.trim() || DEFAULT_RUNPOD_MODEL
+      );
     case 'anthropic':
-    default:
       return config.get<string>('ANTHROPIC_MODEL')?.trim() || DEFAULT_ANTHROPIC_MODEL;
+    default:
+      return config.get<string>('RUNPOD_AI_MODEL')?.trim() || DEFAULT_RUNPOD_MODEL;
   }
 }

@@ -5,7 +5,11 @@ import { LLM_PROVIDER, LlmProvider } from './llm-provider';
 import { AnthropicProvider } from './anthropic.provider';
 import { OpenAiProvider } from './openai.provider';
 import { OllamaProvider } from './ollama.provider';
-import { resolveDefaultModel, selectProviderName } from './llm-config';
+import {
+  resolveDefaultModel,
+  selectProviderName,
+  DEFAULT_RUNPOD_ENDPOINT_ID,
+} from './llm-config';
 
 /**
  * Builds the one live {@link LlmProvider} from env and binds it to the
@@ -30,12 +34,27 @@ export function buildLlmProvider(config: ConfigService): LlmProvider {
     case 'ollama':
       return new OllamaProvider(model, config.get<string>('OLLAMA_BASE_URL') || undefined);
     case 'anthropic':
-    default:
       return new AnthropicProvider(
         model,
         config.get<string>('ANTHROPIC_API_KEY') || '',
         config.get<string>('ANTHROPIC_BASE_URL') || undefined,
       );
+    case 'runpod':
+    default: {
+      // RunPod Serverless vLLM exposes an OpenAI-compatible route, so reuse the
+      // OpenAI adapter pointed at the endpoint's /openai/v1. Key = RUNPOD_API_KEY.
+      const endpointId =
+        config.get<string>('RUNPOD_AI_ENDPOINT_ID')?.trim() || DEFAULT_RUNPOD_ENDPOINT_ID;
+      const baseUrl =
+        config.get<string>('RUNPOD_BASE_URL')?.trim() ||
+        `https://api.runpod.ai/v2/${endpointId}/openai/v1`;
+      return new OpenAiProvider(
+        model,
+        config.get<string>('RUNPOD_API_KEY') || config.get<string>('LLM_API_KEY') || '',
+        baseUrl,
+        'runpod',
+      );
+    }
   }
 }
 
