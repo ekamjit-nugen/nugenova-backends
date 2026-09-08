@@ -20,6 +20,7 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
 import { AcademicModule } from './modules/academic/academic.module';
 import { LmsModule } from './modules/lms/lms.module';
 import { VerticalModule } from './modules/vertical/vertical.module';
+import { GuardianModule } from './modules/guardian/guardian.module';
 
 /**
  * Nugenova backend root module.
@@ -52,6 +53,7 @@ import { VerticalModule } from './modules/vertical/vertical.module';
     AcademicModule,
     LmsModule,
     VerticalModule,
+    GuardianModule,
   ],
 })
 export class AppModule {}

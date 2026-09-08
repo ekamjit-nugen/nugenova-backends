@@ -54,6 +54,7 @@ import { MembershipPersonType1788030000000 } from '../src/bootstrap/database/mig
 import { Academic1788031000000 } from '../src/bootstrap/database/migrations/1788031000000-Academic';
 import { Lms1788032000000 } from '../src/bootstrap/database/migrations/1788032000000-Lms';
 import { VerticalPack1788033000000 } from '../src/bootstrap/database/migrations/1788033000000-VerticalPack';
+import { Guardian1788034000000 } from '../src/bootstrap/database/migrations/1788034000000-Guardian';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -76,6 +77,8 @@ import { TermEntity } from '../src/modules/academic/entities/term.entity';
 import { CourseEntity } from '../src/modules/lms/entities/course.entity';
 import { ClassSectionEntity } from '../src/modules/lms/entities/class-section.entity';
 import { EnrolmentEntity } from '../src/modules/lms/entities/enrolment.entity';
+import { GuardianLinkEntity } from '../src/modules/guardian/entities/guardian-link.entity';
+import { ConsentLedgerEntity } from '../src/modules/guardian/entities/consent-ledger.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -140,6 +143,8 @@ module.exports = async function globalSetup(): Promise<void> {
       CourseEntity,
       ClassSectionEntity,
       EnrolmentEntity,
+      GuardianLinkEntity,
+      ConsentLedgerEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -182,6 +187,7 @@ module.exports = async function globalSetup(): Promise<void> {
       Academic1788031000000,
       Lms1788032000000,
       VerticalPack1788033000000,
+      Guardian1788034000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
