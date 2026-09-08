@@ -53,6 +53,7 @@ import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/mig
 import { MembershipPersonType1788030000000 } from '../src/bootstrap/database/migrations/1788030000000-MembershipPersonType';
 import { Academic1788031000000 } from '../src/bootstrap/database/migrations/1788031000000-Academic';
 import { Lms1788032000000 } from '../src/bootstrap/database/migrations/1788032000000-Lms';
+import { VerticalPack1788033000000 } from '../src/bootstrap/database/migrations/1788033000000-VerticalPack';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -180,6 +181,7 @@ module.exports = async function globalSetup(): Promise<void> {
       MembershipPersonType1788030000000,
       Academic1788031000000,
       Lms1788032000000,
+      VerticalPack1788033000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

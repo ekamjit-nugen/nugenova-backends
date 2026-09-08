@@ -122,3 +122,165 @@ export const DEFAULT_ROLES: DefaultRoleDef[] = [
 /** Quick lookup: role name → the enforced tier a holder receives. */
 export const ROLE_NAME_TO_TIER: Record<string, 'manager' | 'employee'> =
   Object.fromEntries(DEFAULT_ROLES.map((r) => [r.name, r.tier]));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EDUCATION VERTICAL (§04/§12)
+//
+// The education pack seeds its own roles + resource keys REUSING the same
+// role-matrix mechanism (RoleEntity + {resource, actions[]} permissions) — the
+// matrix ENGINE is untouched; these are just additional data-driven definitions.
+// They are NOT part of SYSTEM_ROLES/DEFAULT_ROLES (which every org gets), so a
+// company tenant is unaffected; VerticalPackService seeds these only for an
+// education orgType. Enforced tiers reuse the existing enum: institution leaders
+// map to 'admin', operational staff to 'manager', teachers/individual staff to
+// 'employee', and learner/guardian personas to 'viewer' (self-service, minimal).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Education permission resources (keep in sync with the education Roles matrix). */
+export const EDUCATION_RESOURCES = [
+  'students',
+  'guardians',
+  'admissions',
+  'courses',
+  'classes',
+  'enrolments',
+  'attendance',
+  'gradebook',
+  'timetable',
+  'fees',
+  'library',
+  'hostel',
+  'transport',
+  'reports',
+  'settings',
+] as const;
+
+const EDU_FULL = EDUCATION_RESOURCES.map((r) => ({ resource: r, actions: [...ALL] }));
+const eduView = (resources: string[]) =>
+  resources.map((r) => ({ resource: r, actions: ['view'] }));
+
+/**
+ * Education system roles. `tier` is the enforced enum tier a holder receives;
+ * `permissions` is the fine-grained matrix. Seeded by VerticalPackService for
+ * education orgs (idempotent), never by the default org seeding.
+ */
+export const EDUCATION_ROLES: SystemRoleDef[] = [
+  {
+    name: 'principal',
+    displayName: 'Principal',
+    description: 'Head of the institution — full academic and operational access.',
+    tier: 'admin',
+    permissions: EDU_FULL,
+  },
+  {
+    name: 'registrar',
+    displayName: 'Registrar',
+    description: 'Admissions, enrolment and student records.',
+    tier: 'manager',
+    permissions: [
+      { resource: 'students', actions: [...ALL] },
+      { resource: 'guardians', actions: [...ALL] },
+      { resource: 'admissions', actions: [...ALL] },
+      { resource: 'enrolments', actions: [...ALL] },
+      { resource: 'courses', actions: ['view'] },
+      { resource: 'classes', actions: ['view'] },
+      { resource: 'reports', actions: ['view', 'export'] },
+    ],
+  },
+  {
+    name: 'hod',
+    displayName: 'Head of Department',
+    description: 'Leads a faculty/department — courses, classes and its teachers.',
+    tier: 'manager',
+    permissions: [
+      { resource: 'courses', actions: [...ALL] },
+      { resource: 'classes', actions: [...ALL] },
+      { resource: 'enrolments', actions: ['view', 'create', 'edit'] },
+      { resource: 'gradebook', actions: ['view', 'export'] },
+      { resource: 'timetable', actions: [...ALL] },
+      { resource: 'students', actions: ['view'] },
+      { resource: 'reports', actions: ['view', 'export'] },
+    ],
+  },
+  {
+    name: 'teacher',
+    displayName: 'Teacher',
+    description: 'Teaches classes — marks attendance and grades their own students.',
+    tier: 'employee',
+    permissions: [
+      // Scoped in-service to the teacher's own classes (the roster guard); the
+      // matrix grants the capability, not org-wide reach.
+      { resource: 'gradebook', actions: ['view', 'create', 'edit'] },
+      { resource: 'timetable', actions: ['view'] },
+      { resource: 'classes', actions: ['view'] },
+      { resource: 'students', actions: ['view'] },
+    ],
+  },
+  {
+    name: 'counsellor',
+    displayName: 'Counsellor',
+    description: 'Student wellbeing and guidance.',
+    tier: 'employee',
+    permissions: [
+      { resource: 'students', actions: ['view', 'edit'] },
+      { resource: 'guardians', actions: ['view'] },
+      { resource: 'attendance', actions: ['view'] },
+      { resource: 'reports', actions: ['view'] },
+    ],
+  },
+  {
+    name: 'warden',
+    displayName: 'Warden',
+    description: 'Hostel/boarding operations.',
+    tier: 'manager',
+    permissions: [
+      { resource: 'hostel', actions: [...ALL] },
+      { resource: 'students', actions: ['view'] },
+      { resource: 'guardians', actions: ['view'] },
+      { resource: 'attendance', actions: ['view'] },
+    ],
+  },
+  {
+    name: 'librarian',
+    displayName: 'Librarian',
+    description: 'Library catalogue and lending.',
+    tier: 'employee',
+    permissions: [
+      { resource: 'library', actions: [...ALL] },
+      { resource: 'students', actions: ['view'] },
+    ],
+  },
+  {
+    name: 'accountant',
+    displayName: 'Accountant',
+    description: 'Fees, invoicing and financial reporting.',
+    tier: 'manager',
+    permissions: [
+      { resource: 'fees', actions: [...ALL] },
+      { resource: 'students', actions: ['view'] },
+      { resource: 'guardians', actions: ['view'] },
+      { resource: 'reports', actions: ['view', 'export'] },
+    ],
+  },
+  {
+    name: 'student',
+    displayName: 'Student',
+    description: 'A learner — self-service access to their own academic surfaces.',
+    tier: 'viewer',
+    // Self-service surfaces (own timetable/gradebook/fees) need no org-wide
+    // permission; a Student role carries only read on shared catalogues.
+    permissions: eduView(['courses', 'classes', 'library']),
+  },
+  {
+    name: 'guardian',
+    displayName: 'Guardian',
+    description: "A parent/guardian — consent-gated view of their child's records.",
+    tier: 'viewer',
+    // A guardian's reach is decided per-link + consent (see the guardian module),
+    // not by an org-wide matrix; this role is the minimal shell.
+    permissions: eduView(['fees']),
+  },
+];
+
+/** The set of education-role slugs (used to protect + detect them). */
+export const EDUCATION_ROLE_NAMES = new Set(EDUCATION_ROLES.map((r) => r.name));
