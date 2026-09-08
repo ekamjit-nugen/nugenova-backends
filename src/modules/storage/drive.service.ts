@@ -1410,6 +1410,87 @@ export class DriveService {
   }
 
   /**
+   * Browse the contents of a folder shared WITH the current user through an
+   * internal grant. Mirrors `listShareFolder` (the public-share subtree browse),
+   * but authorizes by `drive_grants` instead of a share token and lists ORG-scoped
+   * (not owner-scoped) so the grantee sees the same files the owner does.
+   *
+   * @param folderId  the folder to list; `null` lists the granted folder itself.
+   *                  Must lie within the granted folder's subtree, else Forbidden.
+   */
+  async listGrantedFolder(
+    organizationId: string,
+    userId: string,
+    grantId: string,
+    folderId: string | null,
+  ): Promise<{
+    breadcrumb: Array<{ id: string; name: string }>;
+    folders: Array<{ id: string; name: string }>;
+    files: Array<{ id: string; name: string; size: number; mimeType: string }>;
+  }> {
+    const grant = await this.grants.findOne({
+      where: {
+        id: grantId,
+        organizationId,
+        granteeUserId: userId,
+        targetType: 'folder',
+      },
+    });
+    if (!grant) throw new NotFoundException('Shared folder not found');
+
+    const allowed = await this.collectSubtreeFolderIds(
+      organizationId,
+      grant.targetId,
+    );
+    const allowedSet = new Set(allowed);
+    const target = folderId || grant.targetId;
+    if (!allowedSet.has(target)) {
+      throw new ForbiddenException('Outside shared folder');
+    }
+
+    const [folders, files] = await Promise.all([
+      this.folders.find({
+        where: {
+          organizationId,
+          parentFolderId: target,
+          isDeleted: false,
+        },
+        order: { name: 'ASC' },
+      }),
+      this.files.find({
+        where: {
+          organizationId,
+          folderId: target,
+          isDeleted: false,
+        },
+        order: { name: 'ASC' },
+      }),
+    ]);
+
+    const breadcrumb: Array<{ id: string; name: string }> = [];
+    let cur: string | null = target;
+    for (let i = 0; i < 64 && cur && allowedSet.has(cur); i++) {
+      const fo: DriveFolderEntity | null = await this.folders.findOne({
+        where: { id: cur },
+      });
+      if (!fo) break;
+      breadcrumb.unshift({ id: fo.id, name: fo.name });
+      cur = cur === grant.targetId ? null : fo.parentFolderId;
+    }
+
+    return {
+      breadcrumb,
+      folders: folders.map((f) => ({ id: f.id, name: f.name })),
+      files: files.map((f) => ({
+        id: f.id,
+        name: f.name,
+        size: f.size,
+        mimeType: f.mimeType,
+      })),
+    };
+  }
+
+  /**
    * Resolve a file the user may WRITE to (rename / replace content): the owner of
    * a personal file, anyone for a team file, or a member holding an `edit` grant.
    * Throws 403 otherwise.

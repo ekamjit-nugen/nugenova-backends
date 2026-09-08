@@ -463,4 +463,57 @@ describe('DriveService', () => {
       expect(grantRepo.delete).toHaveBeenCalledWith({ id: 'g1', organizationId: 'orgA' });
     });
   });
+
+  describe('listGrantedFolder', () => {
+    // Subtree: root → sub. Files live directly under root.
+    const wireSubtree = () => {
+      folderRepo.find.mockImplementation(async (opts: any) =>
+        opts?.where?.parentFolderId === 'root' ? [{ id: 'sub', name: 'Sub' }] : [],
+      );
+      folderRepo.findOne.mockImplementation(async (opts: any) =>
+        opts?.where?.id === 'root'
+          ? { id: 'root', name: 'Root', parentFolderId: null }
+          : null,
+      );
+      fileRepo.find.mockImplementation(async (opts: any) =>
+        opts?.where?.folderId === 'root'
+          ? [{ id: 'f1', name: 'sheet.xlsx', size: 100, mimeType: 'application/vnd.ms-excel' }]
+          : [],
+      );
+    };
+
+    it('returns the subtree listing for a valid folder grant', async () => {
+      grantRepo.findOne.mockResolvedValue({
+        id: 'g1', organizationId: 'orgA', granteeUserId: 'bob', targetType: 'folder', targetId: 'root',
+      });
+      wireSubtree();
+      const res = await service.listGrantedFolder('orgA', 'bob', 'g1', null);
+      expect(res.breadcrumb).toEqual([{ id: 'root', name: 'Root' }]);
+      expect(res.folders).toEqual([{ id: 'sub', name: 'Sub' }]);
+      expect(res.files).toEqual([
+        { id: 'f1', name: 'sheet.xlsx', size: 100, mimeType: 'application/vnd.ms-excel' },
+      ]);
+      // Scoped by the grantee + folder target, org-scoped (not owner-scoped).
+      expect(grantRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'g1', organizationId: 'orgA', granteeUserId: 'bob', targetType: 'folder' },
+      });
+    });
+
+    it('rejects a folder outside the granted subtree', async () => {
+      grantRepo.findOne.mockResolvedValue({
+        id: 'g1', organizationId: 'orgA', granteeUserId: 'bob', targetType: 'folder', targetId: 'root',
+      });
+      wireSubtree();
+      await expect(
+        service.listGrantedFolder('orgA', 'bob', 'g1', 'outside'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('404s when the grant is missing / not the grantee / not a folder', async () => {
+      grantRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.listGrantedFolder('orgA', 'bob', 'nope', null),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
 });

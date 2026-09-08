@@ -364,6 +364,22 @@ export class DriveController {
     return this.drive.listSharedWithMe(req.user.organizationId, req.user.userId);
   }
 
+  /** Browse the contents of a folder shared WITH the current user (grant-scoped). */
+  @Get('shared/:grantId/list')
+  @UseGuards(CloudDriveAccessGuard)
+  async listGrantedFolder(
+    @Req() req: any,
+    @Param('grantId') grantId: string,
+    @Query('folderId') folderId?: string,
+  ) {
+    return this.drive.listGrantedFolder(
+      req.user.organizationId,
+      req.user.userId,
+      grantId,
+      folderId || null,
+    );
+  }
+
   // ─── External shares (management) ────────────────────────────────
 
   @Post('shares')
