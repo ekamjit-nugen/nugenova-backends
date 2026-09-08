@@ -23,6 +23,7 @@ import { LmsModule } from './modules/lms/lms.module';
 import { VerticalModule } from './modules/vertical/vertical.module';
 import { GuardianModule } from './modules/guardian/guardian.module';
 import { PlatformEventsModule } from './modules/platform-events/platform-events.module';
+import { DriveModule } from './modules/storage/drive.module';
 
 /**
  * Nugenova backend root module.
@@ -62,6 +63,7 @@ import { PlatformEventsModule } from './modules/platform-events/platform-events.
     LmsModule,
     VerticalModule,
     GuardianModule,
+    DriveModule,
   ],
 })
 export class AppModule {}

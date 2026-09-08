@@ -58,6 +58,7 @@ import { VerticalPack1788033000000 } from '../src/bootstrap/database/migrations/
 import { Guardian1788034000000 } from '../src/bootstrap/database/migrations/1788034000000-Guardian';
 import { ChatBookmark1788040000000 } from '../src/bootstrap/database/migrations/1788040000000-ChatBookmark';
 import { OrgChatSettings1788050000000 } from '../src/bootstrap/database/migrations/1788050000000-OrgChatSettings';
+import { CloudDrive1788080000000 } from '../src/bootstrap/database/migrations/1788080000000-CloudDrive';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -86,6 +87,10 @@ import { ClassSectionEntity } from '../src/modules/lms/entities/class-section.en
 import { EnrolmentEntity } from '../src/modules/lms/entities/enrolment.entity';
 import { GuardianLinkEntity } from '../src/modules/guardian/entities/guardian-link.entity';
 import { ConsentLedgerEntity } from '../src/modules/guardian/entities/consent-ledger.entity';
+import { DriveFolderEntity } from '../src/modules/storage/entities/drive-folder.entity';
+import { DriveFileEntity } from '../src/modules/storage/entities/drive-file.entity';
+import { DriveShareEntity } from '../src/modules/storage/entities/drive-share.entity';
+import { DriveQuotaEntity } from '../src/modules/storage/entities/drive-quota.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -156,6 +161,10 @@ module.exports = async function globalSetup(): Promise<void> {
       EnrolmentEntity,
       GuardianLinkEntity,
       ConsentLedgerEntity,
+      DriveFolderEntity,
+      DriveFileEntity,
+      DriveShareEntity,
+      DriveQuotaEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -202,6 +211,7 @@ module.exports = async function globalSetup(): Promise<void> {
       Guardian1788034000000,
       ChatBookmark1788040000000,
       OrgChatSettings1788050000000,
+      CloudDrive1788080000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

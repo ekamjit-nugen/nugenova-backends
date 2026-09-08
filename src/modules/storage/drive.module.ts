@@ -1,0 +1,58 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+
+import { AuthModule } from '../auth/auth.module';
+import { NotificationModule } from '../notification/notification.module';
+import { StorageModule } from '../../bootstrap/storage/storage.module';
+import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+
+import { DriveFolderEntity } from './entities/drive-folder.entity';
+import { DriveFileEntity } from './entities/drive-file.entity';
+import { DriveShareEntity } from './entities/drive-share.entity';
+import { DriveQuotaEntity } from './entities/drive-quota.entity';
+import { DriveService } from './drive.service';
+import { DriveController } from './drive.controller';
+import { DrivePublicController } from './drive-public.controller';
+import { CloudDriveAccessGuard } from './cloud-drive-access.guard';
+import { DriveAdminGuard } from './drive-admin.guard';
+import {
+  NoopOfficeConvertProvider,
+  OFFICE_CONVERT_PROVIDER,
+} from './office-convert.provider';
+
+/**
+ * Cloud Drive — per-tenant file vault (folders, files, quotas, external shares).
+ * Postgres/TypeORM port of the legacy Mongo `storage` module. Mounted under
+ * `/api/v1/storage`; the bootstrap media surface owns `/media`.
+ *
+ * Byte delegation: the drive stores only metadata — the actual bytes live in the
+ * shared bootstrap `StorageService` (S3 with a bytea fallback), referenced by
+ * `storageFileId`. No second byte store, and no presigned URLs: every download
+ * streams through the authenticated proxy.
+ *
+ * Office→PDF preview is a pluggable seam (`OFFICE_CONVERT_PROVIDER`) defaulting to
+ * a no-op — PDFs preview directly, other office types report "not convertible".
+ */
+@Module({
+  imports: [
+    AuthModule, // JwtAuthGuard machinery (JwtService + TokenRevocationService)
+    NotificationModule, // NotifierService (access-granted notification)
+    StorageModule, // shared byte store (StorageService)
+    TypeOrmModule.forFeature([
+      DriveFolderEntity,
+      DriveFileEntity,
+      DriveShareEntity,
+      DriveQuotaEntity,
+      OrgMembershipEntity, // per-user grant + quota override (cloudDrive jsonb)
+    ]),
+  ],
+  controllers: [DriveController, DrivePublicController],
+  providers: [
+    DriveService,
+    CloudDriveAccessGuard,
+    DriveAdminGuard,
+    { provide: OFFICE_CONVERT_PROVIDER, useClass: NoopOfficeConvertProvider },
+  ],
+  exports: [DriveService],
+})
+export class DriveModule {}
