@@ -53,6 +53,7 @@ import { OrgNotificationTypes1788010000000 } from '../src/bootstrap/database/mig
 import { Chat1788020000000 } from '../src/bootstrap/database/migrations/1788020000000-Chat';
 import { ChatBookmark1788040000000 } from '../src/bootstrap/database/migrations/1788040000000-ChatBookmark';
 import { OrgChatSettings1788050000000 } from '../src/bootstrap/database/migrations/1788050000000-OrgChatSettings';
+import { AiUsage1788090000000 } from '../src/bootstrap/database/migrations/1788090000000-AiUsage';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -74,6 +75,8 @@ import { ConversationEntity } from '../src/modules/chat/entities/conversation.en
 import { MessageEntity } from '../src/modules/chat/entities/message.entity';
 import { ChatBookmarkEntity } from '../src/modules/chat/entities/chat-bookmark.entity';
 import { OrgChatSettingEntity } from '../src/modules/chat/entities/org-chat-setting.entity';
+import { AiUsageEventEntity } from '../src/modules/ai/entities/ai-usage-event.entity';
+import { AiUsageCounterEntity } from '../src/modules/ai/entities/ai-usage-counter.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -137,6 +140,8 @@ module.exports = async function globalSetup(): Promise<void> {
       MessageEntity,
       ChatBookmarkEntity,
       OrgChatSettingEntity,
+      AiUsageEventEntity,
+      AiUsageCounterEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -178,6 +183,7 @@ module.exports = async function globalSetup(): Promise<void> {
       Chat1788020000000,
       ChatBookmark1788040000000,
       OrgChatSettings1788050000000,
+      AiUsage1788090000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
