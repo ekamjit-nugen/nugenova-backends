@@ -26,6 +26,7 @@ import { GuardianModule } from './modules/guardian/guardian.module';
 import { PlatformEventsModule } from './modules/platform-events/platform-events.module';
 import { DriveModule } from './modules/storage/drive.module';
 import { AiModule } from './modules/ai/ai.module';
+import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 
 /**
  * Nugenova backend root module.
@@ -68,6 +69,7 @@ import { AiModule } from './modules/ai/ai.module';
     GuardianModule,
     DriveModule,
     AiModule,
+    KnowledgeModule,
   ],
 })
 export class AppModule {}

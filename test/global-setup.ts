@@ -67,6 +67,7 @@ import { Assessment1788100000000 } from '../src/bootstrap/database/migrations/17
 // AI usage migration renumbered 1788090000000 -> 1788120000000 to avoid the
 // timestamp collision with PlatformLimits1788090000000.
 import { AiUsage1788120000000 } from '../src/bootstrap/database/migrations/1788120000000-AiUsage';
+import { KnowledgeChunks1788130000000 } from '../src/bootstrap/database/migrations/1788130000000-KnowledgeChunks';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -103,6 +104,7 @@ import { DriveShareEntity } from '../src/modules/storage/entities/drive-share.en
 import { DriveQuotaEntity } from '../src/modules/storage/entities/drive-quota.entity';
 import { AiUsageEventEntity } from '../src/modules/ai/entities/ai-usage-event.entity';
 import { AiUsageCounterEntity } from '../src/modules/ai/entities/ai-usage-counter.entity';
+import { KnowledgeChunkEntity } from '../src/modules/knowledge/entities/knowledge-chunk.entity';
 
 /**
  * Jest globalSetup for the e2e suite. Runs ONCE before the app boots and makes
@@ -183,6 +185,7 @@ module.exports = async function globalSetup(): Promise<void> {
       DriveGrantEntity,
       AiUsageEventEntity,
       AiUsageCounterEntity,
+      KnowledgeChunkEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -234,6 +237,7 @@ module.exports = async function globalSetup(): Promise<void> {
       Assessment1788100000000,
       DriveGrants1788110000000,
       AiUsage1788120000000,
+      KnowledgeChunks1788130000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
