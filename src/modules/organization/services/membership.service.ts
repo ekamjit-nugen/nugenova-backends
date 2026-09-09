@@ -17,6 +17,7 @@ import { AddMemberDto } from '../dto';
 import { ROLE_NAME_TO_TIER } from '../default-roles';
 import { OrgLimitsService } from './org-limits.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
+import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
 
 export interface MemberView {
   membershipId: string;
@@ -40,6 +41,17 @@ export interface MemberView {
   employeeCode: string | null;
   employmentType: string | null;
   joiningDate: Date | null;
+  // Submitted HR documents (member-onboarding slots that have a file), populated
+  // on the detail view so the directory can show/download them.
+  documents?: MemberDocumentView[];
+}
+
+export interface MemberDocumentView {
+  key: string;
+  title: string;
+  status: string;
+  fileId: string;
+  uploadedAt: string | null;
 }
 
 /**
@@ -59,6 +71,8 @@ export class MembershipService {
     private readonly roleRepo: Repository<RoleEntity>,
     @InjectRepository(OrganizationEntity)
     private readonly orgRepo: Repository<OrganizationEntity>,
+    @InjectRepository(MemberOnboardingEntity)
+    private readonly onboardingRepo: Repository<MemberOnboardingEntity>,
     private readonly limits: OrgLimitsService,
     private readonly mail: MailService,
   ) {}
@@ -206,7 +220,33 @@ export class MembershipService {
     const user = m.userId
       ? await this.userRepo.findOne({ where: { id: m.userId } })
       : null;
-    return this.toView(m, user || undefined);
+    const view = this.toView(m, user || undefined);
+    view.documents = await this.memberDocuments(orgId, membershipId);
+    return view;
+  }
+
+  /**
+   * The member's submitted HR documents — the member-onboarding slots that have
+   * an actual file attached (empty/pending requests are omitted). Surfaced on
+   * the directory detail view; each `fileId` streams via the `/media` proxy.
+   */
+  private async memberDocuments(
+    orgId: string,
+    membershipId: string,
+  ): Promise<MemberDocumentView[]> {
+    const onboarding = await this.onboardingRepo.findOne({
+      where: { organizationId: orgId, membershipId },
+    });
+    if (!onboarding) return [];
+    return (onboarding.documents || [])
+      .filter((d) => d.fileId)
+      .map((d) => ({
+        key: d.key,
+        title: d.title,
+        status: d.status,
+        fileId: d.fileId as string,
+        uploadedAt: d.uploadedAt ? new Date(d.uploadedAt).toISOString() : null,
+      }));
   }
 
   async updateMember(

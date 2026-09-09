@@ -13,6 +13,7 @@ import { UserEntity } from '../../auth/entities/user.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { MailService } from '../../../bootstrap/mail/mail.service';
+import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
 
 /**
  * Pure unit specs — NO database. Focus on addMember's role resolution: enforced
@@ -50,6 +51,7 @@ describe('MembershipService (unit, no DB)', () => {
         { provide: getRepositoryToken(UserEntity), useValue: userRepo },
         { provide: getRepositoryToken(RoleEntity), useValue: roleRepo },
         { provide: getRepositoryToken(OrganizationEntity), useValue: orgRepo },
+        { provide: getRepositoryToken(MemberOnboardingEntity), useValue: passthrough() },
         { provide: OrgLimitsService, useValue: limits },
         { provide: MailService, useValue: mail },
       ],
