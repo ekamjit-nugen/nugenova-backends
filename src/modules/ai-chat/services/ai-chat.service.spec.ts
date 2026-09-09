@@ -21,6 +21,7 @@ describe('AiChatService', () => {
   let submit: jest.Mock;
   let complete: jest.Mock;
   let search: jest.Mock;
+  let buildAiAttendanceContext: jest.Mock;
   let service: AiChatService;
   let worker: AiJobWorker;
 
@@ -56,12 +57,18 @@ describe('AiChatService', () => {
     ]);
     const retrieval = { search };
 
+    // Attendance grounding is exercised in its own spec; default to "not an
+    // attendance question" (null) so these RAG-focused cases are unaffected.
+    buildAiAttendanceContext = jest.fn().mockResolvedValue(null);
+    const attendance = { buildAiAttendanceContext };
+
     service = new AiChatService(
       conversations as any,
       messages as any,
       jobs as any,
       ai as any,
       retrieval as any,
+      attendance as any,
     );
     service.onModuleInit();
     worker = registerWorker.mock.calls[0][1]; // the 'chat' worker callback

@@ -5,6 +5,7 @@ import { In, LessThan, Repository } from 'typeorm';
 import { AiService } from '../../ai/services/ai.service';
 import { LlmMessage } from '../../ai/providers/llm-provider';
 import { AiUsageFeature } from '../../ai/entities/ai-usage-event.entity';
+import { AttendanceService, Caller } from '../../attendance/services/attendance.service';
 import {
   KnowledgeRetrievalService,
   RetrievedChunk,
@@ -22,12 +23,28 @@ export const CHATBOT_FEATURE: AiUsageFeature = 'chatbot';
 /** Prior turns fed back to the model as context (caps prompt growth). */
 export const MAX_HISTORY_MESSAGES = 12;
 
+/**
+ * The caller's permission snapshot (from the trusted JWT) threaded to the async
+ * worker so it can build an attendance `Caller` and apply the SAME
+ * `attendance:view` gate the HTTP guard applies — the chatbot answers "who's
+ * present / who hasn't clocked in" for managers/owners/admins only.
+ */
+export interface AiCallerContext {
+  orgRole: string | null;
+  roles: string[];
+  perms: Record<string, string[]> | null;
+  permScoped: boolean;
+  departmentScopeId: string | null;
+}
+
 /** Input carried on the AiJob row for a 'chat' job. */
 interface ChatJobInput {
   conversationId: string;
   userMessageId: string;
   assistantMessageId: string;
   query: string;
+  /** Caller permission snapshot for permission-gated grounding (attendance). */
+  caller?: AiCallerContext;
 }
 
 /**
@@ -66,6 +83,7 @@ export class AiChatService implements OnModuleInit {
     private readonly jobs: AiJobService,
     private readonly ai: AiService,
     private readonly retrieval: KnowledgeRetrievalService,
+    private readonly attendance: AttendanceService,
   ) {}
 
   onModuleInit(): void {
@@ -145,6 +163,7 @@ export class AiChatService implements OnModuleInit {
     userId: string,
     conversationId: string,
     content: string,
+    caller?: AiCallerContext,
   ) {
     const conv = await this.loadOwnedConversation(organizationId, userId, conversationId);
     const text = content.trim();
@@ -185,6 +204,7 @@ export class AiChatService implements OnModuleInit {
         userMessageId: userMessage.id,
         assistantMessageId: assistantMessage.id,
         query: text,
+        caller,
       } satisfies ChatJobInput,
     });
 
@@ -253,10 +273,14 @@ export class AiChatService implements OnModuleInit {
       );
       const grounded = chunks.length > 0;
 
+      // Permission-gated live grounding (e.g. attendance roster) — only when the
+      // question calls for it AND the caller is authorised. Never breaks chat.
+      const liveContext = await this.buildLiveContext(job, input);
+
       // build history (capped) + the grounded system block
       const history = await this.buildHistory(input.conversationId, input.assistantMessageId);
       const llmMessages: LlmMessage[] = [
-        { role: 'system', content: this.buildSystemPrompt(chunks) },
+        { role: 'system', content: this.buildSystemPrompt(chunks, liveContext) },
         ...history,
       ];
 
@@ -331,8 +355,38 @@ export class AiChatService implements OnModuleInit {
     return usable.map((m) => ({ role: m.role, content: m.content }));
   }
 
-  /** Numbered grounding block when chunks exist; a general block otherwise. */
-  private buildSystemPrompt(chunks: RetrievedChunk[]): string {
+  /**
+   * Permission-gated live context appended to the system prompt for questions
+   * that need real-time, access-controlled data (today: attendance). Runs in the
+   * worker off the JWT snapshot threaded on the job; any failure is swallowed so
+   * a hiccup here never breaks the chat answer.
+   */
+  private async buildLiveContext(
+    job: AiJobEntity,
+    input: ChatJobInput,
+  ): Promise<string | null> {
+    const cc = input.caller;
+    if (!cc || !job.organizationId) return null;
+    try {
+      const caller: Caller = {
+        userId: job.userId,
+        orgId: job.organizationId,
+        roles: cc.roles ?? [],
+        orgRole: cc.orgRole ?? null,
+        perms: cc.perms ?? null,
+        permScoped: cc.permScoped ?? false,
+        departmentScopeId: cc.departmentScopeId ?? null,
+      };
+      return await this.attendance.buildAiAttendanceContext(caller, input.query);
+    } catch (err) {
+      this.logger.warn(`Live attendance context skipped: ${String(err)}`);
+      return null;
+    }
+  }
+
+  /** Numbered grounding block when chunks exist; a general block otherwise. An
+   * optional permission-gated `live` block (e.g. attendance) is appended verbatim. */
+  private buildSystemPrompt(chunks: RetrievedChunk[], live?: string | null): string {
     const base =
       'You are a helpful organization assistant in a multi-turn conversation. ' +
       'Use the numbered context passages below when they are relevant, cite the ' +
@@ -340,11 +394,14 @@ export class AiChatService implements OnModuleInit {
       'turns into account. If the context does not contain the answer, say you ' +
       'could not find it in the organization documents rather than guessing.';
 
+    const liveBlock = live ? `\n\n${live}` : '';
+
     if (chunks.length === 0) {
       return (
         base +
         '\n\nNo relevant organization documents were found for this question. ' +
-        'Answer from general knowledge and make clear the answer is NOT grounded in org documents.'
+        'Answer from general knowledge and make clear the answer is NOT grounded in org documents.' +
+        liveBlock
       );
     }
 
@@ -352,7 +409,7 @@ export class AiChatService implements OnModuleInit {
       .map((c, i) => `[${i + 1}] (${c.sourceName}, chunk ${c.chunkIndex})\n${c.content}`)
       .join('\n\n');
     const sourceList = chunks.map((c, i) => `[${i + 1}] ${c.sourceName}`).join('\n');
-    return `${base}\n\nContext passages:\n${passages}\n\nSources:\n${sourceList}`;
+    return `${base}\n\nContext passages:\n${passages}\n\nSources:\n${sourceList}${liveBlock}`;
   }
 
   /** A short title derived from the first user message. */

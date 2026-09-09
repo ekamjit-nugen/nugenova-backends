@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { AttendanceModule } from '../attendance/attendance.module';
 
 import { AiConversationEntity } from './entities/ai-conversation.entity';
 import { AiMessageEntity } from './entities/ai-message.entity';
@@ -36,6 +37,7 @@ import { AiChatController } from './ai-chat.controller';
     AuthModule,
     AiModule,
     KnowledgeModule,
+    AttendanceModule,
     TypeOrmModule.forFeature([AiConversationEntity, AiMessageEntity, AiJobEntity]),
   ],
   controllers: [AiChatController],
