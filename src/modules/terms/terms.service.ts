@@ -286,10 +286,26 @@ export class TermsService implements OnModuleInit {
     );
   }
 
-  /** The active T&C document for the owner's consent screen (or null if none). */
+  /**
+   * The active T&C document for the owner's consent screen (or null if none).
+   *
+   * `this.active` is a per-process in-memory cache that only THIS process
+   * refreshes (on its own writes + at boot). If the DB is changed elsewhere —
+   * another instance calling `activate`, or a direct DB edit — this pointer can
+   * go stale and reference a row that no longer exists. Rather than 404 the
+   * whole consent screen, reconcile with the DB: re-read the row, and on a miss
+   * refresh the cache once and retry, returning null only when there is truly no
+   * active T&C. This read path never throws for a stale pointer.
+   */
   async getActiveForConsent(): Promise<TermsDoc | null> {
     if (!this.active) return null;
-    return this.get(this.active.id);
+    let row = await this.repo.findOne({ where: { id: this.active.id } });
+    if (!row) {
+      await this.refreshCache();
+      if (!this.active) return null;
+      row = await this.repo.findOne({ where: { id: this.active.id } });
+    }
+    return row ? this.toDoc(row) : null;
   }
 
   /** The doc for the owner's consent screen (by the org's assigned termsId). */

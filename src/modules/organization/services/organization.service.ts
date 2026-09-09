@@ -489,11 +489,12 @@ export class OrganizationService {
     ua?: string,
   ): Promise<OrgPublic> {
     const org = await this.getEntity(orgId);
-    const active = this.terms.getActive();
-    if (!active) {
+    // Resolve the active doc against the DB (self-heals a stale in-memory
+    // pointer) so acceptance never 404s on a doc the cache thinks is active.
+    const doc = await this.terms.getActiveForConsent();
+    if (!doc) {
       throw new BadRequestException('No active Terms & Conditions to accept');
     }
-    const doc = await this.terms.get(active.id);
     org.consent = {
       termsId: doc.id,
       version: doc.version,

@@ -183,4 +183,39 @@ describe('TermsService (unit, no DB)', () => {
       expect(out.filename).toBe('terms.pdf');
     });
   });
+
+  // Regression: the in-memory `active` pointer can go stale when the DB is
+  // changed by another process (another instance's activate, or a direct DB
+  // edit). The consent read path must reconcile with the DB, never 404.
+  describe('getActiveForConsent (stale-cache self-heal)', () => {
+    it('returns the active doc without a refresh on the happy path', async () => {
+      repo.find.mockResolvedValueOnce([{ id: 't1', version: 3, isActive: true }]);
+      await service.onModuleInit();
+      const t1 = { id: 't1', title: 'Std', version: 3, kind: 'html', text: 'body', fileId: null, isActive: true, updatedAt: new Date() };
+      repo.findOne.mockResolvedValueOnce(t1);
+      const doc = await service.getActiveForConsent();
+      expect(doc?.id).toBe('t1');
+    });
+
+    it('self-heals when the cached active id was deleted and a new doc is now active', async () => {
+      repo.find.mockResolvedValueOnce([{ id: 't1', version: 3, isActive: true }]);
+      await service.onModuleInit(); // active = t1
+      // t1 is gone from the DB; t2 is now the active doc.
+      repo.findOne.mockResolvedValueOnce(null); // findOne(t1) → miss
+      repo.find.mockResolvedValueOnce([{ id: 't2', version: 1, isActive: true }]); // refreshCache
+      const t2 = { id: 't2', title: 'New', version: 1, kind: 'html', text: 'new terms body', fileId: null, isActive: true, updatedAt: new Date() };
+      repo.findOne.mockResolvedValueOnce(t2); // findOne(t2) → hit
+      const doc = await service.getActiveForConsent();
+      expect(doc?.id).toBe('t2');
+      expect(service.getActive()).toEqual({ id: 't2', version: 1 });
+    });
+
+    it('returns null (never throws) when the cached active id is gone and nothing is active', async () => {
+      repo.find.mockResolvedValueOnce([{ id: 't1', version: 3, isActive: true }]);
+      await service.onModuleInit();
+      repo.findOne.mockResolvedValueOnce(null); // findOne(t1) → miss
+      repo.find.mockResolvedValueOnce([]); // refreshCache → no active row
+      await expect(service.getActiveForConsent()).resolves.toBeNull();
+    });
+  });
 });
