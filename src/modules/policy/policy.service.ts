@@ -371,6 +371,69 @@ export class PolicyService {
     });
   }
 
+  /**
+   * The effective timeline of a policy's work-timing: one segment per version,
+   * each covering the interval [from, to) that version governed. Reconstructed
+   * from the immutable version snapshots (each captured the policy BEFORE the
+   * edit that superseded it, so its `createdAt` is when that version ENDED) plus
+   * the current live row (the open-ended last segment). Ordered oldest → newest.
+   *
+   * Used to answer "which policy version — and what hours — governed this
+   * attendance record?" for a given record date. Skips the org-scoped existence
+   * check (callers pass an id they resolved for the org); returns [] if unknown.
+   */
+  async getWorkTimingTimeline(
+    orgId: string,
+    policyId: string,
+  ): Promise<
+    Array<{
+      version: number;
+      from: Date | null;
+      to: Date | null;
+      policyName: string;
+      workTiming: WorkTimingConfig | null;
+    }>
+  > {
+    const live = await this.repo.findOne({
+      where: { id: policyId, organizationId: orgId },
+    });
+    if (!live) return [];
+    const history = await this.versions.find({
+      where: { organizationId: orgId, policyId },
+      order: { version: 'ASC' },
+    });
+    const segments: Array<{
+      version: number;
+      from: Date | null;
+      to: Date | null;
+      policyName: string;
+      workTiming: WorkTimingConfig | null;
+    }> = [];
+    let prevTo: Date | null = null;
+    for (const h of history) {
+      const snap = (h.snapshot ?? {}) as {
+        policyName?: string;
+        workTiming?: WorkTimingConfig | null;
+      };
+      segments.push({
+        version: h.version,
+        from: prevTo,
+        to: h.createdAt,
+        policyName: snap.policyName ?? live.policyName,
+        workTiming: snap.workTiming ?? null,
+      });
+      prevTo = h.createdAt;
+    }
+    segments.push({
+      version: live.version,
+      from: prevTo,
+      to: null,
+      policyName: live.policyName,
+      workTiming: live.workTiming ?? null,
+    });
+    return segments;
+  }
+
   async remove(orgId: string, id: string): Promise<void> {
     const policy = await this.get(orgId, id);
     if (policy.isTemplate) throw new ForbiddenException('Templates cannot be deleted');
