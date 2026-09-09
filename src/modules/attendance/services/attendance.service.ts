@@ -714,9 +714,22 @@ export class AttendanceService {
       take: MAX_LIST_ROWS,
     });
     rows = await this.filterByDepartment(rows, c.orgId, q.departmentId);
+    // Owners aren't part of the tracked attendance list.
+    const ownerIds = new Set(
+      (await this.memberships.find({ where: { organizationId: c.orgId, role: 'owner' } }))
+        .map((m) => m.userId)
+        .filter(Boolean) as string[],
+    );
+    if (ownerIds.size) rows = rows.filter((r) => !ownerIds.has(r.employeeId));
     const named = await this.attachEmployeeNames(rows);
     const filtered = q.search
-      ? named.filter((r: any) => (r.employeeName || '').toLowerCase().includes(q.search!.toLowerCase()))
+      ? named.filter((r: any) => {
+          const s = q.search!.toLowerCase();
+          return (
+            (r.employeeName || '').toLowerCase().includes(s) ||
+            (r.employeeEmail || '').toLowerCase().includes(s)
+          );
+        })
       : named;
     return this.attachPolicyWindow(c.orgId, filtered);
   }
@@ -1254,10 +1267,11 @@ export class AttendanceService {
     const dayKey = anchor.toISOString().slice(0, 10);
     const weekend = anchor.getUTCDay() === 0 || anchor.getUTCDay() === 6;
 
-    // Active roster (department-narrowed for a scoped lead).
+    // Active roster (department-narrowed for a scoped lead). The org owner is
+    // excluded — owners manage attendance, they aren't part of the tracked roster.
     const scope = await this.departmentScopeIds(c);
     const members = (await this.memberships.find({ where: { organizationId: c.orgId, status: 'active' } }))
-      .filter((m) => m.userId && (!scope || scope.has(m.userId)));
+      .filter((m) => m.userId && m.role !== 'owner' && (!scope || scope.has(m.userId)));
     const ids = members.map((m) => m.userId as string);
     if (!ids.length) {
       return { date: dayKey, rows: [], summary: { total: 0, clockedIn: 0, notClockedIn: 0, onLeave: 0, absent: 0 } };
@@ -1632,16 +1646,18 @@ export class AttendanceService {
   /** Attach `employeeName` to rows from the user directory (by auth userId). */
   private async attachEmployeeNames(
     rows: AttendanceEntity[],
-  ): Promise<Array<AttendanceEntity & { employeeName: string }>> {
+  ): Promise<Array<AttendanceEntity & { employeeName: string; employeeEmail: string | null }>> {
     if (!rows.length) return rows as any;
     const ids = [...new Set(rows.map((r) => r.employeeId))];
     const users = await this.users.find({ where: { id: In(ids) } });
     const nameById = new Map(
       users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim() || u.email]),
     );
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
     return rows.map((r) => ({
       ...r,
       employeeName: nameById.get(r.employeeId) || 'Unknown',
+      employeeEmail: emailById.get(r.employeeId) ?? null,
     })) as any;
   }
 

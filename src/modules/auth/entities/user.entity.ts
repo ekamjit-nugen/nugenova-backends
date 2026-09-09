@@ -63,6 +63,14 @@ export class UserEntity extends PgBaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   timezone: string | null;
 
+  /** Person-level HR attributes carried over from the legacy Nugen employee record. */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  dateOfBirth: Date | null;
+
+  /** Free-form skill tags (legacy `employee.skills`); jsonb to tolerate string[] or object[]. */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  skills: unknown[] | null;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   linkedIn: string | null;
 

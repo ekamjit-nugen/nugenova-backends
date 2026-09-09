@@ -12,9 +12,11 @@ import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { staffScope } from '../../auth/entities/person-type';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
+import { OrganizationEntity } from '../entities/organization.entity';
 import { AddMemberDto } from '../dto';
 import { ROLE_NAME_TO_TIER } from '../default-roles';
 import { OrgLimitsService } from './org-limits.service';
+import { MailService } from '../../../bootstrap/mail/mail.service';
 
 export interface MemberView {
   membershipId: string;
@@ -28,6 +30,16 @@ export interface MemberView {
   departmentId: string | null;
   status: string;
   joinedAt: Date | null;
+  // Profile + HR attributes (for the member detail view).
+  avatar: string | null;
+  phoneNumber: string | null;
+  jobTitle: string | null;
+  location: string | null;
+  timezone: string | null;
+  dateOfBirth: Date | null;
+  employeeCode: string | null;
+  employmentType: string | null;
+  joiningDate: Date | null;
 }
 
 /**
@@ -45,7 +57,10 @@ export class MembershipService {
     private readonly userRepo: Repository<UserEntity>,
     @InjectRepository(RoleEntity)
     private readonly roleRepo: Repository<RoleEntity>,
+    @InjectRepository(OrganizationEntity)
+    private readonly orgRepo: Repository<OrganizationEntity>,
     private readonly limits: OrgLimitsService,
+    private readonly mail: MailService,
   ) {}
 
   /**
@@ -166,6 +181,13 @@ export class MembershipService {
       where: staffScope({ organizationId: orgId }),
       order: { createdAt: 'ASC' },
     });
+    // Default ordering: active (and any non-deactivated) members first, then
+    // deactivated ones at the bottom. Stable sort preserves join order within
+    // each group (Array.prototype.sort is stable in modern Node).
+    const isDeactivated = (s: string) => s === 'deactivated';
+    memberships.sort(
+      (a, b) => Number(isDeactivated(a.status)) - Number(isDeactivated(b.status)),
+    );
     const userIds = memberships.map((m) => m.userId).filter(Boolean) as string[];
     const users = userIds.length
       ? await this.userRepo.find({ where: { id: In(userIds) } })
@@ -190,12 +212,33 @@ export class MembershipService {
   async updateMember(
     orgId: string,
     membershipId: string,
-    patch: { role?: string; roleId?: string | null; departmentId?: string | null },
+    patch: {
+      role?: string;
+      roleId?: string | null;
+      departmentId?: string | null;
+      status?: 'active' | 'deactivated';
+    },
+    actorUserId?: string,
   ): Promise<MemberView> {
     const m = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId: orgId },
     });
     if (!m) throw new NotFoundException('Member not found');
+
+    // Temporary disable / re-enable (org-scoped). The owner can never be disabled.
+    if (patch.status !== undefined && patch.status !== m.status) {
+      if (m.role === 'owner' && patch.status === 'deactivated') {
+        throw new BadRequestException('The organization owner cannot be deactivated.');
+      }
+      m.status = patch.status;
+      if (patch.status === 'deactivated') {
+        m.deactivatedAt = new Date();
+        m.deactivatedBy = actorUserId ?? null;
+      } else {
+        m.deactivatedAt = null;
+        m.deactivatedBy = null;
+      }
+    }
 
     // Apply the department first so role↔department validation sees the new dept.
     if (patch.departmentId !== undefined) m.departmentId = patch.departmentId || null;
@@ -238,6 +281,75 @@ export class MembershipService {
     return this.toView(m, user || undefined);
   }
 
+  /**
+   * Change a member's sign-in email. SECURITY-SENSITIVE: the OLD address is
+   * always notified — directly via {@link MailService} (the transactional
+   * mailer), NOT the preference-gated notifier — so the change reaches the
+   * previous owner even if they have every in-app/email notification turned off.
+   */
+  async changeEmail(
+    orgId: string,
+    membershipId: string,
+    newEmailRaw: string,
+    actorUserId?: string,
+  ): Promise<MemberView> {
+    const m = await this.membershipRepo.findOne({
+      where: { id: membershipId, organizationId: orgId },
+    });
+    if (!m) throw new NotFoundException('Member not found');
+    if (!m.userId) {
+      throw new BadRequestException('This member has no user account yet (invite pending).');
+    }
+    const user = await this.userRepo.findOne({ where: { id: m.userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const newEmail = newEmailRaw.trim().toLowerCase();
+    const oldEmail = user.email;
+    if (newEmail === oldEmail) return this.toView(m, user);
+
+    // Uniqueness: no other user may already own this email.
+    const clash = await this.userRepo.findOne({ where: { email: newEmail } });
+    if (clash && clash.id !== user.id) {
+      throw new ConflictException('That email is already in use by another account.');
+    }
+
+    user.email = newEmail;
+    await this.userRepo.save(user);
+    // Keep the membership's denormalised email aligned when it carries one.
+    if (m.email) {
+      m.email = newEmail;
+      await this.membershipRepo.save(m);
+    }
+
+    // Notify the OLD address — unconditionally (bypasses notification prefs).
+    if (oldEmail) {
+      const org = await this.orgRepo.findOne({ where: { id: orgId } });
+      const orgName = org?.name || 'your organization';
+      const name = user.firstName ? `${user.firstName}` : 'there';
+      const when = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+      await this.mail.send({
+        to: oldEmail,
+        subject: `Security notice: the email on your ${orgName} account was changed`,
+        html:
+          `<p>Hi ${name},</p>` +
+          `<p>The sign-in email for your <strong>${orgName}</strong> account was just changed from ` +
+          `<strong>${oldEmail}</strong> to <strong>${newEmail}</strong> by an administrator on ${when}.</p>` +
+          `<p>You are receiving this at your previous email as a security precaution. ` +
+          `<strong>If you did not expect this change, contact your organization administrator immediately</strong> — ` +
+          `your account may be compromised.</p>` +
+          `<p>— ${orgName} (via Nugenova)</p>`,
+        text:
+          `Hi ${name},\n\nThe sign-in email for your ${orgName} account was changed from ${oldEmail} ` +
+          `to ${newEmail} by an administrator on ${when}.\n\nYou are receiving this at your previous email ` +
+          `as a security precaution. If you did not expect this change, contact your organization ` +
+          `administrator immediately.\n\n— ${orgName} (via Nugenova)`,
+      });
+    }
+    void actorUserId; // reserved for future audit-log correlation
+
+    return this.toView(m, user);
+  }
+
   async removeMember(orgId: string, membershipId: string): Promise<void> {
     const m = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId: orgId },
@@ -262,6 +374,15 @@ export class MembershipService {
       departmentId: m.departmentId ?? null,
       status: m.status,
       joinedAt: m.joinedAt,
+      avatar: user?.avatar ?? null,
+      phoneNumber: user?.phoneNumber ?? null,
+      jobTitle: user?.jobTitle ?? null,
+      location: user?.location ?? null,
+      timezone: user?.timezone ?? null,
+      dateOfBirth: user?.dateOfBirth ?? null,
+      employeeCode: m.employeeCode ?? null,
+      employmentType: m.employmentType ?? null,
+      joiningDate: m.joiningDate ?? null,
     };
   }
 }

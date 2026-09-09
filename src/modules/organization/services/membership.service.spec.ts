@@ -11,6 +11,8 @@ import { OrgLimitsService } from './org-limits.service';
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
+import { OrganizationEntity } from '../entities/organization.entity';
+import { MailService } from '../../../bootstrap/mail/mail.service';
 
 /**
  * Pure unit specs — NO database. Focus on addMember's role resolution: enforced
@@ -22,7 +24,9 @@ describe('MembershipService (unit, no DB)', () => {
   let membershipRepo: any;
   let userRepo: any;
   let roleRepo: any;
+  let orgRepo: any;
   let limits: any;
+  let mail: any;
 
   const passthrough = () => ({
     findOne: jest.fn(),
@@ -36,14 +40,18 @@ describe('MembershipService (unit, no DB)', () => {
     membershipRepo = passthrough();
     userRepo = passthrough();
     roleRepo = passthrough();
+    orgRepo = passthrough();
     limits = { assertSeatAvailable: jest.fn().mockResolvedValue(undefined) };
+    mail = { send: jest.fn().mockResolvedValue(undefined) };
     const moduleRef = await Test.createTestingModule({
       providers: [
         MembershipService,
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: membershipRepo },
         { provide: getRepositoryToken(UserEntity), useValue: userRepo },
         { provide: getRepositoryToken(RoleEntity), useValue: roleRepo },
+        { provide: getRepositoryToken(OrganizationEntity), useValue: orgRepo },
         { provide: OrgLimitsService, useValue: limits },
+        { provide: MailService, useValue: mail },
       ],
     }).compile();
     service = moduleRef.get(MembershipService);

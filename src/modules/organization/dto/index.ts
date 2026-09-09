@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsIn,
   IsInt,
   IsObject,
   IsOptional,
@@ -232,6 +233,19 @@ export class UpdateMemberDto {
   @IsOptional()
   @IsString()
   departmentId?: string;
+
+  /** Temporarily disable / re-enable the member in this org. */
+  @IsOptional()
+  @IsIn(['active', 'deactivated'])
+  status?: 'active' | 'deactivated';
+}
+
+/** Change a member's sign-in email (security-sensitive — old email is notified). */
+export class ChangeMemberEmailDto {
+  @Transform(trimLowerEmail)
+  @IsEmail({}, { message: 'email must be a valid email address' })
+  @MaxLength(254)
+  email: string;
 }
 
 export class AddMemberDto {

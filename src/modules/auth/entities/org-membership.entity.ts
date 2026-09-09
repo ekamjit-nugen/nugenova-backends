@@ -101,4 +101,21 @@ export class OrgMembershipEntity extends PgBaseEntity {
 
   @Column({ type: 'jsonb', nullable: true, default: null })
   cloudDrive: Record<string, unknown> | null;
+
+  // ── Employment attributes (per-org staff record) ────────────────────────────
+  // Carried from the legacy Nugen `employee` document. There is no separate
+  // employee table — the person IS this membership — so employment metadata that
+  // has no other home lands here.
+
+  /** Human-facing employee code / id from the legacy HR system (e.g. "NUGEN-042"). */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  employeeCode: string | null;
+
+  /** full_time | part_time | contract | intern | consultant (legacy free string). */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  employmentType: string | null;
+
+  /** Date the person joined this organization (legacy `employee.joiningDate`). */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  joiningDate: Date | null;
 }

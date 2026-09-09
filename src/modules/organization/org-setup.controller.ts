@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Put,
   Req,
@@ -21,6 +22,7 @@ import { MembershipService } from './services/membership.service';
 import { OrganizationService } from './services/organization.service';
 import {
   AddMemberDto,
+  ChangeMemberEmailDto,
   CreateDepartmentDto,
   CreateRoleDto,
   UpdateDepartmentDto,
@@ -178,6 +180,13 @@ export class OrgSetupController {
     return { success: true, data };
   }
 
+  @Get('members/:id')
+  @RequirePermission('employees', 'view')
+  async getMember(@Param('id') id: string, @Req() req: any) {
+    const data = await this.members.get(this.orgId(req), id);
+    return { success: true, data };
+  }
+
   @Put('members/:id')
   @RequirePermission('employees', 'edit')
   async updateMember(
@@ -185,7 +194,19 @@ export class OrgSetupController {
     @Body() dto: UpdateMemberDto,
     @Req() req: any,
   ) {
-    const data = await this.members.updateMember(this.orgId(req), id, dto);
+    const data = await this.members.updateMember(this.orgId(req), id, dto, req.user.userId);
+    return { success: true, data };
+  }
+
+  /** Change a member's sign-in email. The OLD email is always notified. */
+  @Patch('members/:id/email')
+  @RequirePermission('employees', 'edit')
+  async changeMemberEmail(
+    @Param('id') id: string,
+    @Body() dto: ChangeMemberEmailDto,
+    @Req() req: any,
+  ) {
+    const data = await this.members.changeEmail(this.orgId(req), id, dto.email, req.user.userId);
     return { success: true, data };
   }
 
