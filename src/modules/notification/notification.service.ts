@@ -78,6 +78,33 @@ export class NotificationService {
   ) {}
 
   /** Persist one notification. Returns the created row's view. */
+  /**
+   * True if an identical in-app notification (same user, type, title, body) was
+   * already created within `withinMs`. Guards against duplicate delivery when a
+   * scheduled job fires twice (e.g. across a dev restart) so the same reminder
+   * doesn't show up two (or more) times.
+   */
+  async hasRecentDuplicate(
+    userId: string,
+    type: string,
+    title: string,
+    body: string | null,
+    withinMs = 6 * 60 * 60 * 1000,
+  ): Promise<boolean> {
+    const since = new Date(Date.now() - withinMs);
+    const qb = this.repo
+      .createQueryBuilder('n')
+      .select('n.id')
+      .where('n.userId = :userId', { userId })
+      .andWhere('n.type = :type', { type })
+      .andWhere('n.title = :title', { title })
+      .andWhere('n.isDeleted = false')
+      .andWhere('n.createdAt > :since', { since });
+    if (body === null || body === undefined) qb.andWhere('n.body IS NULL');
+    else qb.andWhere('n.body = :body', { body });
+    return !!(await qb.getOne());
+  }
+
   async create(input: CreateNotificationInput): Promise<NotificationView> {
     const row = await this.repo.save(
       this.repo.create({

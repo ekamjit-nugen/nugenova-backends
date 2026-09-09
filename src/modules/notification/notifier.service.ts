@@ -133,7 +133,15 @@ export class NotifierService {
     try {
       const prefOk = critical || (await this.preferences.allows(input.userId, input.type, priority));
       const orgOk = await this.orgAllows(input.organizationId, input.userId, input.type, 'inApp');
-      if (prefOk && orgOk) {
+      // Skip if the same notification was just created (a re-fired scheduled job
+      // must not deliver the same reminder twice).
+      const dup = await this.notifications.hasRecentDuplicate(
+        input.userId,
+        input.type,
+        input.title,
+        input.body ?? null,
+      );
+      if (prefOk && orgOk && !dup) {
         await this.notifications.create({
           organizationId: input.organizationId,
           userId: input.userId,
