@@ -28,6 +28,7 @@ import { DriveModule } from './modules/storage/drive.module';
 import { AiModule } from './modules/ai/ai.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { AiChatModule } from './modules/ai-chat/ai-chat.module';
+import { DiscussionBoardsModule } from './modules/discussion-boards/discussion-boards.module';
 
 /**
  * Nugenova backend root module.
@@ -72,6 +73,7 @@ import { AiChatModule } from './modules/ai-chat/ai-chat.module';
     AiModule,
     KnowledgeModule,
     AiChatModule,
+    DiscussionBoardsModule,
   ],
 })
 export class AppModule {}
