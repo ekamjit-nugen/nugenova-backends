@@ -1,7 +1,7 @@
 import { Controller, ForbiddenException, Get, Param, Req, UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { DiscussionBoardsService } from './discussion-boards.service';
+import { BoardCaller, DiscussionBoardsService } from './discussion-boards.service';
 
 /**
  * Discussion-boards (communication board) HTTP surface — `/api/v1/discussion-boards/*`,
@@ -21,13 +21,21 @@ export class DiscussionBoardsController {
     return id;
   }
 
+  /** Participant-access context from the trusted JWT. */
+  private caller(req: any): BoardCaller {
+    return {
+      userId: req.user?.userId,
+      isAdmin: req.user?.orgRole === 'owner' || req.user?.orgRole === 'admin',
+    };
+  }
+
   @Get()
   async list(@Req() req: any) {
-    return { success: true, data: await this.boards.listBoards(this.orgId(req)) };
+    return { success: true, data: await this.boards.listBoards(this.orgId(req), this.caller(req)) };
   }
 
   @Get(':id')
   async board(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.boards.getBoard(this.orgId(req), id) };
+    return { success: true, data: await this.boards.getBoard(this.orgId(req), id, this.caller(req)) };
   }
 }
