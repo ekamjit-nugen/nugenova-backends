@@ -19,6 +19,7 @@ import { UserEntity } from '../auth/entities/user.entity';
 describe('NotifierService (email fan-out)', () => {
   let service: NotifierService;
   let create: jest.Mock;
+  let hasRecentDuplicate: jest.Mock;
   let send: jest.Mock;
   let allows: jest.Mock;
   let allowsEmail: jest.Mock;
@@ -28,6 +29,8 @@ describe('NotifierService (email fan-out)', () => {
 
   const build = async () => {
     create = jest.fn().mockResolvedValue(undefined);
+    // No recent duplicate by default, so the in-app row is created.
+    hasRecentDuplicate = jest.fn().mockResolvedValue(false);
     send = jest.fn().mockResolvedValue(true);
     allows = jest.fn().mockResolvedValue(true);
     allowsEmail = jest.fn().mockResolvedValue(true);
@@ -39,7 +42,7 @@ describe('NotifierService (email fan-out)', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         NotifierService,
-        { provide: NotificationService, useValue: { create } },
+        { provide: NotificationService, useValue: { create, hasRecentDuplicate } },
         { provide: NotificationPreferenceService, useValue: { allows, allowsEmail } },
         { provide: OrgNotificationSettingService, useValue: { allowsForEmployee } },
         { provide: MailService, useValue: { send } },

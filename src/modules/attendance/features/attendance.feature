@@ -100,11 +100,11 @@ Feature: Attendance — clocking, scope, and tenant isolation
     When the employee requests the attendance setup status
     Then the request is forbidden
 
-  Scenario: the daily roster lists every active member, not only those with a record
+  Scenario: the daily roster lists trackable members, not only those with a record
     Given an organization with an employee
     When the owner reads today's roster
-    Then both the owner and the employee appear on it
-    And the employee shows as not clocked in while the owner is not tracked
+    Then the employee appears on it but the org owner is excluded
+    And the employee shows as not clocked in
 
   Scenario: holidays are readable by all members but only writable by admins
     Given an organization with an employee
