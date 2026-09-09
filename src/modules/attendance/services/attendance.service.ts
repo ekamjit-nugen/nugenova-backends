@@ -57,6 +57,24 @@ import {
  * every method so scoping + role rules are explicit and testable (no `this`
  * request state).
  */
+/**
+ * The work-timing policy version that governed a single attendance record on its
+ * own date (reconstructed from the policy's version history). Surfaced on the
+ * All Employees list so a manager/owner can see e.g. that a 09:00 record was
+ * judged under policy v1 and a 10:00 record under v2. `isCurrent` is false when
+ * an older version governed the record (i.e. the policy has changed since).
+ */
+export interface AppliedPolicySummary {
+  policyId: string;
+  name: string;
+  version: number;
+  startTime: string | null;
+  endTime: string | null;
+  graceMinutes: number | null;
+  timezone: string | null;
+  isCurrent: boolean;
+}
+
 export interface Caller {
   userId: string;
   orgId: string; // guaranteed non-null by AttendanceAccessGuard
@@ -731,7 +749,7 @@ export class AttendanceService {
           );
         })
       : named;
-    return this.attachPolicyWindow(c.orgId, filtered);
+    return this.attachAppliedPolicy(c.orgId, filtered);
   }
 
   async getStats(c: Caller, startDate?: string, endDate?: string, scopeToSelf = false) {
@@ -1690,6 +1708,117 @@ export class AttendanceService {
       }),
     );
     return out;
+  }
+
+  /**
+   * Attach, per record, the work-timing policy VERSION that governed it on its
+   * own date — not the current one. So a record clocked under the old 09:00
+   * policy reports v1 (09:00) while newer records report v2 (10:00), explaining
+   * why the same person is "on time" at different hours. Also sets the expected
+   * window (policyStartMin/EndMin) from that historical version so the bar/late
+   * judgement line up with what the member was actually held to. For All
+   * Employees (owner/manager); the owner's own rows are exempt (no policy).
+   */
+  private async attachAppliedPolicy<
+    T extends {
+      employeeId: string;
+      appliedShiftPolicyId?: string | null;
+      checkInTime?: Date | string | null;
+      date: Date | string;
+    },
+  >(
+    orgId: string,
+    rows: T[],
+  ): Promise<Array<T & { policyStartMin: number; policyEndMin: number; appliedPolicy: AppliedPolicySummary | null }>> {
+    if (!rows.length) return rows as any;
+    const hhmm = (s?: string | null): number | null =>
+      s && /^\d{1,2}:\d{2}$/.test(s) ? Number(s.split(':')[0]) * 60 + Number(s.split(':')[1]) : null;
+
+    // The org-wide ('all') work-timing policy — the final fallback for records
+    // that never stamped `appliedShiftPolicyId` and whose employee can't be
+    // resolved (e.g. migrated rows). Most records are governed by this policy.
+    const orgDefaultPolicyId = await this.policyService
+      .list(orgId)
+      .then(
+        (ps) =>
+          ps.find(
+            (p) =>
+              TIMING_CATEGORIES.includes(p.category) &&
+              p.applicableTo === 'all' &&
+              p.workTiming?.startTime,
+          )?.id ?? null,
+      )
+      .catch(() => null);
+
+    // Current applicable policy id per employee — the fallback for older records
+    // that never stamped `appliedShiftPolicyId`.
+    const empPolicyId = new Map<string, string | null>();
+    await Promise.all(
+      [...new Set(rows.map((r) => r.employeeId))].map(async (uid) => {
+        try {
+          const ctx = await this.policyService.resolveForEmployee(orgId, uid);
+          empPolicyId.set(uid, ctx.policyId ?? null);
+        } catch {
+          empPolicyId.set(uid, null);
+        }
+      }),
+    );
+
+    // Candidate policy ids for a record, most-specific first: the id stamped on
+    // the record, the employee's current policy, then the org-wide default. The
+    // first candidate that actually resolves to a timeline wins — so a record
+    // whose legacy `appliedShiftPolicyId` didn't migrate still falls back to the
+    // org policy.
+    const candidatesOf = (r: T): string[] =>
+      [r.appliedShiftPolicyId, empPolicyId.get(r.employeeId), orgDefaultPolicyId].filter(
+        (x, i, a): x is string => !!x && a.indexOf(x) === i,
+      );
+
+    // Effective timeline per distinct candidate policy id (version history + live).
+    type Seg = Awaited<ReturnType<PolicyService['getWorkTimingTimeline']>>[number];
+    const timelines = new Map<string, Seg[]>();
+    await Promise.all(
+      [...new Set(rows.flatMap(candidatesOf))].map(async (pid) => {
+        try {
+          timelines.set(pid, await this.policyService.getWorkTimingTimeline(orgId, pid));
+        } catch {
+          timelines.set(pid, []);
+        }
+      }),
+    );
+
+    return rows.map((r) => {
+      const at = new Date((r.checkInTime as Date | string | null) || r.date);
+      let startMin = 540; // 09:00 default
+      let endMin = 1080; // 18:00
+      let appliedPolicy: AppliedPolicySummary | null = null;
+      const pid = candidatesOf(r).find((id) => (timelines.get(id) || []).length) || null;
+      const segs = pid ? timelines.get(pid) : null;
+      if (pid && segs && segs.length) {
+        const seg =
+          segs.find((s) => (s.from === null || at >= s.from) && (s.to === null || at < s.to)) ||
+          segs[segs.length - 1];
+        const currentVersion = segs[segs.length - 1].version;
+        const wt = seg.workTiming;
+        if (wt) {
+          const s = hhmm(wt.startTime);
+          const e = hhmm(wt.endTime);
+          if (s !== null) startMin = s;
+          if (e !== null && e > (s ?? 0)) endMin = e;
+        }
+        appliedPolicy = {
+          policyId: pid,
+          name: seg.policyName,
+          version: seg.version,
+          startTime: wt?.startTime ?? null,
+          endTime: wt?.endTime ?? null,
+          graceMinutes: wt?.graceMinutes ?? null,
+          timezone: wt?.timezone ?? null,
+          isCurrent: seg.version === currentVersion,
+        };
+      }
+      return { ...r, policyStartMin: startMin, policyEndMin: endMin, appliedPolicy };
+    }) as any;
   }
 
   /** Attach the resolved policy window to attendance rows (for the bar UI). */
