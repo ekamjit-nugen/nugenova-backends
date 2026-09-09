@@ -238,6 +238,16 @@ export class UpdateMemberDto {
   @IsOptional()
   @IsIn(['active', 'deactivated'])
   status?: 'active' | 'deactivated';
+
+  /**
+   * Put the member on probation for N months (counted from their joining date),
+   * or 0/null to end/remove probation. HR action — owners/admins.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(36)
+  probationMonths?: number | null;
 }
 
 /** Change a member's sign-in email (security-sensitive — old email is notified). */

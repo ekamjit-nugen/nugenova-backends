@@ -17,6 +17,7 @@ import { AddMemberDto } from '../dto';
 import { ROLE_NAME_TO_TIER } from '../default-roles';
 import { OrgLimitsService } from './org-limits.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
+import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
 
 export interface MemberView {
   membershipId: string;
@@ -40,6 +41,27 @@ export interface MemberView {
   employeeCode: string | null;
   employmentType: string | null;
   joiningDate: Date | null;
+  // Submitted HR documents (member-onboarding slots that have a file), populated
+  // on the detail view so the directory can show/download them.
+  documents?: MemberDocumentView[];
+  // Probation status — HR-only, shown on the directory detail (never exposed to
+  // the member themselves). Null when the member is not/never on probation.
+  probation?: MemberProbationView | null;
+}
+
+export interface MemberDocumentView {
+  key: string;
+  title: string;
+  status: string;
+  fileId: string;
+  uploadedAt: string | null;
+}
+
+export interface MemberProbationView {
+  onProbation: boolean; // true while today <= endDate
+  months: number | null;
+  startDate: string | null;
+  endDate: string | null;
 }
 
 /**
@@ -59,6 +81,8 @@ export class MembershipService {
     private readonly roleRepo: Repository<RoleEntity>,
     @InjectRepository(OrganizationEntity)
     private readonly orgRepo: Repository<OrganizationEntity>,
+    @InjectRepository(MemberOnboardingEntity)
+    private readonly onboardingRepo: Repository<MemberOnboardingEntity>,
     private readonly limits: OrgLimitsService,
     private readonly mail: MailService,
   ) {}
@@ -206,7 +230,90 @@ export class MembershipService {
     const user = m.userId
       ? await this.userRepo.findOne({ where: { id: m.userId } })
       : null;
-    return this.toView(m, user || undefined);
+    const view = this.toView(m, user || undefined);
+    await this.attachOnboarding(orgId, membershipId, view);
+    return view;
+  }
+
+  /**
+   * Enrich a MemberView with the member's HR documents + probation, both derived
+   * from the one member-onboarding record. HR-only surface (the directory
+   * detail); never returned to the member's own onboarding view.
+   */
+  private async attachOnboarding(
+    orgId: string,
+    membershipId: string,
+    view: MemberView,
+  ): Promise<void> {
+    const onboarding = await this.onboardingRepo.findOne({
+      where: { organizationId: orgId, membershipId },
+    });
+    view.documents = (onboarding?.documents || [])
+      .filter((d) => d.fileId)
+      .map((d) => ({
+        key: d.key,
+        title: d.title,
+        status: d.status,
+        fileId: d.fileId as string,
+        uploadedAt: d.uploadedAt ? new Date(d.uploadedAt).toISOString() : null,
+      }));
+    const end = onboarding?.probationEndDate ? new Date(onboarding.probationEndDate) : null;
+    view.probation = end
+      ? {
+          onProbation: end.getTime() >= Date.now(),
+          months: onboarding?.probationMonths ?? null,
+          startDate: onboarding?.startDate ? new Date(onboarding.startDate).toISOString() : null,
+          endDate: end.toISOString(),
+        }
+      : null;
+  }
+
+  /**
+   * Put a member on probation for `months` (from their joining date), or clear
+   * it when `months` is 0/null. Upserts the member-onboarding record.
+   */
+  private async setProbation(
+    orgId: string,
+    m: OrgMembershipEntity,
+    months: number | null,
+    actorUserId?: string,
+  ): Promise<void> {
+    let onboarding = await this.onboardingRepo.findOne({
+      where: { organizationId: orgId, membershipId: m.id },
+    });
+    if (!months || months <= 0) {
+      if (onboarding) {
+        onboarding.probationMonths = null;
+        onboarding.probationEndDate = null;
+        await this.onboardingRepo.save(onboarding);
+      }
+      return;
+    }
+    const start = m.joiningDate ? new Date(m.joiningDate) : new Date();
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + months);
+    if (!onboarding) {
+      const user = m.userId ? await this.userRepo.findOne({ where: { id: m.userId } }) : null;
+      onboarding = this.onboardingRepo.create({
+        organizationId: orgId,
+        membershipId: m.id,
+        userId: m.userId ?? null,
+        employeeEmail: m.email ?? user?.email ?? null,
+        employeeName: user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || null : null,
+        status: 'completed',
+        documents: [],
+        checklist: [],
+        startDate: start,
+        probationMonths: months,
+        probationEndDate: end,
+        initiatedBy: actorUserId ?? null,
+      });
+    } else {
+      onboarding.probationMonths = months;
+      onboarding.probationEndDate = end;
+      if (!onboarding.startDate) onboarding.startDate = start;
+    }
+    await this.onboardingRepo.save(onboarding);
   }
 
   async updateMember(
@@ -217,6 +324,7 @@ export class MembershipService {
       roleId?: string | null;
       departmentId?: string | null;
       status?: 'active' | 'deactivated';
+      probationMonths?: number | null;
     },
     actorUserId?: string,
   ): Promise<MemberView> {
@@ -275,10 +383,18 @@ export class MembershipService {
     }
 
     await this.membershipRepo.save(m);
+
+    // Probation is set/cleared on the member-onboarding record.
+    if (patch.probationMonths !== undefined) {
+      await this.setProbation(orgId, m, patch.probationMonths, actorUserId);
+    }
+
     const user = m.userId
       ? await this.userRepo.findOne({ where: { id: m.userId } })
       : null;
-    return this.toView(m, user || undefined);
+    const view = this.toView(m, user || undefined);
+    await this.attachOnboarding(orgId, membershipId, view);
+    return view;
   }
 
   /**
