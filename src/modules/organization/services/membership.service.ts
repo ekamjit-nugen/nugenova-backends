@@ -231,8 +231,20 @@ export class MembershipService {
       ? await this.userRepo.findOne({ where: { id: m.userId } })
       : null;
     const view = this.toView(m, user || undefined);
-    // The directory detail carries the member's HR documents + probation — both
-    // derived from the one member-onboarding record. HR-only surface.
+    await this.attachOnboarding(orgId, membershipId, view);
+    return view;
+  }
+
+  /**
+   * Enrich a MemberView with the member's HR documents + probation, both derived
+   * from the one member-onboarding record. HR-only surface (the directory
+   * detail); never returned to the member's own onboarding view.
+   */
+  private async attachOnboarding(
+    orgId: string,
+    membershipId: string,
+    view: MemberView,
+  ): Promise<void> {
     const onboarding = await this.onboardingRepo.findOne({
       where: { organizationId: orgId, membershipId },
     });
@@ -254,7 +266,54 @@ export class MembershipService {
           endDate: end.toISOString(),
         }
       : null;
-    return view;
+  }
+
+  /**
+   * Put a member on probation for `months` (from their joining date), or clear
+   * it when `months` is 0/null. Upserts the member-onboarding record.
+   */
+  private async setProbation(
+    orgId: string,
+    m: OrgMembershipEntity,
+    months: number | null,
+    actorUserId?: string,
+  ): Promise<void> {
+    let onboarding = await this.onboardingRepo.findOne({
+      where: { organizationId: orgId, membershipId: m.id },
+    });
+    if (!months || months <= 0) {
+      if (onboarding) {
+        onboarding.probationMonths = null;
+        onboarding.probationEndDate = null;
+        await this.onboardingRepo.save(onboarding);
+      }
+      return;
+    }
+    const start = m.joiningDate ? new Date(m.joiningDate) : new Date();
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + months);
+    if (!onboarding) {
+      const user = m.userId ? await this.userRepo.findOne({ where: { id: m.userId } }) : null;
+      onboarding = this.onboardingRepo.create({
+        organizationId: orgId,
+        membershipId: m.id,
+        userId: m.userId ?? null,
+        employeeEmail: m.email ?? user?.email ?? null,
+        employeeName: user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || null : null,
+        status: 'completed',
+        documents: [],
+        checklist: [],
+        startDate: start,
+        probationMonths: months,
+        probationEndDate: end,
+        initiatedBy: actorUserId ?? null,
+      });
+    } else {
+      onboarding.probationMonths = months;
+      onboarding.probationEndDate = end;
+      if (!onboarding.startDate) onboarding.startDate = start;
+    }
+    await this.onboardingRepo.save(onboarding);
   }
 
   async updateMember(
@@ -265,6 +324,7 @@ export class MembershipService {
       roleId?: string | null;
       departmentId?: string | null;
       status?: 'active' | 'deactivated';
+      probationMonths?: number | null;
     },
     actorUserId?: string,
   ): Promise<MemberView> {
@@ -323,10 +383,18 @@ export class MembershipService {
     }
 
     await this.membershipRepo.save(m);
+
+    // Probation is set/cleared on the member-onboarding record.
+    if (patch.probationMonths !== undefined) {
+      await this.setProbation(orgId, m, patch.probationMonths, actorUserId);
+    }
+
     const user = m.userId
       ? await this.userRepo.findOne({ where: { id: m.userId } })
       : null;
-    return this.toView(m, user || undefined);
+    const view = this.toView(m, user || undefined);
+    await this.attachOnboarding(orgId, membershipId, view);
+    return view;
   }
 
   /**
