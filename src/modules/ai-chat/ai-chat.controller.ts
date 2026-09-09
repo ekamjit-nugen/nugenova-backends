@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { AiChatService } from './services/ai-chat.service';
+import { AiChatService, AiCallerContext } from './services/ai-chat.service';
 import { CreateConversationDto, SendMessageDto } from './dto';
 
 /**
@@ -39,6 +39,20 @@ export class AiChatController {
     const id = req.user?.userId;
     if (!id) throw new ForbiddenException('No user context');
     return id;
+  }
+
+  /** The caller's permission snapshot from the trusted JWT — threaded to the
+   *  async worker so permission-gated grounding (attendance) uses the same gate
+   *  as the HTTP guards. Never sourced from the request body. */
+  private callerContext(req: any): AiCallerContext {
+    const u = req.user ?? {};
+    return {
+      orgRole: u.orgRole ?? null,
+      roles: u.roles ?? [],
+      perms: u.perms ?? null,
+      permScoped: u.permScoped ?? false,
+      departmentScopeId: u.departmentScopeId ?? null,
+    };
   }
 
   @Post('conversations')
@@ -69,7 +83,13 @@ export class AiChatController {
 
   @Post('conversations/:id/messages')
   async send(@Req() req: any, @Param('id') id: string, @Body() dto: SendMessageDto) {
-    const data = await this.chat.sendMessage(this.orgId(req), this.userId(req), id, dto.content);
+    const data = await this.chat.sendMessage(
+      this.orgId(req),
+      this.userId(req),
+      id,
+      dto.content,
+      this.callerContext(req),
+    );
     return { success: true, data };
   }
 

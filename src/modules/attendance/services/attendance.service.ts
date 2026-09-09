@@ -110,6 +110,16 @@ const MAX_ACTIVITY_DAYS = 92;
 const ORG_VIEW_ROLES = ['owner', 'admin'];
 
 /**
+ * Does a chatbot question look like it's asking about team/office attendance —
+ * who is present, who has (or hasn't) clocked in, who is late/absent/on leave?
+ * Used to decide whether to ground an AI answer on the daily roster (and only
+ * ever for a caller who may view org attendance). Deliberately broad; a false
+ * positive just adds authorised context, never leaks anything.
+ */
+const ATTENDANCE_AI_INTENT =
+  /\b(clock(?:ed)?[\s-]?(?:in|out)|check(?:ed)?[\s-]?in|punch(?:ed)?[\s-]?in|attendance|roster|present\s+today|who(?:'s|\s+is|\s+are|\s+has|\s+hasn'?t|\s+have|\s+haven'?t)?\s+(?:here|in|present|absent|late|on\s+leave|working|clocked)|not\s+clocked|in\s+(?:the\s+)?office|on\s+leave\b|absent\b|late\s+today)\b/i;
+
+/**
  * AttendanceService — the interactive attendance surface ported from the
  * Nugenova monolith to Postgres/TypeORM.
  *
@@ -1363,6 +1373,67 @@ export class AttendanceService {
       rows,
       summary: { total: rows.length, clockedIn, notClockedIn, onLeave: onLeaveCount, absent: absentCount },
     };
+  }
+
+  /**
+   * A compact, PERMISSION-GATED attendance context block for the AI chatbot.
+   *
+   *  - returns `null` when the question isn't about attendance (nothing to add);
+   *  - when it IS but the caller may NOT view org attendance, returns a short
+   *    instruction telling the assistant to decline — so a plain employee never
+   *    receives roster data through the bot (same gate as `GET /attendance/roster`);
+   *  - when the caller MAY view it, returns today's roster as grounding text so
+   *    only managers/owners/admins get a real answer.
+   *
+   * This is the single seam the chatbot uses; the permission decision reuses
+   * {@link canViewOrgAttendance} so it can never drift from the HTTP guard.
+   */
+  async buildAiAttendanceContext(
+    c: Caller,
+    query: string,
+    dateStr?: string,
+  ): Promise<string | null> {
+    if (!c.orgId || !ATTENDANCE_AI_INTENT.test(query)) return null;
+
+    if (!this.canViewOrgAttendance(c)) {
+      return (
+        'ATTENDANCE ACCESS: the user is asking about team/office attendance ' +
+        '(who is present, who has or has not clocked in, who is late/absent/on ' +
+        'leave). They do NOT have permission to see other people\'s attendance — ' +
+        'it is limited to managers, owners and admins. Politely decline and ' +
+        'suggest they contact their manager. Do NOT state or guess any names or numbers.'
+      );
+    }
+
+    const roster = await this.getDailyRoster(c, dateStr);
+    const label = (r: {
+      name: string;
+      status: string;
+      isLateArrival: boolean;
+      lateByMinutes: number;
+    }): string => {
+      const tags: string[] = [];
+      if (r.status === 'half_day') tags.push('half day');
+      if (r.status === 'wfh') tags.push('WFH');
+      if (r.isLateArrival) tags.push(`late ${r.lateByMinutes}m`);
+      return tags.length ? `${r.name} (${tags.join(', ')})` : r.name;
+    };
+    const clockedIn = roster.rows.filter((r) => r.checkInTime);
+    const notIn = roster.rows.filter((r) => r.status === 'not_clocked_in');
+    const onLeave = roster.rows.filter((r) => r.status === 'leave');
+    const absent = roster.rows.filter((r) => r.status === 'absent');
+    const s = roster.summary;
+
+    const lines = [
+      `LIVE ATTENDANCE for ${roster.date} — the user IS authorised to see this. ` +
+        'Answer their attendance question ONLY from the data below; never invent names or counts.',
+      `Summary: ${s.total} tracked, ${s.clockedIn} clocked in, ${s.notClockedIn} not clocked in, ${s.onLeave} on leave, ${s.absent} absent.`,
+      `Clocked in (${clockedIn.length}): ${clockedIn.map(label).join(', ') || 'nobody yet'}.`,
+      `Not clocked in (${notIn.length}): ${notIn.map((r) => r.name).join(', ') || 'nobody'}.`,
+    ];
+    if (onLeave.length) lines.push(`On leave: ${onLeave.map((r) => r.name).join(', ')}.`);
+    if (absent.length) lines.push(`Marked absent: ${absent.map((r) => r.name).join(', ')}.`);
+    return lines.join('\n');
   }
 
   async listHolidays(c: Caller, year?: number): Promise<HolidayEntity[]> {
