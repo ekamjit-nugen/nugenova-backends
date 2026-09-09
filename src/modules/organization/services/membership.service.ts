@@ -44,6 +44,9 @@ export interface MemberView {
   // Submitted HR documents (member-onboarding slots that have a file), populated
   // on the detail view so the directory can show/download them.
   documents?: MemberDocumentView[];
+  // Probation status — HR-only, shown on the directory detail (never exposed to
+  // the member themselves). Null when the member is not/never on probation.
+  probation?: MemberProbationView | null;
 }
 
 export interface MemberDocumentView {
@@ -52,6 +55,13 @@ export interface MemberDocumentView {
   status: string;
   fileId: string;
   uploadedAt: string | null;
+}
+
+export interface MemberProbationView {
+  onProbation: boolean; // true while today <= endDate
+  months: number | null;
+  startDate: string | null;
+  endDate: string | null;
 }
 
 /**
@@ -221,24 +231,12 @@ export class MembershipService {
       ? await this.userRepo.findOne({ where: { id: m.userId } })
       : null;
     const view = this.toView(m, user || undefined);
-    view.documents = await this.memberDocuments(orgId, membershipId);
-    return view;
-  }
-
-  /**
-   * The member's submitted HR documents — the member-onboarding slots that have
-   * an actual file attached (empty/pending requests are omitted). Surfaced on
-   * the directory detail view; each `fileId` streams via the `/media` proxy.
-   */
-  private async memberDocuments(
-    orgId: string,
-    membershipId: string,
-  ): Promise<MemberDocumentView[]> {
+    // The directory detail carries the member's HR documents + probation — both
+    // derived from the one member-onboarding record. HR-only surface.
     const onboarding = await this.onboardingRepo.findOne({
       where: { organizationId: orgId, membershipId },
     });
-    if (!onboarding) return [];
-    return (onboarding.documents || [])
+    view.documents = (onboarding?.documents || [])
       .filter((d) => d.fileId)
       .map((d) => ({
         key: d.key,
@@ -247,6 +245,16 @@ export class MembershipService {
         fileId: d.fileId as string,
         uploadedAt: d.uploadedAt ? new Date(d.uploadedAt).toISOString() : null,
       }));
+    const end = onboarding?.probationEndDate ? new Date(onboarding.probationEndDate) : null;
+    view.probation = end
+      ? {
+          onProbation: end.getTime() >= Date.now(),
+          months: onboarding?.probationMonths ?? null,
+          startDate: onboarding?.startDate ? new Date(onboarding.startDate).toISOString() : null,
+          endDate: end.toISOString(),
+        }
+      : null;
+    return view;
   }
 
   async updateMember(

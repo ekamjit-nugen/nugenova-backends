@@ -505,7 +505,9 @@ export class OnboardingLifecycleService {
     const r = await this.myRecord(orgId, userId);
     if (!r) return null;
     await this.reconcile(r, await this.policy.getOnboardingConfig(orgId));
-    return this.toView(r);
+    // Probation is an HR-internal detail — never expose it to the member on
+    // their own onboarding view. It stays visible on the HR/directory surfaces.
+    return { ...this.toView(r), probationMonths: null, probationEndDate: null };
   }
 
   async uploadMyDocument(
