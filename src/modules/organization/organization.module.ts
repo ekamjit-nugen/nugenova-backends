@@ -13,6 +13,7 @@ import { UserEntity } from '../auth/entities/user.entity';
 import { SessionEntity } from '../auth/entities/session.entity';
 import { DriveQuotaEntity } from '../storage/entities/drive-quota.entity';
 import { PlatformSettingsEntity } from '../admin-platform/entities/platform-settings.entity';
+import { MemberOnboardingEntity } from '../onboarding/entities/member-onboarding.entity';
 
 import { OrganizationService } from './services/organization.service';
 import { DepartmentService } from './services/department.service';
@@ -50,6 +51,7 @@ import { AdminTermsController } from './admin-terms.controller';
       SessionEntity,
       DriveQuotaEntity, // read the org's raw team quota row for the limits view
       PlatformSettingsEntity, // platform-wide defaults (singleton)
+      MemberOnboardingEntity, // a member's submitted documents, for the directory detail
     ]),
   ],
   controllers: [

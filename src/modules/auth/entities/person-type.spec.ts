@@ -14,6 +14,7 @@ import { MembershipService } from '../../organization/services/membership.servic
 import { OrgLimitsService } from '../../organization/services/org-limits.service';
 import { OrganizationEntity } from '../../organization/entities/organization.entity';
 import { MailService } from '../../../bootstrap/mail/mail.service';
+import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
 
 /**
  * The education-vertical guard. `staffScope()` narrows any OrgMembership query to
@@ -86,6 +87,7 @@ describe('person-type / staffScope (unit, no DB)', () => {
           { provide: getRepositoryToken(UserEntity), useValue: userRepo },
           { provide: getRepositoryToken(RoleEntity), useValue: roleRepo },
           { provide: getRepositoryToken(OrganizationEntity), useValue: { findOne: jest.fn() } },
+          { provide: getRepositoryToken(MemberOnboardingEntity), useValue: { findOne: jest.fn() } },
           { provide: OrgLimitsService, useValue: { assertSeatAvailable: jest.fn() } },
           { provide: MailService, useValue: { send: jest.fn() } },
         ],
