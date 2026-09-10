@@ -10,14 +10,14 @@ function qbReturning(rows: any[]) {
 
 describe('DiscussionBoardsService', () => {
   let boardsRepo: { find: jest.Mock; findOne: jest.Mock };
-  let notesRepo: { find: jest.Mock; createQueryBuilder: jest.Mock };
+  let notesRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock; createQueryBuilder: jest.Mock };
   let nodesRepo: { find: jest.Mock };
   let commentsRepo: { find: jest.Mock };
   let service: DiscussionBoardsService;
 
   beforeEach(() => {
     boardsRepo = { find: jest.fn(), findOne: jest.fn() };
-    notesRepo = { find: jest.fn(), createQueryBuilder: jest.fn() };
+    notesRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn((n) => Promise.resolve(n)), createQueryBuilder: jest.fn() };
     nodesRepo = { find: jest.fn() };
     commentsRepo = { find: jest.fn() };
     service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any);
@@ -80,5 +80,31 @@ describe('DiscussionBoardsService', () => {
   it('getBoard 404s when the board is not in the org', async () => {
     boardsRepo.findOne.mockResolvedValue(null);
     await expect(service.getBoard('orgA', 'nope', admin)).rejects.toThrow('Board not found');
+  });
+
+  describe('updateNote', () => {
+    it('a participant edits a note text/title', async () => {
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [{ userId: 'nisha' }], createdBy: 'x' });
+      notesRepo.findOne.mockResolvedValue({ id: 'n1', boardId: 'b1', organizationId: 'orgA', text: 'old', title: null });
+
+      const out = await service.updateNote('orgA', member('nisha'), 'b1', 'n1', { text: 'new text', title: 'T' });
+
+      expect(out.text).toBe('new text');
+      expect(out.title).toBe('T');
+      expect(notesRepo.save).toHaveBeenCalled();
+      expect(notesRepo.findOne).toHaveBeenCalledWith({ where: { id: 'n1', boardId: 'b1', organizationId: 'orgA', isDeleted: false } });
+    });
+
+    it('a non-participant cannot edit (403)', async () => {
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [{ userId: 'other' }], createdBy: 'other' });
+      await expect(service.updateNote('orgA', member('nisha'), 'b1', 'n1', { text: 'x' })).rejects.toThrow('do not have access');
+      expect(notesRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('404 when the note is not on the board', async () => {
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [], createdBy: 'nisha' });
+      notesRepo.findOne.mockResolvedValue(null);
+      await expect(service.updateNote('orgA', member('nisha'), 'b1', 'nope', { text: 'x' })).rejects.toThrow('Note not found');
+    });
   });
 });

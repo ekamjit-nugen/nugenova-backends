@@ -1,7 +1,8 @@
-import { Controller, ForbiddenException, Get, Param, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Req, UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { BoardCaller, DiscussionBoardsService } from './discussion-boards.service';
+import { UpdateNoteDto } from './dto';
 
 /**
  * Discussion-boards (communication board) HTTP surface — `/api/v1/discussion-boards/*`,
@@ -37,5 +38,17 @@ export class DiscussionBoardsController {
   @Get(':id')
   async board(@Req() req: any, @Param('id') id: string) {
     return { success: true, data: await this.boards.getBoard(this.orgId(req), id, this.caller(req)) };
+  }
+
+  /** Edit a sticky note's content (double-click-to-edit). */
+  @Patch(':boardId/notes/:noteId')
+  async updateNote(
+    @Req() req: any,
+    @Param('boardId') boardId: string,
+    @Param('noteId') noteId: string,
+    @Body() dto: UpdateNoteDto,
+  ) {
+    const note = await this.boards.updateNote(this.orgId(req), this.caller(req), boardId, noteId, dto);
+    return { success: true, data: note };
   }
 }

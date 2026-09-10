@@ -125,4 +125,28 @@ export class DiscussionBoardsService {
 
     return { board, notes, nodes, comments };
   }
+
+  /**
+   * Edit a note's text/title. Same participant gate as viewing — anyone who can
+   * open the board can edit its notes (owner/admin, creator, or a participant).
+   */
+  async updateNote(
+    orgId: string,
+    caller: BoardCaller,
+    boardId: string,
+    noteId: string,
+    patch: { text?: string; title?: string },
+  ): Promise<BoardNoteEntity> {
+    const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
+    if (!board) throw new NotFoundException('Board not found');
+    if (!this.canAccess(board, caller)) {
+      throw new ForbiddenException('You do not have access to this board');
+    }
+    const note = await this.notes.findOne({ where: { id: noteId, boardId, organizationId: orgId, isDeleted: false } });
+    if (!note) throw new NotFoundException('Note not found');
+
+    if (patch.text !== undefined) note.text = patch.text;
+    if (patch.title !== undefined) note.title = patch.title;
+    return this.notes.save(note);
+  }
 }
