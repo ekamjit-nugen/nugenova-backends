@@ -1,12 +1,12 @@
 import {
-  Body, Controller, ForbiddenException, Get, Param, Patch, Post, Req,
+  Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Req,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { BoardCaller, DiscussionBoardsService } from './discussion-boards.service';
-import { UpdateNoteDto } from './dto';
+import { AddParticipantDto, UpdateNoteDto } from './dto';
 
 /**
  * Discussion-boards (communication board) HTTP surface — `/api/v1/discussion-boards/*`,
@@ -66,5 +66,25 @@ export class DiscussionBoardsController {
   ) {
     const data = await this.boards.uploadAsset(this.orgId(req), this.caller(req), boardId, file);
     return { success: true, data };
+  }
+
+  /** Files (images/assets) shared on a board. */
+  @Get(':boardId/files')
+  async files(@Req() req: any, @Param('boardId') boardId: string) {
+    return { success: true, data: await this.boards.getBoardFiles(this.orgId(req), this.caller(req), boardId) };
+  }
+
+  /** Add a member to the board. */
+  @Post(':boardId/participants')
+  async addParticipant(@Req() req: any, @Param('boardId') boardId: string, @Body() dto: AddParticipantDto) {
+    const board = await this.boards.addParticipant(this.orgId(req), this.caller(req), boardId, dto);
+    return { success: true, data: board };
+  }
+
+  /** Remove a member from the board. */
+  @Delete(':boardId/participants/:userId')
+  async removeParticipant(@Req() req: any, @Param('boardId') boardId: string, @Param('userId') userId: string) {
+    const board = await this.boards.removeParticipant(this.orgId(req), this.caller(req), boardId, userId);
+    return { success: true, data: board };
   }
 }

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import {
@@ -158,6 +158,14 @@ export class StorageService {
     const f = await this.files.findOne({ where: { id, isDeleted: false } });
     if (!f) throw new NotFoundException('File not found');
     return f;
+  }
+
+  /** Metadata for many files by id (org-scoped when given). Missing ids are skipped. */
+  async listByIds(ids: string[], organizationId?: string): Promise<DocumentFileEntity[]> {
+    if (!ids.length) return [];
+    return this.files.find({
+      where: { id: In(ids), isDeleted: false, ...(organizationId ? { organizationId } : {}) },
+    });
   }
 
   /** Return the raw bytes for the byte-proxy download (both drivers). */

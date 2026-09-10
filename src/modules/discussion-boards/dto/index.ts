@@ -12,3 +12,15 @@ export class UpdateNoteDto {
   @MaxLength(500)
   title?: string;
 }
+
+/** Add a member to a board's participants. */
+export class AddParticipantDto {
+  @IsString()
+  @MaxLength(24)
+  userId: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  role?: string;
+}

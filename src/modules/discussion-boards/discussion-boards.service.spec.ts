@@ -13,7 +13,7 @@ describe('DiscussionBoardsService', () => {
   let notesRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock; createQueryBuilder: jest.Mock };
   let nodesRepo: { find: jest.Mock };
   let commentsRepo: { find: jest.Mock };
-  let storage: { save: jest.Mock; getMeta: jest.Mock; getBytes: jest.Mock };
+  let storage: { save: jest.Mock; getMeta: jest.Mock; getBytes: jest.Mock; listByIds: jest.Mock };
   let service: DiscussionBoardsService;
 
   beforeEach(() => {
@@ -21,8 +21,10 @@ describe('DiscussionBoardsService', () => {
     notesRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn((n) => Promise.resolve(n)), createQueryBuilder: jest.fn() };
     nodesRepo = { find: jest.fn() };
     commentsRepo = { find: jest.fn() };
-    storage = { save: jest.fn(), getMeta: jest.fn(), getBytes: jest.fn() };
-    service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any, storage as any);
+    storage = { save: jest.fn(), getMeta: jest.fn(), getBytes: jest.fn(), listByIds: jest.fn() };
+    const usersRepo = { findOne: jest.fn().mockResolvedValue({ firstName: 'A', lastName: 'B', email: 'a@x.com' }) };
+    const notifier = { notify: jest.fn().mockResolvedValue(undefined) };
+    service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any, usersRepo as any, storage as any, notifier as any);
   });
 
   const admin = { userId: 'admin1', isAdmin: true };
