@@ -47,6 +47,10 @@ export class CreateNoteDto {
   @ValidateIf((_o, v) => v !== null)
   @IsISO8601()
   dueDate?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  completed?: boolean;
 }
 
 /** Add a member to a board's participants. */

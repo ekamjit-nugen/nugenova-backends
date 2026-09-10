@@ -207,7 +207,7 @@ export class DiscussionBoardsService {
     orgId: string,
     caller: BoardCaller,
     boardId: string,
-    input: { text?: string; title?: string; color?: string; dueDate?: string | null },
+    input: { text?: string; title?: string; color?: string; dueDate?: string | null; completed?: boolean },
   ): Promise<BoardNoteEntity> {
     const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
     if (!board) throw new NotFoundException('Board not found');
@@ -223,7 +223,8 @@ export class DiscussionBoardsService {
       color: input.color || '#FFFFFF',
       x: 0, y: 0, width: 200, height: 200, zIndex: 10,
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
-      completed: false,
+      completed: !!input.completed,
+      completedAt: input.completed ? new Date() : null,
       remindersSent: [],
       isDeleted: false,
     });
