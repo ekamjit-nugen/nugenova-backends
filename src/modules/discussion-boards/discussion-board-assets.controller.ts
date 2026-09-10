@@ -23,6 +23,9 @@ export class DiscussionBoardAssetsController {
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${filename.replace(/[^\w.\-]+/g, '_')}"`);
     res.setHeader('Cache-Control', 'public, max-age=86400');
+    // Board images are embedded via <img> and may be loaded cross-origin (the
+    // web app and API can be on different origins in dev); allow embedding.
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.send(buffer);
   }
 }
