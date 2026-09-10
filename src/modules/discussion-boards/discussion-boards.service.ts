@@ -207,17 +207,20 @@ export class DiscussionBoardsService {
     orgId: string,
     caller: BoardCaller,
     boardId: string,
-    input: { text?: string; title?: string; color?: string; dueDate?: string | null; completed?: boolean },
+    input: { text?: string; title?: string; color?: string; dueDate?: string | null; completed?: boolean; authorId?: string; authorName?: string },
   ): Promise<BoardNoteEntity> {
     const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
     if (!board) throw new NotFoundException('Board not found');
     if (!this.canAccess(board, caller)) throw new ForbiddenException('You do not have access to this board');
 
+    // A card added while grouped by author is "meant for" that author.
+    const authorId = input.authorId || caller.userId;
+    const authorName = input.authorName || (await this.userName(authorId));
     const note = this.notes.create({
       organizationId: orgId,
       boardId,
-      authorId: caller.userId,
-      authorName: await this.userName(caller.userId),
+      authorId,
+      authorName,
       text: input.text ?? '',
       title: input.title ?? null,
       color: input.color || '#FFFFFF',
@@ -229,6 +232,18 @@ export class DiscussionBoardsService {
       isDeleted: false,
     });
     return this.notes.save(note);
+  }
+
+  /** Soft-delete a card (participant-gated). */
+  async deleteNote(orgId: string, caller: BoardCaller, boardId: string, noteId: string): Promise<{ deleted: true }> {
+    const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
+    if (!board) throw new NotFoundException('Board not found');
+    if (!this.canAccess(board, caller)) throw new ForbiddenException('You do not have access to this board');
+    const note = await this.notes.findOne({ where: { id: noteId, boardId, organizationId: orgId, isDeleted: false } });
+    if (!note) throw new NotFoundException('Note not found');
+    note.isDeleted = true;
+    await this.notes.save(note);
+    return { deleted: true };
   }
 
   /**
@@ -425,6 +440,49 @@ export class DiscussionBoardsService {
         uploadedBy: f.uploadedBy,
         noteId: assetNote.get(f.id) ?? '',
       }))
+      .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+  }
+
+  /**
+   * Every board file the caller may see in Cloud Drive — images/assets from the
+   * boards they can access (participant/creator/admin). Files on boards NOT
+   * shared with the user are excluded. Grouped-ready: each carries its board.
+   */
+  async listAccessibleBoardFiles(orgId: string, caller: BoardCaller): Promise<Array<{
+    id: string; url: string; name: string; mimeType: string; size: number; createdAt: Date | null;
+    boardId: string | null; boardTitle: string | null;
+  }>> {
+    const boards = (await this.boards.find({ where: { organizationId: orgId, isDeleted: false } }))
+      .filter((b) => this.canAccess(b, caller));
+    if (!boards.length) return [];
+    const boardById = new Map(boards.map((b) => [b.id, b]));
+
+    const notes = await this.notes.find({ where: { organizationId: orgId, boardId: In(boards.map((b) => b.id)), isDeleted: false } });
+    const assetBoard = new Map<string, string>(); // assetId → boardId
+    const re = /\/discussion-boards\/assets\/([a-z0-9]{24})/gi;
+    for (const n of notes) {
+      let m: RegExpExecArray | null;
+      const t = n.text ?? '';
+      while ((m = re.exec(t))) if (!assetBoard.has(m[1])) assetBoard.set(m[1], n.boardId);
+    }
+    const ids = [...assetBoard.keys()];
+    if (!ids.length) return [];
+    const files = await this.storage.listByIds(ids, orgId);
+    return files
+      .filter((f) => f.category === BOARD_ASSET_CATEGORY)
+      .map((f) => {
+        const boardId = assetBoard.get(f.id) ?? null;
+        return {
+          id: f.id,
+          url: `/discussion-boards/assets/${f.id}`,
+          name: f.originalName,
+          mimeType: f.mimeType,
+          size: f.size,
+          createdAt: f.createdAt,
+          boardId,
+          boardTitle: boardId ? boardById.get(boardId)?.title ?? null : null,
+        };
+      })
       .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
   }
 

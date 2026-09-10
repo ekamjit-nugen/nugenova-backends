@@ -51,6 +51,17 @@ export class CreateNoteDto {
   @IsOptional()
   @IsBoolean()
   completed?: boolean;
+
+  /** Assign the card to a specific person (used when grouped by author). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  authorId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  authorName?: string;
 }
 
 /** Add a member to a board's participants. */

@@ -39,6 +39,13 @@ export class DiscussionBoardsController {
     return { success: true, data: await this.boards.listBoards(this.orgId(req), this.caller(req)) };
   }
 
+  /** Every board file the caller can access — for the Cloud Drive. Declared
+   *  before `:id`/`:boardId/files` so the literal path wins. */
+  @Get('mine/files')
+  async myFiles(@Req() req: any) {
+    return { success: true, data: await this.boards.listAccessibleBoardFiles(this.orgId(req), this.caller(req)) };
+  }
+
   @Get(':id')
   async board(@Req() req: any, @Param('id') id: string) {
     return { success: true, data: await this.boards.getBoard(this.orgId(req), id, this.caller(req)) };
@@ -79,6 +86,12 @@ export class DiscussionBoardsController {
   @Get(':boardId/files')
   async files(@Req() req: any, @Param('boardId') boardId: string) {
     return { success: true, data: await this.boards.getBoardFiles(this.orgId(req), this.caller(req), boardId) };
+  }
+
+  /** Delete a card. */
+  @Delete(':boardId/notes/:noteId')
+  async deleteNote(@Req() req: any, @Param('boardId') boardId: string, @Param('noteId') noteId: string) {
+    return { success: true, data: await this.boards.deleteNote(this.orgId(req), this.caller(req), boardId, noteId) };
   }
 
   /** Add a member to the board. */
