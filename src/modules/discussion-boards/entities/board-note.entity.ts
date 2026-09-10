@@ -46,6 +46,21 @@ export class BoardNoteEntity extends PgBaseEntity {
   @Column({ type: 'int', nullable: true, default: null })
   zIndex: number | null;
 
+  /** When this card/action must be completed (drives deadline reminders). */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  dueDate: Date | null;
+
+  /** Marked done — stops all further deadline reminders. */
+  @Column({ type: 'boolean', nullable: false, default: false })
+  completed: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  completedAt: Date | null;
+
+  /** Which reminder stages already fired (`day_before` | `due_day` | `overdue`). */
+  @Column({ type: 'jsonb', nullable: false, default: () => `'[]'::jsonb` })
+  remindersSent: string[];
+
   @Column({ type: 'boolean', nullable: false, default: false })
   isDeleted: boolean;
 }

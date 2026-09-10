@@ -10,6 +10,7 @@ import { BoardNoteEntity } from './entities/board-note.entity';
 import { BoardNodeEntity } from './entities/board-node.entity';
 import { BoardCommentEntity } from './entities/board-comment.entity';
 import { DiscussionBoardsService } from './discussion-boards.service';
+import { DiscussionBoardsCronService } from './discussion-boards-cron.service';
 import { DiscussionBoardsController } from './discussion-boards.controller';
 import { DiscussionBoardAssetsController } from './discussion-board-assets.controller';
 
@@ -31,7 +32,7 @@ import { DiscussionBoardAssetsController } from './discussion-board-assets.contr
     ]),
   ],
   controllers: [DiscussionBoardsController, DiscussionBoardAssetsController],
-  providers: [DiscussionBoardsService],
+  providers: [DiscussionBoardsService, DiscussionBoardsCronService],
   exports: [DiscussionBoardsService],
 })
 export class DiscussionBoardsModule {}

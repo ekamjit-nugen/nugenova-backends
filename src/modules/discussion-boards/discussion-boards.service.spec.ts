@@ -9,21 +9,22 @@ function qbReturning(rows: any[]) {
 }
 
 describe('DiscussionBoardsService', () => {
-  let boardsRepo: { find: jest.Mock; findOne: jest.Mock };
-  let notesRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock; createQueryBuilder: jest.Mock };
+  let boardsRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock };
+  let notesRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock; create: jest.Mock; createQueryBuilder: jest.Mock };
   let nodesRepo: { find: jest.Mock };
   let commentsRepo: { find: jest.Mock };
   let storage: { save: jest.Mock; getMeta: jest.Mock; getBytes: jest.Mock; listByIds: jest.Mock };
+  let notifier: { notify: jest.Mock };
   let service: DiscussionBoardsService;
 
   beforeEach(() => {
-    boardsRepo = { find: jest.fn(), findOne: jest.fn() };
-    notesRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn((n) => Promise.resolve(n)), createQueryBuilder: jest.fn() };
+    boardsRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn((b) => Promise.resolve(b)) };
+    notesRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn((n) => Promise.resolve(n)), create: jest.fn((v) => ({ ...v })), createQueryBuilder: jest.fn() };
     nodesRepo = { find: jest.fn() };
     commentsRepo = { find: jest.fn() };
     storage = { save: jest.fn(), getMeta: jest.fn(), getBytes: jest.fn(), listByIds: jest.fn() };
     const usersRepo = { findOne: jest.fn().mockResolvedValue({ firstName: 'A', lastName: 'B', email: 'a@x.com' }) };
-    const notifier = { notify: jest.fn().mockResolvedValue(undefined) };
+    notifier = { notify: jest.fn().mockResolvedValue(undefined) };
     service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any, usersRepo as any, storage as any, notifier as any);
   });
 
@@ -109,6 +110,44 @@ describe('DiscussionBoardsService', () => {
       boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [], createdBy: 'nisha' });
       notesRepo.findOne.mockResolvedValue(null);
       await expect(service.updateNote('orgA', member('nisha'), 'b1', 'nope', { text: 'x' })).rejects.toThrow('Note not found');
+    });
+  });
+
+  describe('cards: create, colour, complete', () => {
+    it('createNote defaults the colour to white', async () => {
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [{ userId: 'nisha' }] });
+      const out = await service.createNote('orgA', member('nisha'), 'b1', { text: 'hi' });
+      expect(out.color).toBe('#FFFFFF');
+      expect(out.boardId).toBe('b1');
+    });
+
+    it('updateNote sets colour, and completing stamps completedAt', async () => {
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [{ userId: 'nisha' }] });
+      notesRepo.findOne.mockResolvedValue({ id: 'n1', boardId: 'b1', organizationId: 'orgA', color: '#FFFFFF', remindersSent: [] });
+      const out = await service.updateNote('orgA', member('nisha'), 'b1', 'n1', { color: '#BBF7D0', completed: true });
+      expect(out.color).toBe('#BBF7D0');
+      expect(out.completed).toBe(true);
+      expect(out.completedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('runDueReminders', () => {
+    const tomorrow = new Date(Date.now() + 86400000);
+    it('fires the day-before stage once to all participants and marks it sent', async () => {
+      notesRepo.find.mockResolvedValue([{ id: 'n1', boardId: 'b1', organizationId: 'orgA', title: 'Ship it', text: '', dueDate: tomorrow, completed: false, remindersSent: [] }]);
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', title: 'Board', participants: [{ userId: 'u1' }, { userId: 'u2' }] });
+      const r = await service.runDueReminders(new Date());
+      expect(r.notified).toBe(2);
+      expect(notifier.notify).toHaveBeenCalledTimes(2);
+      expect(notifier.notify.mock.calls[0][0]).toMatchObject({ type: 'board_due', data: { stage: 'day_before' } });
+      expect(notesRepo.save).toHaveBeenCalledWith(expect.objectContaining({ remindersSent: ['day_before'] }));
+    });
+
+    it('does not re-fire a stage already sent', async () => {
+      notesRepo.find.mockResolvedValue([{ id: 'n1', boardId: 'b1', organizationId: 'orgA', dueDate: tomorrow, completed: false, remindersSent: ['day_before'] }]);
+      const r = await service.runDueReminders(new Date());
+      expect(r.notified).toBe(0);
+      expect(notifier.notify).not.toHaveBeenCalled();
     });
   });
 

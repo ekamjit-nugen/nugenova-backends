@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 
 import { StorageService } from '../../bootstrap/storage/storage.service';
 import { UserEntity } from '../auth/entities/user.entity';
@@ -169,7 +169,7 @@ export class DiscussionBoardsService {
     caller: BoardCaller,
     boardId: string,
     noteId: string,
-    patch: { text?: string; title?: string },
+    patch: { text?: string; title?: string; color?: string; dueDate?: string | null; completed?: boolean },
   ): Promise<BoardNoteEntity> {
     const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
     if (!board) throw new NotFoundException('Board not found');
@@ -182,11 +182,94 @@ export class DiscussionBoardsService {
     const oldText = note.text;
     if (patch.text !== undefined) note.text = patch.text;
     if (patch.title !== undefined) note.title = patch.title;
+    if (patch.color !== undefined) note.color = patch.color;
+    if (patch.dueDate !== undefined) {
+      const d = patch.dueDate ? new Date(patch.dueDate) : null;
+      // A changed deadline re-arms all reminder stages.
+      if ((note.dueDate?.getTime() ?? null) !== (d?.getTime() ?? null)) note.remindersSent = [];
+      note.dueDate = d;
+    }
+    if (patch.completed !== undefined) {
+      note.completed = patch.completed;
+      note.completedAt = patch.completed ? new Date() : null;
+    }
     const saved = await this.notes.save(note);
 
-    // Fire-and-forget notifications (never block the edit).
-    void this.notifyOnNoteChange(orgId, board, saved, caller.userId, oldText, patch).catch(() => undefined);
+    // Only fan out on a content change (not a colour/complete/date toggle).
+    if (patch.text !== undefined || patch.title !== undefined) {
+      void this.notifyOnNoteChange(orgId, board, saved, caller.userId, oldText, patch).catch(() => undefined);
+    }
     return saved;
+  }
+
+  /** Create a new card (note) on a board. Colour defaults to white. */
+  async createNote(
+    orgId: string,
+    caller: BoardCaller,
+    boardId: string,
+    input: { text?: string; title?: string; color?: string; dueDate?: string | null },
+  ): Promise<BoardNoteEntity> {
+    const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
+    if (!board) throw new NotFoundException('Board not found');
+    if (!this.canAccess(board, caller)) throw new ForbiddenException('You do not have access to this board');
+
+    const note = this.notes.create({
+      organizationId: orgId,
+      boardId,
+      authorId: caller.userId,
+      authorName: await this.userName(caller.userId),
+      text: input.text ?? '',
+      title: input.title ?? null,
+      color: input.color || '#FFFFFF',
+      x: 0, y: 0, width: 200, height: 200, zIndex: 10,
+      dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      completed: false,
+      remindersSent: [],
+      isDeleted: false,
+    });
+    return this.notes.save(note);
+  }
+
+  /**
+   * Deadline reminder sweep (called by the cron). For every open, dated note,
+   * fire the stage that has come due (a day before → on the day → overdue) once,
+   * to all board participants. Marking the note complete stops all reminders.
+   */
+  async runDueReminders(now: Date = new Date()): Promise<{ checked: number; notified: number }> {
+    const notes = await this.notes.find({ where: { completed: false, isDeleted: false, dueDate: Not(IsNull()) } });
+    const boardCache = new Map<string, DiscussionBoardEntity | null>();
+    let notified = 0;
+    for (const n of notes) {
+      if (!n.dueDate) continue;
+      const stage = dueStage(n.dueDate, now);
+      if (!stage) continue;
+      const sent = Array.isArray(n.remindersSent) ? n.remindersSent : [];
+      if (sent.includes(stage)) continue;
+
+      let board = boardCache.get(n.boardId);
+      if (board === undefined) {
+        board = await this.boards.findOne({ where: { id: n.boardId, isDeleted: false } });
+        boardCache.set(n.boardId, board ?? null);
+      }
+      if (!board) continue;
+
+      const label = n.title?.trim() || plain(n.text).slice(0, 40) || 'a card';
+      const title = stage === 'day_before' ? `“${label}” is due tomorrow on “${board.title}”`
+        : stage === 'due_day' ? `“${label}” is due today on “${board.title}”`
+        : `“${label}” is overdue on “${board.title}”`;
+      for (const userId of this.participantIds(board)) {
+        await this.notifier.notify({
+          organizationId: n.organizationId, userId, type: 'board_due',
+          title, body: label,
+          priority: stage === 'overdue' ? 'high' : undefined,
+          data: { actionUrl: `/discussion-boards/${board.id}`, boardId: board.id, noteId: n.id, stage },
+        });
+        notified++;
+      }
+      n.remindersSent = [...sent, stage];
+      await this.notes.save(n);
+    }
+    return { checked: notes.length, notified };
   }
 
   /**
@@ -352,6 +435,16 @@ export class DiscussionBoardsService {
     const buffer = await this.storage.getBytes(f);
     return { buffer, mimeType: f.mimeType, filename: f.originalName };
   }
+}
+
+/** The reminder stage a due date has reached, relative to `now` (or null). */
+function dueStage(due: Date, now: Date): 'day_before' | 'due_day' | 'overdue' | null {
+  if (now.getTime() > due.getTime()) return 'overdue';
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(due) - startOfDay(now)) / 86400000);
+  if (diffDays === 0) return 'due_day';
+  if (diffDays === 1) return 'day_before';
+  return null;
 }
 
 /** Strip HTML tags + markdown punctuation to a short plain-text snippet. */
