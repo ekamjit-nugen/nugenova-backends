@@ -9,6 +9,7 @@ import { BoardNodeEntity } from './entities/board-node.entity';
 import { BoardCommentEntity } from './entities/board-comment.entity';
 import { DiscussionBoardsService } from './discussion-boards.service';
 import { DiscussionBoardsController } from './discussion-boards.controller';
+import { DiscussionBoardAssetsController } from './discussion-board-assets.controller';
 
 /**
  * Discussion boards — the collaborative "communication board" ported from the
@@ -25,7 +26,7 @@ import { DiscussionBoardsController } from './discussion-boards.controller';
       BoardCommentEntity,
     ]),
   ],
-  controllers: [DiscussionBoardsController],
+  controllers: [DiscussionBoardsController, DiscussionBoardAssetsController],
   providers: [DiscussionBoardsService],
   exports: [DiscussionBoardsService],
 })

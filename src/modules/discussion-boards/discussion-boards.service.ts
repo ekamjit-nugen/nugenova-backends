@@ -1,11 +1,16 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { StorageService } from '../../bootstrap/storage/storage.service';
 import { DiscussionBoardEntity } from './entities/discussion-board.entity';
 import { BoardNoteEntity } from './entities/board-note.entity';
 import { BoardNodeEntity } from './entities/board-node.entity';
 import { BoardCommentEntity } from './entities/board-comment.entity';
+
+/** Files uploaded as board images are tagged with this category so the public
+ *  asset endpoint will only ever serve board images, never other documents. */
+export const BOARD_ASSET_CATEGORY = 'board-asset';
 
 /** Who is asking — drives participant-based access. */
 export interface BoardCaller {
@@ -52,6 +57,7 @@ export class DiscussionBoardsService {
     private readonly nodes: Repository<BoardNodeEntity>,
     @InjectRepository(BoardCommentEntity)
     private readonly comments: Repository<BoardCommentEntity>,
+    private readonly storage: StorageService,
   ) {}
 
   /** True when the caller may see/open this board: an admin, its creator, or a
@@ -148,5 +154,42 @@ export class DiscussionBoardsService {
     if (patch.text !== undefined) note.text = patch.text;
     if (patch.title !== undefined) note.title = patch.title;
     return this.notes.save(note);
+  }
+
+  /**
+   * Store an uploaded board image and return a stable relative URL the note
+   * content embeds. Same participant gate as editing. Images are tagged
+   * `board-asset` so the public asset endpoint only ever serves board images.
+   */
+  async uploadAsset(
+    orgId: string,
+    caller: BoardCaller,
+    boardId: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string } | undefined,
+  ): Promise<{ id: string; url: string; mimeType: string }> {
+    if (!file?.buffer?.length) throw new BadRequestException('No image provided');
+    if (!/^image\//i.test(file.mimetype)) throw new BadRequestException('Only image files are allowed');
+    const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
+    if (!board) throw new NotFoundException('Board not found');
+    if (!this.canAccess(board, caller)) throw new ForbiddenException('You do not have access to this board');
+
+    const meta = await this.storage.save({
+      organizationId: orgId,
+      uploadedBy: caller.userId,
+      originalName: file.originalname || 'image',
+      mimeType: file.mimetype,
+      buffer: file.buffer,
+      category: BOARD_ASSET_CATEGORY,
+    });
+    return { id: meta.id, url: `/discussion-boards/assets/${meta.id}`, mimeType: meta.mimeType };
+  }
+
+  /** Raw bytes for the PUBLIC asset endpoint — ONLY files tagged `board-asset`,
+   *  so it can never be used to read confidential documents by id. */
+  async getAssetBytes(id: string): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+    const f = await this.storage.getMeta(id).catch(() => null);
+    if (!f || f.category !== BOARD_ASSET_CATEGORY) throw new NotFoundException('Asset not found');
+    const buffer = await this.storage.getBytes(f);
+    return { buffer, mimeType: f.mimeType, filename: f.originalName };
   }
 }

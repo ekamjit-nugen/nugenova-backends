@@ -1,4 +1,8 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Req, UseGuards } from '@nestjs/common';
+import {
+  Body, Controller, ForbiddenException, Get, Param, Patch, Post, Req,
+  UploadedFile, UseGuards, UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { BoardCaller, DiscussionBoardsService } from './discussion-boards.service';
@@ -50,5 +54,17 @@ export class DiscussionBoardsController {
   ) {
     const note = await this.boards.updateNote(this.orgId(req), this.caller(req), boardId, noteId, dto);
     return { success: true, data: note };
+  }
+
+  /** Upload an image for a note (returns a stable URL to embed). */
+  @Post(':boardId/assets')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadAsset(
+    @Req() req: any,
+    @Param('boardId') boardId: string,
+    @UploadedFile() file: { buffer: Buffer; originalname: string; mimetype: string },
+  ) {
+    const data = await this.boards.uploadAsset(this.orgId(req), this.caller(req), boardId, file);
+    return { success: true, data };
   }
 }

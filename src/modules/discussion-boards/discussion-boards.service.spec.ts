@@ -13,6 +13,7 @@ describe('DiscussionBoardsService', () => {
   let notesRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock; createQueryBuilder: jest.Mock };
   let nodesRepo: { find: jest.Mock };
   let commentsRepo: { find: jest.Mock };
+  let storage: { save: jest.Mock; getMeta: jest.Mock; getBytes: jest.Mock };
   let service: DiscussionBoardsService;
 
   beforeEach(() => {
@@ -20,7 +21,8 @@ describe('DiscussionBoardsService', () => {
     notesRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn((n) => Promise.resolve(n)), createQueryBuilder: jest.fn() };
     nodesRepo = { find: jest.fn() };
     commentsRepo = { find: jest.fn() };
-    service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any);
+    storage = { save: jest.fn(), getMeta: jest.fn(), getBytes: jest.fn() };
+    service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any, storage as any);
   });
 
   const admin = { userId: 'admin1', isAdmin: true };
@@ -105,6 +107,29 @@ describe('DiscussionBoardsService', () => {
       boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [], createdBy: 'nisha' });
       notesRepo.findOne.mockResolvedValue(null);
       await expect(service.updateNote('orgA', member('nisha'), 'b1', 'nope', { text: 'x' })).rejects.toThrow('Note not found');
+    });
+  });
+
+  describe('assets', () => {
+    it('uploadAsset stores a board-asset for a participant and returns a stable url', async () => {
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [{ userId: 'nisha' }], createdBy: 'x' });
+      storage.save.mockResolvedValue({ id: 'asset1', mimeType: 'image/png' });
+      const out = await service.uploadAsset('orgA', member('nisha'), 'b1', { buffer: Buffer.from('x'), originalname: 'a.png', mimetype: 'image/png' });
+      expect(out).toEqual({ id: 'asset1', url: '/discussion-boards/assets/asset1', mimeType: 'image/png' });
+      expect(storage.save).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 'orgA', category: 'board-asset' }));
+    });
+
+    it('uploadAsset rejects non-image files', async () => {
+      boardsRepo.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', participants: [{ userId: 'nisha' }] });
+      await expect(service.uploadAsset('orgA', member('nisha'), 'b1', { buffer: Buffer.from('x'), originalname: 'a.exe', mimetype: 'application/octet-stream' })).rejects.toThrow('image');
+    });
+
+    it('getAssetBytes only serves files tagged board-asset (never other documents)', async () => {
+      storage.getMeta.mockResolvedValue({ id: 'f1', category: 'onboarding', mimeType: 'application/pdf', originalName: 'secret.pdf' });
+      await expect(service.getAssetBytes('f1')).rejects.toThrow('Asset not found');
+      storage.getMeta.mockResolvedValue({ id: 'f2', category: 'board-asset', mimeType: 'image/png', originalName: 'x.png' });
+      storage.getBytes.mockResolvedValue(Buffer.from('img'));
+      await expect(service.getAssetBytes('f2')).resolves.toMatchObject({ mimeType: 'image/png' });
     });
   });
 });
