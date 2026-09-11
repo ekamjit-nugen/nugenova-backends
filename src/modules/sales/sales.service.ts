@@ -635,6 +635,140 @@ export class SalesService {
     };
   }
 
+  // ── analytics ──────────────────────────────────────────────────────────────────
+
+  async analytics(orgId: string) {
+    const [stages, leads, deals] = await Promise.all([
+      this.ensureStages(orgId),
+      this.leads.find({ where: { organizationId: orgId, isDeleted: false } }),
+      this.deals.find({ where: { organizationId: orgId, isDeleted: false } }),
+    ]);
+    const probById = new Map(stages.map((s) => [s.id, s.probability]));
+    const dval = (d: DealEntity) => Number(d.amount ?? 0);
+
+    // Rep leaderboard (deal-centric revenue).
+    const ownerIds = new Set<string>();
+    leads.forEach((l) => l.assignedTo && ownerIds.add(l.assignedTo));
+    deals.forEach((d) => d.assignedTo && ownerIds.add(d.assignedTo));
+    const users = ownerIds.size ? await this.users.find({ where: { id: In([...ownerIds]) } }) : [];
+    const nameById = new Map(users.map((u) => [u.id, nameOf(u)]));
+    const leaderboard = [...ownerIds].map((uid) => {
+      const myDeals = deals.filter((d) => d.assignedTo === uid);
+      const openD = myDeals.filter((d) => d.status === 'open');
+      const wonD = myDeals.filter((d) => d.status === 'won');
+      const closedD = myDeals.filter((d) => d.status === 'won' || d.status === 'lost').length;
+      return {
+        userId: uid, name: nameById.get(uid) ?? 'Member',
+        leads: leads.filter((l) => l.assignedTo === uid).length,
+        deals: myDeals.length,
+        openValue: openD.reduce((s, d) => s + dval(d), 0),
+        wonValue: wonD.reduce((s, d) => s + dval(d), 0),
+        winRate: closedD ? wonD.length / closedD : 0,
+      };
+    }).sort((a, b) => b.wonValue - a.wonValue);
+
+    // Leads by source + conversion.
+    const bySource = [...new Set(leads.map((l) => l.source))].map((source) => {
+      const rows = leads.filter((l) => l.source === source);
+      return { source, count: rows.length, converted: rows.filter((l) => l.convertedToDealId).length };
+    }).sort((a, b) => b.count - a.count);
+
+    // Monthly won revenue (last 6 months).
+    const now = new Date();
+    const months: { month: string; label: string; wonValue: number; wonCount: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push({ month: key, label: d.toLocaleString(undefined, { month: 'short' }), wonValue: 0, wonCount: 0 });
+    }
+    const monthIdx = new Map(months.map((m, i) => [m.month, i]));
+    for (const d of deals) {
+      if (d.status !== 'won' || !d.wonAt) continue;
+      const wa = new Date(d.wonAt);
+      const key = `${wa.getFullYear()}-${String(wa.getMonth() + 1).padStart(2, '0')}`;
+      const idx = monthIdx.get(key);
+      if (idx != null) { months[idx].wonValue += dval(d); months[idx].wonCount += 1; }
+    }
+
+    // Avg sales cycle (days from deal created → won).
+    const wonWithCycle = deals.filter((d) => d.status === 'won' && d.wonAt);
+    const avgCycleDays = wonWithCycle.length
+      ? Math.round(wonWithCycle.reduce((s, d) => s + (new Date(d.wonAt!).getTime() - new Date(d.createdAt).getTime()) / 86_400_000, 0) / wonWithCycle.length)
+      : 0;
+
+    const openDeals = deals.filter((d) => d.status === 'open');
+    const wonDeals = deals.filter((d) => d.status === 'won');
+    const closedDeals = deals.filter((d) => d.status === 'won' || d.status === 'lost').length;
+    return {
+      totals: {
+        openValue: openDeals.reduce((s, d) => s + dval(d), 0),
+        weightedForecast: openDeals.reduce((s, d) => s + dval(d) * ((d.stageId ? probById.get(d.stageId) ?? 0 : 0) / 100), 0),
+        wonValue: wonDeals.reduce((s, d) => s + dval(d), 0),
+        winRate: closedDeals ? wonDeals.length / closedDeals : 0,
+        avgCycleDays,
+        totalLeads: leads.length, totalDeals: deals.length,
+      },
+      funnel: stages.map((s) => {
+        const ds = openDeals.filter((d) => d.stageId === s.id);
+        return { stageId: s.id, name: s.name, color: s.color, count: ds.length, value: ds.reduce((a, d) => a + dval(d), 0) };
+      }),
+      leaderboard, bySource, monthly: months,
+    };
+  }
+
+  // ── import / export ────────────────────────────────────────────────────────────
+
+  private csvCell(v: unknown): string {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  async exportLeadsCsv(orgId: string): Promise<string> {
+    const rows = await this.leads.find({ where: { organizationId: orgId, isDeleted: false }, order: { createdAt: 'DESC' } });
+    const stages = await this.ensureStages(orgId);
+    const stageName = new Map(stages.map((s) => [s.id, s.name]));
+    const header = ['Name', 'Company', 'Email', 'Phone', 'Title', 'Source', 'Stage', 'Status', 'Value', 'Currency', 'Tags', 'Created'];
+    const lines = [header.join(',')];
+    for (const l of rows) {
+      lines.push([
+        l.name, l.company, l.email, l.phone, l.title, l.source, l.stageId ? stageName.get(l.stageId) ?? '' : '',
+        l.status, l.value ?? '', l.currency, (l.tags ?? []).join('; '), new Date(l.createdAt).toISOString().slice(0, 10),
+      ].map((c) => this.csvCell(c)).join(','));
+    }
+    return lines.join('\n');
+  }
+
+  /** Bulk-create leads from imported rows (e.g. a CSV export from Excel). */
+  async importLeads(caller: SalesCaller, rows: Array<Record<string, any>>): Promise<{ created: number; skipped: number }> {
+    const stages = await this.ensureStages(caller.orgId);
+    const defaultStage = stages.find((s) => s.isDefault)?.id || stages[0]?.id || null;
+    const valid = (rows || []).filter((r) => (r.name ?? '').toString().trim());
+    let created = 0;
+    for (const chunk of this.chunk(valid, 100)) {
+      const entities = chunk.map((r) => this.leads.create({
+        organizationId: caller.orgId, name: String(r.name).trim(),
+        company: r.company ? String(r.company).trim() : null,
+        email: r.email ? String(r.email).toLowerCase().trim() : null,
+        phone: r.phone ? String(r.phone).trim() : null,
+        title: r.title ? String(r.title).trim() : null,
+        source: 'import', stageId: defaultStage, status: 'open',
+        value: r.value != null && r.value !== '' ? String(Number(r.value) || 0) : null,
+        currency: (r.currency ? String(r.currency) : 'INR').toUpperCase(),
+        tags: Array.isArray(r.tags) ? r.tags : (r.tags ? String(r.tags).split(/[;,]/).map((x: string) => x.trim()).filter(Boolean) : []),
+        score: 0, createdBy: caller.userId, isDeleted: false,
+      }));
+      await this.leads.save(entities);
+      created += entities.length;
+    }
+    return { created, skipped: (rows?.length ?? 0) - created };
+  }
+
+  private chunk<T>(arr: T[], n: number): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+  }
+
   // ── helpers ──────────────────────────────────────────────────────────────────
 
   private async withNames(rows: LeadEntity[]) {

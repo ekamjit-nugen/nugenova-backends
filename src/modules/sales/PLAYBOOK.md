@@ -104,14 +104,27 @@ column (`clientId`) toward the delivery module.
   a full quote editor with live totals, send/accept/reject) on lead + deal detail;
   a **Create client** button on won deals (→ Clients module).
 
-## Roadmap
+## Phase 4 (IN PROGRESS) — analytics + import/export
 
-- **Phase 4** — analytics/leaderboard, lead scoring, follow-up reminder cron,
-  import/export, portal quote acceptance, and `@RequireModule('sales')` once the
-  vertical guard reaches main.
-- **Phase 4** — analytics (forecast/leaderboard), lead scoring, follow-up
-  reminder cron, import/export, and `@RequireModule('sales')` once the vertical
-  guard reaches main.
+- **Analytics** (`GET /sales/analytics`) — a reporting rollup beyond the dashboard
+  `overview`: headline totals (open pipeline, weighted forecast, won revenue, win
+  rate, **avg. sales cycle** = mean days deal-created→won), the open-deal **funnel**,
+  a **rep leaderboard** (per assignee: leads, deals, open value, won value, win
+  rate — sorted by won value), **leads by source** with conversion counts, and
+  **monthly won revenue** for the last 6 months. Frontend: `/sales/analytics`
+  (KPI row + 6-month revenue bars + source bars + leaderboard table), nav
+  "Analytics" under the Sales section.
+- **Import/export** (the Excel migration path) — `GET /sales/leads/export` returns
+  `{ csv, filename }` (header + one row per lead, RFC-4180 quoting); the frontend
+  builds a Blob and downloads it. `POST /sales/leads/import` bulk-creates leads
+  from `{ rows: [...] }` (chunked 100/save, source=`import`, default stage, rows
+  without a `name` skipped → `{ created, skipped }`). Frontend: **Import** modal on
+  `/sales/leads` parses a CSV client-side (`parseCsv` + `COL_ALIASES` fuzzy header
+  map for Name/Company/Email/Phone/Title/Value/Currency/Tags), previews the rows,
+  then posts them; **Export** button downloads the CSV.
+
+Still open in Phase 4: lead scoring, follow-up reminder cron, portal quote
+acceptance, and `@RequireModule('sales')` once the vertical guard reaches main.
 
 ## Tests
 

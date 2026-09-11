@@ -38,6 +38,21 @@ export class SalesController {
   @Get('overview')
   async overview(@Req() req: any) { return this.ok(await this.sales.overview(this.caller(req).orgId)); }
 
+  @Get('analytics')
+  async analytics(@Req() req: any) { return this.ok(await this.sales.analytics(this.caller(req).orgId)); }
+
+  // ── import / export (Excel migration path) ──
+  @Get('leads/export')
+  async exportLeads(@Req() req: any) {
+    const csv = await this.sales.exportLeadsCsv(this.caller(req).orgId);
+    return this.ok({ csv, filename: `leads-${new Date().toISOString().slice(0, 10)}.csv` });
+  }
+
+  @Post('leads/import')
+  async importLeads(@Req() req: any, @Body() body: { rows?: Array<Record<string, any>> }) {
+    return this.ok(await this.sales.importLeads(this.caller(req), body?.rows ?? []));
+  }
+
   @Get('followups')
   async followups(@Req() req: any, @Query('mine') mine?: string) {
     const c = this.caller(req);

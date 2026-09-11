@@ -168,4 +168,62 @@ describe('SalesService', () => {
       await expect(service.convertDealToClient(caller, 'd1')).rejects.toThrow(/already linked/);
     });
   });
+
+  describe('analytics + import/export', () => {
+    it('builds a rep leaderboard, source breakdown, and monthly won revenue', async () => {
+      stages.find.mockResolvedValue(seededStages);
+      const now = new Date();
+      leads.find.mockResolvedValue([
+        { assignedTo: 'u1', source: 'referral', convertedToDealId: 'd1' },
+        { assignedTo: 'u1', source: 'referral', convertedToDealId: null },
+        { assignedTo: 'u2', source: 'website', convertedToDealId: null },
+      ]);
+      deals.find.mockResolvedValue([
+        { assignedTo: 'u1', stageId: 's-prop', status: 'open', amount: '100000', createdAt: now, wonAt: null },
+        { assignedTo: 'u1', stageId: 's-won', status: 'won', amount: '50000', createdAt: new Date(now.getTime() - 5 * 86400000), wonAt: now },
+        { assignedTo: 'u2', stageId: 's-lost', status: 'lost', amount: '30000', createdAt: now, wonAt: null },
+      ]);
+      users.find.mockResolvedValue([{ id: 'u1', firstName: 'Rae', lastName: 'One' }, { id: 'u2', firstName: 'Sam', lastName: 'Two' }]);
+
+      const a = await service.analytics('orgA');
+      expect(a.totals.openValue).toBe(100000);
+      expect(a.totals.wonValue).toBe(50000);
+      expect(Math.round(a.totals.weightedForecast)).toBe(60000); // 100k @ 60%
+      // u1 leads the board (50k won)
+      expect(a.leaderboard[0].userId).toBe('u1');
+      expect(a.leaderboard[0].wonValue).toBe(50000);
+      expect(a.leaderboard[0].winRate).toBe(1); // 1 won of 1 closed for u1
+      const referral = a.bySource.find((s) => s.source === 'referral');
+      expect(referral).toMatchObject({ count: 2, converted: 1 });
+      expect(a.monthly).toHaveLength(6);
+      expect(a.monthly[5].wonValue).toBe(50000); // current month
+      expect(a.totals.avgCycleDays).toBe(5);
+    });
+
+    it('exports leads to CSV with a header and escaped cells', async () => {
+      stages.find.mockResolvedValue(seededStages);
+      leads.find.mockResolvedValue([
+        { name: 'Acme, Inc', company: 'Acme', email: 'a@x.com', phone: null, title: null, source: 'referral', stageId: 's-new', status: 'open', value: '1000', currency: 'INR', tags: ['vip'], createdAt: new Date('2026-01-02') },
+      ]);
+      const csv = await service.exportLeadsCsv('orgA');
+      const [header, row] = csv.split('\n');
+      expect(header).toContain('Name');
+      expect(row).toContain('"Acme, Inc"'); // comma-bearing cell quoted
+      expect(row).toContain('New'); // stage name resolved
+    });
+
+    it('imports leads in bulk, skipping rows without a name', async () => {
+      stages.find.mockResolvedValue(seededStages);
+      const out = await service.importLeads(caller, [
+        { name: 'Lead One', company: 'Co', email: 'ONE@X.com', value: '5000', tags: 'a; b' },
+        { name: '', company: 'No name' },
+        { company: 'Also no name' },
+      ] as any);
+      expect(out).toEqual({ created: 1, skipped: 2 });
+      expect(leads.save).toHaveBeenCalledTimes(1);
+      const saved = leads.save.mock.calls[0][0];
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatchObject({ name: 'Lead One', email: 'one@x.com', source: 'import', stageId: 's-new', tags: ['a', 'b'] });
+    });
+  });
 });
