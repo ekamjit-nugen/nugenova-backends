@@ -4,8 +4,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SalesCaller, SalesService } from './sales.service';
 import {
   ConvertLeadDto, CreateAccountDto, CreateActivityDto, CreateContactDto, CreateDealDto, CreateFollowupDto, CreateLeadDto,
-  CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto, UpdateDealDto, UpdateFollowupDto,
-  UpdateLeadDto, UpdateRequirementDto,
+  CreateQuoteDto, CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto, UpdateDealDto,
+  UpdateFollowupDto, UpdateLeadDto, UpdateQuoteDto, UpdateRequirementDto,
 } from './dto';
 
 /**
@@ -148,6 +148,38 @@ export class SalesController {
   async addDealRequirement(@Req() req: any, @Param('id') id: string, @Body() dto: CreateRequirementDto) {
     return this.ok(await this.sales.addRequirement(this.caller(req), 'deal', id, dto));
   }
+
+  @Get('deals/:id/quotes')
+  async dealQuotes(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.listQuotes(this.caller(req).orgId, 'deal', id)); }
+  @Post('deals/:id/quotes')
+  async createDealQuote(@Req() req: any, @Param('id') id: string, @Body() dto: CreateQuoteDto) { return this.ok(await this.sales.createQuote(this.caller(req), 'deal', id, dto)); }
+  @Post('deals/:id/quotes/from-requirements')
+  async dealQuoteFromReqs(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.quoteFromRequirements(this.caller(req), 'deal', id)); }
+
+  @Post('deals/:id/convert-to-client')
+  async convertDealToClient(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.convertDealToClient(this.caller(req), id)); }
+
+  // ── lead quotes ──
+  @Get('leads/:id/quotes')
+  async leadQuotes(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.listQuotes(this.caller(req).orgId, 'lead', id)); }
+  @Post('leads/:id/quotes')
+  async createLeadQuote(@Req() req: any, @Param('id') id: string, @Body() dto: CreateQuoteDto) { return this.ok(await this.sales.createQuote(this.caller(req), 'lead', id, dto)); }
+  @Post('leads/:id/quotes/from-requirements')
+  async leadQuoteFromReqs(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.quoteFromRequirements(this.caller(req), 'lead', id)); }
+
+  // ── quotes (by id) ──
+  @Get('quotes/:id')
+  async getQuote(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.getQuote(this.caller(req).orgId, id)); }
+  @Patch('quotes/:id')
+  async updateQuote(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateQuoteDto) { return this.ok(await this.sales.updateQuote(this.caller(req).orgId, id, dto)); }
+  @Post('quotes/:id/send')
+  async sendQuote(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.setQuoteStatus(this.caller(req).orgId, id, 'sent')); }
+  @Post('quotes/:id/accept')
+  async acceptQuote(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.setQuoteStatus(this.caller(req).orgId, id, 'accepted')); }
+  @Post('quotes/:id/reject')
+  async rejectQuote(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.setQuoteStatus(this.caller(req).orgId, id, 'rejected')); }
+  @Delete('quotes/:id')
+  async deleteQuote(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.deleteQuote(this.caller(req).orgId, id)); }
 
   // ── requirements (by id) ──
   @Patch('requirements/:id')

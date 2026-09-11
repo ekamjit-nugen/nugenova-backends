@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
+import { ClientsModule } from '../clients/clients.module';
 import { UserEntity } from '../auth/entities/user.entity';
 
 import { PipelineStageEntity } from './entities/pipeline-stage.entity';
@@ -13,6 +14,7 @@ import { SalesActivityEntity } from './entities/sales-activity.entity';
 import { SalesFollowupEntity } from './entities/sales-followup.entity';
 import { DealEntity } from './entities/deal.entity';
 import { RequirementEntity } from './entities/requirement.entity';
+import { QuoteEntity } from './entities/quote.entity';
 import { SalesService } from './sales.service';
 import { SalesController } from './sales.controller';
 
@@ -24,6 +26,7 @@ import { SalesController } from './sales.controller';
   imports: [
     AuthModule,
     NotificationModule,
+    ClientsModule,
     TypeOrmModule.forFeature([
       PipelineStageEntity,
       LeadEntity,
@@ -33,6 +36,7 @@ import { SalesController } from './sales.controller';
       SalesFollowupEntity,
       DealEntity,
       RequirementEntity,
+      QuoteEntity,
       UserEntity,
     ]),
   ],

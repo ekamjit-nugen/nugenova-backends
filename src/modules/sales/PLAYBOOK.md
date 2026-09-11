@@ -86,10 +86,29 @@ column (`clientId`) toward the delivery module.
   the **Requirements & effort** panel + roll-up), the panel is reused on the lead
   detail, and a **Convert to deal** button on leads.
 
+## Phase 3 (DONE) — quotes + Won→Client bridge
+
+- **Quotes/proposals** (`sales_quotes`, migration `1788380000000`) for a lead or
+  deal: line items (`items` jsonb: description·unit·quantity·rate), `discountType`
+  (percent|amount) + `discountValue`, `taxPercent` → `subtotal`/`discountAmount`/
+  `taxAmount`/`total` recomputed on every save; auto `number` (Q-0001); status
+  draft→sent→accepted|rejected|expired. **Build from requirements**
+  (`POST /:entity/:id/quotes/from-requirements`) maps non-dropped requirements to
+  line items. Routes: `/quotes/:id` (`GET/PATCH/DELETE`, `send|accept|reject`).
+- **Won→Client bridge** (`POST /deals/:id/convert-to-client`) — creates a client
+  in the delivery **Clients module** (`ClientsService.create`) from the deal's
+  account (name/industry/website) + contact (primary contact), links
+  `deal.clientId` and the source lead's `clientId`, and drops a timeline note.
+  Guarded against double-linking. SalesModule imports ClientsModule for this.
+- Frontend: `components/sales/quotes-panel.tsx` (list + build-from-requirements +
+  a full quote editor with live totals, send/accept/reject) on lead + deal detail;
+  a **Create client** button on won deals (→ Clients module).
+
 ## Roadmap
 
-- **Phase 3** — **Quotes/proposals** (line items → amount, tax/discount, send/
-  accept) + **Won→Client** bridge into the Clients module.
+- **Phase 4** — analytics/leaderboard, lead scoring, follow-up reminder cron,
+  import/export, portal quote acceptance, and `@RequireModule('sales')` once the
+  vertical guard reaches main.
 - **Phase 4** — analytics (forecast/leaderboard), lead scoring, follow-up
   reminder cron, import/export, and `@RequireModule('sales')` once the vertical
   guard reaches main.

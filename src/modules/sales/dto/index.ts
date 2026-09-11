@@ -1,5 +1,6 @@
+import { Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min,
+  IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 import { ACTIVITY_TYPES, FOLLOWUP_STATUSES, LEAD_SOURCES, LEAD_STATUSES } from '../sales.constants';
 
@@ -141,6 +142,29 @@ export class CreateRequirementDto {
 
 export class UpdateRequirementDto extends CreateRequirementDto {
   @IsOptional() @IsString() @MaxLength(300) declare title: string;
+}
+
+// ── quotes ──
+export class QuoteItemDto {
+  @IsString() @MaxLength(500) description: string;
+  @IsOptional() @IsIn(['hours', 'days', 'fixed', 'unit']) unit?: string;
+  @IsNumber() quantity: number;
+  @IsNumber() rate: number;
+}
+
+export class CreateQuoteDto {
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
+  @IsOptional() @IsString() @MaxLength(8) currency?: string;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => QuoteItemDto) items?: QuoteItemDto[];
+  @IsOptional() @IsIn(['percent', 'amount']) discountType?: string;
+  @IsOptional() @IsNumber() discountValue?: number;
+  @IsOptional() @IsNumber() taxPercent?: number;
+  @IsOptional() @IsString() @MaxLength(8000) notes?: string;
+  @IsOptional() @IsDateString() validUntil?: string;
+}
+
+export class UpdateQuoteDto extends CreateQuoteDto {
+  @IsOptional() @IsIn(['draft', 'sent', 'accepted', 'rejected', 'expired']) status?: string;
 }
 
 export class CreateStageDto {

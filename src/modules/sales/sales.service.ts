@@ -10,13 +10,15 @@ import { SalesActivityEntity } from './entities/sales-activity.entity';
 import { SalesFollowupEntity } from './entities/sales-followup.entity';
 import { DealEntity } from './entities/deal.entity';
 import { RequirementEntity } from './entities/requirement.entity';
+import { QuoteEntity, QuoteItem } from './entities/quote.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { NotifierService } from '../notification/notifier.service';
+import { ClientsService } from '../clients/clients.service';
 import { DEFAULT_STAGES, SalesEntityType } from './sales.constants';
 import {
   ConvertLeadDto, CreateAccountDto, CreateActivityDto, CreateContactDto, CreateDealDto, CreateFollowupDto, CreateLeadDto,
-  CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto, UpdateDealDto, UpdateFollowupDto,
-  UpdateLeadDto, UpdateRequirementDto,
+  CreateQuoteDto, CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto, UpdateDealDto,
+  UpdateFollowupDto, UpdateLeadDto, UpdateQuoteDto, UpdateRequirementDto,
 } from './dto';
 
 export interface SalesCaller { userId: string; orgId: string; isAdmin: boolean }
@@ -35,7 +37,9 @@ export class SalesService {
     @InjectRepository(SalesFollowupEntity) private readonly followups: Repository<SalesFollowupEntity>,
     @InjectRepository(DealEntity) private readonly deals: Repository<DealEntity>,
     @InjectRepository(RequirementEntity) private readonly requirements: Repository<RequirementEntity>,
+    @InjectRepository(QuoteEntity) private readonly quotes: Repository<QuoteEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
+    private readonly clientsService: ClientsService,
     @Optional() private readonly notifier?: NotifierService,
   ) {}
 
@@ -404,6 +408,127 @@ export class SalesService {
     const where: Record<string, unknown> = { organizationId: orgId, isDeleted: false, status: In(['pending', 'snoozed']) };
     if (assignedTo) where.assignedTo = assignedTo;
     return this.followups.find({ where, order: { dueAt: 'ASC' }, take: 200 });
+  }
+
+  // ── quotes / proposals ─────────────────────────────────────────────────────────
+
+  private computeQuote(items: QuoteItem[], discountType: string, discountValue: number, taxPercent: number) {
+    const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.rate) || 0), 0);
+    const discountAmount = discountType === 'amount' ? Math.min(discountValue, subtotal) : subtotal * (discountValue / 100);
+    const afterDiscount = Math.max(0, subtotal - discountAmount);
+    const taxAmount = afterDiscount * (taxPercent / 100);
+    return { subtotal, discountAmount, taxAmount, total: afterDiscount + taxAmount };
+  }
+
+  private quoteView(q: QuoteEntity) {
+    return {
+      id: q.id, entityType: q.entityType, entityId: q.entityId, number: q.number, title: q.title, status: q.status,
+      currency: q.currency, items: q.items ?? [], discountType: q.discountType, discountValue: Number(q.discountValue),
+      taxPercent: Number(q.taxPercent), notes: q.notes,
+      subtotal: Number(q.subtotal), discountAmount: Number(q.discountAmount), taxAmount: Number(q.taxAmount), total: Number(q.total),
+      validUntil: q.validUntil, sentAt: q.sentAt, acceptedAt: q.acceptedAt, rejectedAt: q.rejectedAt, createdAt: q.createdAt,
+    };
+  }
+
+  async listQuotes(orgId: string, entityType: SalesEntityType, entityId: string) {
+    const rows = await this.quotes.find({ where: { organizationId: orgId, entityType, entityId, isDeleted: false }, order: { createdAt: 'DESC' } });
+    return rows.map((q) => this.quoteView(q));
+  }
+
+  async getQuote(orgId: string, id: string) {
+    const q = await this.quotes.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
+    if (!q) throw new NotFoundException('Quote not found');
+    return this.quoteView(q);
+  }
+
+  private async nextQuoteNumber(orgId: string): Promise<string> {
+    const count = await this.quotes.count({ where: { organizationId: orgId } });
+    return `Q-${String(count + 1).padStart(4, '0')}`;
+  }
+
+  async createQuote(caller: SalesCaller, entityType: SalesEntityType, entityId: string, dto: CreateQuoteDto) {
+    const items = (dto.items ?? []).map((i) => ({ description: i.description, unit: i.unit ?? 'fixed', quantity: Number(i.quantity) || 0, rate: Number(i.rate) || 0 }));
+    const t = this.computeQuote(items, dto.discountType ?? 'percent', dto.discountValue ?? 0, dto.taxPercent ?? 0);
+    const q = await this.quotes.save(this.quotes.create({
+      organizationId: caller.orgId, entityType, entityId, number: await this.nextQuoteNumber(caller.orgId),
+      title: dto.title?.trim() || 'Quote', status: 'draft', currency: dto.currency?.toUpperCase() ?? 'INR', items,
+      discountType: dto.discountType ?? 'percent', discountValue: String(dto.discountValue ?? 0), taxPercent: String(dto.taxPercent ?? 0),
+      notes: dto.notes ?? null, subtotal: String(t.subtotal), discountAmount: String(t.discountAmount), taxAmount: String(t.taxAmount),
+      total: String(t.total), validUntil: dto.validUntil ? new Date(dto.validUntil) : null, createdBy: caller.userId, isDeleted: false,
+    }));
+    return this.quoteView(q);
+  }
+
+  /** Build a draft quote from an entity's (non-dropped) requirements. */
+  async quoteFromRequirements(caller: SalesCaller, entityType: SalesEntityType, entityId: string) {
+    const reqs = await this.requirements.find({ where: { organizationId: caller.orgId, entityType, entityId, isDeleted: false } });
+    const items: QuoteItem[] = reqs.filter((r) => r.status !== 'dropped').map((r) => ({
+      description: r.role ? `${r.title} (${r.role})` : r.title,
+      unit: r.unit, quantity: Number(r.quantity) || 0, rate: Number(r.rate) || 0,
+    }));
+    return this.createQuote(caller, entityType, entityId, { title: 'Proposal', items });
+  }
+
+  async updateQuote(orgId: string, id: string, dto: UpdateQuoteDto) {
+    const q = await this.quotes.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
+    if (!q) throw new NotFoundException('Quote not found');
+    if (dto.title !== undefined) q.title = dto.title.trim();
+    if (dto.currency !== undefined) q.currency = dto.currency.toUpperCase();
+    if (dto.items !== undefined) q.items = dto.items.map((i) => ({ description: i.description, unit: i.unit ?? 'fixed', quantity: Number(i.quantity) || 0, rate: Number(i.rate) || 0 }));
+    if (dto.discountType !== undefined) q.discountType = dto.discountType;
+    if (dto.discountValue !== undefined) q.discountValue = String(dto.discountValue);
+    if (dto.taxPercent !== undefined) q.taxPercent = String(dto.taxPercent);
+    if (dto.notes !== undefined) q.notes = dto.notes;
+    if (dto.validUntil !== undefined) q.validUntil = dto.validUntil ? new Date(dto.validUntil) : null;
+    if (dto.status !== undefined) this.applyQuoteStatus(q, dto.status);
+    const t = this.computeQuote(q.items, q.discountType, Number(q.discountValue), Number(q.taxPercent));
+    q.subtotal = String(t.subtotal); q.discountAmount = String(t.discountAmount); q.taxAmount = String(t.taxAmount); q.total = String(t.total);
+    return this.quoteView(await this.quotes.save(q));
+  }
+
+  private applyQuoteStatus(q: QuoteEntity, status: string) {
+    q.status = status as any;
+    const now = new Date();
+    if (status === 'sent' && !q.sentAt) q.sentAt = now;
+    if (status === 'accepted') q.acceptedAt = now;
+    if (status === 'rejected') q.rejectedAt = now;
+  }
+
+  async setQuoteStatus(orgId: string, id: string, status: 'sent' | 'accepted' | 'rejected') {
+    const q = await this.quotes.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
+    if (!q) throw new NotFoundException('Quote not found');
+    this.applyQuoteStatus(q, status);
+    return this.quoteView(await this.quotes.save(q));
+  }
+
+  async deleteQuote(orgId: string, id: string) {
+    await this.quotes.update({ id, organizationId: orgId }, { isDeleted: true });
+    return { success: true as const };
+  }
+
+  // ── won deal → client (bridge to the delivery Clients module) ───────────────────
+
+  async convertDealToClient(caller: SalesCaller, dealId: string) {
+    const deal = await this.requireDeal(caller.orgId, dealId);
+    if (deal.clientId) throw new BadRequestException('This deal is already linked to a client');
+    const account = deal.accountId ? await this.accounts.findOne({ where: { id: deal.accountId, organizationId: caller.orgId } }) : null;
+    const contact = deal.contactId ? await this.contacts.findOne({ where: { id: deal.contactId, organizationId: caller.orgId } }) : null;
+    const companyName = account?.name || deal.title;
+    const client = await this.clientsService.create(
+      { userId: caller.userId, orgId: caller.orgId, isAdmin: caller.isAdmin },
+      {
+        companyName,
+        industry: account?.industry ?? undefined,
+        website: account?.website ?? undefined,
+        notes: `Created from won deal "${deal.title}"${deal.amount ? ` (${deal.currency} ${Number(deal.amount)})` : ''}.`,
+        primaryContact: contact ? { name: contact.name, email: contact.email ?? undefined, phone: contact.phone ?? undefined, designation: contact.title ?? undefined } : undefined,
+      } as any,
+    );
+    deal.clientId = client.id;
+    await this.deals.save(deal);
+    if (deal.sourceLeadId) await this.leads.update({ id: deal.sourceLeadId, organizationId: caller.orgId }, { clientId: client.id });
+    await this.logActivity(caller, 'deal', dealId, 'system', `Onboarded as client "${companyName}"`);
+    return { clientId: client.id, dealId };
   }
 
   // ── accounts + contacts ──────────────────────────────────────────────────────

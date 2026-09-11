@@ -1,16 +1,17 @@
 import { SalesService } from './sales.service';
 
 describe('SalesService', () => {
-  let stages: any, leads: any, accounts: any, contacts: any, activities: any, followups: any, deals: any, requirements: any, users: any, notifier: any;
+  let stages: any, leads: any, accounts: any, contacts: any, activities: any, followups: any, deals: any, requirements: any, quotes: any, users: any, clientsService: any, notifier: any;
   let service: SalesService;
   const caller = { userId: 'u1', orgId: 'orgA', isAdmin: true };
 
   beforeEach(() => {
-    const repo = () => ({ find: jest.fn(), findOne: jest.fn(), save: jest.fn((v) => Promise.resolve(Array.isArray(v) ? v : { id: 'new1', ...v })), create: jest.fn((v) => v), update: jest.fn() });
-    stages = repo(); leads = repo(); accounts = repo(); contacts = repo(); activities = repo(); followups = repo(); deals = repo(); requirements = repo(); users = repo();
+    const repo = () => ({ find: jest.fn(), findOne: jest.fn(), save: jest.fn((v) => Promise.resolve(Array.isArray(v) ? v : { id: 'new1', ...v })), create: jest.fn((v) => v), update: jest.fn(), count: jest.fn().mockResolvedValue(0) });
+    stages = repo(); leads = repo(); accounts = repo(); contacts = repo(); activities = repo(); followups = repo(); deals = repo(); requirements = repo(); quotes = repo(); users = repo();
     notifier = { notify: jest.fn().mockResolvedValue(undefined) };
+    clientsService = { create: jest.fn().mockResolvedValue({ id: 'client1' }) };
     users.findOne.mockResolvedValue({ firstName: 'A', lastName: 'B' });
-    service = new SalesService(stages, leads, accounts, contacts, activities, followups, deals, requirements, users, notifier);
+    service = new SalesService(stages, leads, accounts, contacts, activities, followups, deals, requirements, quotes, users, clientsService, notifier);
   });
 
   const seededStages = [
@@ -112,5 +113,59 @@ describe('SalesService', () => {
     leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false });
     stages.findOne.mockResolvedValue(null);
     await expect(service.moveStage(caller, 'l1', { stageId: 'nope' })).rejects.toThrow(/Stage not found/);
+  });
+
+  describe('quotes', () => {
+    it('computes subtotal, percentage discount, tax and total on create', async () => {
+      quotes.save.mockImplementation((v: any) => Promise.resolve({ id: 'q1', ...v }));
+      const q = await service.createQuote(caller, 'deal', 'd1', {
+        title: 'Proposal', discountType: 'percent', discountValue: 10, taxPercent: 18,
+        items: [{ description: 'Backend', unit: 'days', quantity: 10, rate: 9000 }, { description: 'Frontend', unit: 'hours', quantity: 60, rate: 1200 }],
+      } as any);
+      expect(q.subtotal).toBe(162000);
+      expect(q.discountAmount).toBe(16200);
+      expect(q.total).toBe(172044); // 145800 + 18%
+      expect(q.number).toBe('Q-0001');
+    });
+
+    it('builds a quote from requirements (skips dropped)', async () => {
+      requirements.find.mockResolvedValue([
+        { title: 'API', role: 'BE', unit: 'days', quantity: '5', rate: '9000', status: 'open' },
+        { title: 'Old', unit: 'hours', quantity: '10', rate: '100', status: 'dropped' },
+      ]);
+      quotes.save.mockImplementation((v: any) => Promise.resolve({ id: 'q1', ...v }));
+      const q = await service.quoteFromRequirements(caller, 'deal', 'd1');
+      expect(q.items).toHaveLength(1);
+      expect(q.items[0].description).toBe('API (BE)');
+      expect(q.subtotal).toBe(45000);
+    });
+
+    it('setQuoteStatus stamps acceptedAt', async () => {
+      quotes.findOne.mockResolvedValue({ id: 'q1', organizationId: 'orgA', isDeleted: false, items: [], discountType: 'percent', discountValue: '0', taxPercent: '0', status: 'draft' });
+      const q = await service.setQuoteStatus('orgA', 'q1', 'accepted');
+      expect(q.status).toBe('accepted');
+      expect(q.acceptedAt).toBeTruthy();
+    });
+  });
+
+  describe('convertDealToClient', () => {
+    it('creates a client from the deal account/contact and links it', async () => {
+      deals.findOne.mockResolvedValue({ id: 'd1', organizationId: 'orgA', isDeleted: false, title: 'BigCo deal', accountId: 'a1', contactId: 'c1', amount: '150000', currency: 'INR', clientId: null, sourceLeadId: 'l1' });
+      accounts.findOne.mockResolvedValue({ id: 'a1', name: 'BigCo', industry: 'Tech', website: 'bigco.com' });
+      contacts.findOne.mockResolvedValue({ id: 'c1', name: 'Jane', email: 'jane@bigco.com', phone: null, title: 'CTO' });
+      const out = await service.convertDealToClient(caller, 'd1');
+      expect(clientsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ orgId: 'orgA' }),
+        expect.objectContaining({ companyName: 'BigCo', primaryContact: expect.objectContaining({ name: 'Jane' }) }),
+      );
+      expect(out.clientId).toBe('client1');
+      expect(deals.save).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'client1' }));
+      expect(leads.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'l1' }), expect.objectContaining({ clientId: 'client1' }));
+    });
+
+    it('refuses if the deal is already linked to a client', async () => {
+      deals.findOne.mockResolvedValue({ id: 'd1', organizationId: 'orgA', isDeleted: false, clientId: 'existing' });
+      await expect(service.convertDealToClient(caller, 'd1')).rejects.toThrow(/already linked/);
+    });
   });
 });
