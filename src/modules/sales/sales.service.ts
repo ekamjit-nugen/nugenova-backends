@@ -8,16 +8,16 @@ import { SalesAccountEntity } from './entities/sales-account.entity';
 import { SalesContactEntity } from './entities/sales-contact.entity';
 import { SalesActivityEntity } from './entities/sales-activity.entity';
 import { SalesFollowupEntity } from './entities/sales-followup.entity';
-import { DealEntity } from './entities/deal.entity';
 import { RequirementEntity } from './entities/requirement.entity';
 import { QuoteEntity, QuoteItem } from './entities/quote.entity';
+import { LeadDocumentEntity } from './entities/lead-document.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { NotifierService } from '../notification/notifier.service';
 import { ClientsService } from '../clients/clients.service';
 import { DEFAULT_STAGES, SalesEntityType } from './sales.constants';
 import {
-  ConvertLeadDto, CreateAccountDto, CreateActivityDto, CreateContactDto, CreateDealDto, CreateFollowupDto, CreateLeadDto,
-  CreateQuoteDto, CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto, UpdateDealDto,
+  CreateAccountDto, CreateActivityDto, CreateContactDto, CreateFollowupDto, CreateLeadDto, CreateLeadDocumentDto,
+  CreateQuoteDto, CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto,
   UpdateFollowupDto, UpdateLeadDto, UpdateQuoteDto, UpdateRequirementDto,
 } from './dto';
 
@@ -35,9 +35,9 @@ export class SalesService {
     @InjectRepository(SalesContactEntity) private readonly contacts: Repository<SalesContactEntity>,
     @InjectRepository(SalesActivityEntity) private readonly activities: Repository<SalesActivityEntity>,
     @InjectRepository(SalesFollowupEntity) private readonly followups: Repository<SalesFollowupEntity>,
-    @InjectRepository(DealEntity) private readonly deals: Repository<DealEntity>,
     @InjectRepository(RequirementEntity) private readonly requirements: Repository<RequirementEntity>,
     @InjectRepository(QuoteEntity) private readonly quotes: Repository<QuoteEntity>,
+    @InjectRepository(LeadDocumentEntity) private readonly leadDocuments: Repository<LeadDocumentEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
     private readonly clientsService: ClientsService,
     @Optional() private readonly notifier?: NotifierService,
@@ -96,13 +96,19 @@ export class SalesService {
 
   async getLead(orgId: string, id: string) {
     const lead = await this.requireLead(orgId, id);
-    const [stage, activities, followups] = await Promise.all([
+    const [stage, activities, followups, requirements, documents] = await Promise.all([
       lead.stageId ? this.stages.findOne({ where: { id: lead.stageId } }) : null,
       this.activities.find({ where: { organizationId: orgId, entityType: 'lead', entityId: id, isDeleted: false }, order: { occurredAt: 'DESC' } }),
       this.followups.find({ where: { organizationId: orgId, entityType: 'lead', entityId: id, isDeleted: false }, order: { dueAt: 'ASC' } }),
+      this.requirements.find({ where: { organizationId: orgId, entityType: 'lead', entityId: id, isDeleted: false }, order: { createdAt: 'ASC' } }),
+      this.leadDocuments.find({ where: { organizationId: orgId, leadId: id, isDeleted: false }, order: { createdAt: 'DESC' } }),
     ]);
     const [withName] = await this.withNames([lead]);
-    return { lead: withName, stage, activities, followups };
+    return {
+      lead: withName, stage, activities, followups,
+      requirements: requirements.map((r) => this.requirementView(r)), effort: this.rollupEffort(requirements),
+      documents: documents.map((d) => this.documentView(d)),
+    };
   }
 
   async createLead(caller: SalesCaller, dto: CreateLeadDto): Promise<LeadEntity> {
@@ -113,6 +119,7 @@ export class SalesService {
       name: dto.name.trim(), company: dto.company ?? null, email: dto.email?.toLowerCase() ?? null, phone: dto.phone ?? null,
       title: dto.title ?? null, source: (dto.source ?? 'other') as any, stageId, status: 'open',
       value: dto.value != null ? String(dto.value) : null, currency: dto.currency?.toUpperCase() ?? 'INR',
+      requirement: dto.requirement ?? null,
       assignedTo: dto.assignedTo ?? null, score: 0, tags: dto.tags ?? [], notes: dto.notes ?? null,
       createdBy: caller.userId, isDeleted: false,
     }));
@@ -133,10 +140,12 @@ export class SalesService {
     if (dto.status !== undefined) l.status = dto.status as any;
     if (dto.value !== undefined) l.value = dto.value != null ? String(dto.value) : null;
     if (dto.currency !== undefined) l.currency = dto.currency.toUpperCase();
+    if (dto.requirement !== undefined) l.requirement = dto.requirement;
     if (dto.assignedTo !== undefined) l.assignedTo = dto.assignedTo || null;
     if (dto.score !== undefined) l.score = dto.score;
     if (dto.tags !== undefined) l.tags = dto.tags;
     if (dto.notes !== undefined) l.notes = dto.notes;
+    if (dto.status !== undefined) l.wonAt = dto.status === 'won' ? (l.wonAt ?? new Date()) : null;
     if (dto.stageId !== undefined && dto.stageId !== l.stageId) return this.moveStage(caller, id, { stageId: dto.stageId });
     const saved = await this.leads.save(l);
     if (dto.assignedTo && dto.assignedTo !== prevAssignee && dto.assignedTo !== caller.userId) this.notifyAssignment(caller.orgId, dto.assignedTo, saved, caller.userId);
@@ -150,6 +159,7 @@ export class SalesService {
     if (!stage) throw new BadRequestException('Stage not found');
     l.stageId = stage.id;
     l.status = stage.isWon ? 'won' : stage.isLost ? 'lost' : 'open';
+    l.wonAt = stage.isWon ? (l.wonAt ?? new Date()) : null;
     const saved = await this.leads.save(l);
     await this.logActivity(caller, 'lead', id, 'stage_change', `Moved to ${stage.name}`);
     return saved;
@@ -186,139 +196,51 @@ export class SalesService {
   private async touchEntity(orgId: string, entityType: SalesEntityType, entityId: string) {
     const now = new Date();
     if (entityType === 'lead') await this.leads.update({ id: entityId, organizationId: orgId }, { lastActivityAt: now });
-    else if (entityType === 'deal') await this.deals.update({ id: entityId, organizationId: orgId }, { lastActivityAt: now });
     else if (entityType === 'account') await this.accounts.update({ id: entityId, organizationId: orgId }, { lastActivityAt: now });
     else if (entityType === 'contact') await this.contacts.update({ id: entityId, organizationId: orgId }, { lastActivityAt: now });
   }
 
-  // ── deals ────────────────────────────────────────────────────────────────────
-
-  private async requireDeal(orgId: string, id: string): Promise<DealEntity> {
-    const d = await this.deals.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
-    if (!d) throw new NotFoundException('Deal not found');
-    return d;
+  /** Set a lead's value from its requirements' rolled-up estimate. */
+  async rollupLeadValue(caller: SalesCaller, id: string) {
+    const l = await this.requireLead(caller.orgId, id);
+    const reqs = await this.requirements.find({ where: { organizationId: caller.orgId, entityType: 'lead', entityId: id, isDeleted: false } });
+    l.value = String(this.rollupEffort(reqs).totalAmount);
+    const [withName] = await this.withNames([await this.leads.save(l)]);
+    return withName;
   }
 
-  private async dealsWithNames(rows: DealEntity[]) {
-    const ids = [...new Set(rows.map((d) => d.assignedTo).filter(Boolean) as string[])];
-    const users = ids.length ? await this.users.find({ where: { id: In(ids) } }) : [];
-    const byId = new Map(users.map((u) => [u.id, nameOf(u)]));
-    return rows.map((d) => ({ ...d, amount: d.amount != null ? Number(d.amount) : null, assignedToName: d.assignedTo ? byId.get(d.assignedTo) ?? null : null }));
+  // ── lead documents (briefs, specs, contracts) ───────────────────────────────────
+
+  private documentView(d: LeadDocumentEntity) {
+    return {
+      id: d.id, leadId: d.leadId, fileId: d.fileId, name: d.title || d.fileName, fileName: d.fileName,
+      mimeType: d.mimeType, size: d.size != null ? Number(d.size) : null, createdAt: d.createdAt,
+    };
   }
 
-  async listDeals(orgId: string, f: { status?: string; stageId?: string; assignedTo?: string; q?: string }) {
-    const qb = this.deals.createQueryBuilder('d').where('d.organization_id = :orgId AND d.is_deleted = false', { orgId });
-    if (f.status) qb.andWhere('d.status = :status', { status: f.status });
-    if (f.stageId) qb.andWhere('d.stage_id = :stageId', { stageId: f.stageId });
-    if (f.assignedTo) qb.andWhere('d.assigned_to = :assignedTo', { assignedTo: f.assignedTo });
-    if (f.q) qb.andWhere('d.title ILIKE :q', { q: `%${f.q}%` });
-    return this.dealsWithNames(await qb.orderBy('d.updated_at', 'DESC').take(500).getMany());
+  async listDocuments(orgId: string, leadId: string) {
+    await this.requireLead(orgId, leadId);
+    const rows = await this.leadDocuments.find({ where: { organizationId: orgId, leadId, isDeleted: false }, order: { createdAt: 'DESC' } });
+    return rows.map((d) => this.documentView(d));
   }
 
-  async dealBoard(orgId: string, includeClosed = false) {
-    const stages = await this.ensureStages(orgId);
-    const where: Record<string, unknown> = { organizationId: orgId, isDeleted: false };
-    if (!includeClosed) where.status = 'open';
-    const rows = await this.deals.find({ where, order: { updatedAt: 'DESC' } });
-    return { stages, deals: await this.dealsWithNames(rows) };
-  }
-
-  async getDeal(orgId: string, id: string) {
-    const deal = await this.requireDeal(orgId, id);
-    const [stage, activities, followups, requirements] = await Promise.all([
-      deal.stageId ? this.stages.findOne({ where: { id: deal.stageId } }) : null,
-      this.activities.find({ where: { organizationId: orgId, entityType: 'deal', entityId: id, isDeleted: false }, order: { occurredAt: 'DESC' } }),
-      this.followups.find({ where: { organizationId: orgId, entityType: 'deal', entityId: id, isDeleted: false }, order: { dueAt: 'ASC' } }),
-      this.requirements.find({ where: { organizationId: orgId, entityType: 'deal', entityId: id, isDeleted: false }, order: { createdAt: 'ASC' } }),
-    ]);
-    const [withName] = await this.dealsWithNames([deal]);
-    return { deal: withName, stage, activities, followups, requirements: requirements.map((r) => this.requirementView(r)), effort: this.rollupEffort(requirements) };
-  }
-
-  async createDeal(caller: SalesCaller, dto: CreateDealDto): Promise<DealEntity> {
-    const stages = await this.ensureStages(caller.orgId);
-    const stageId = dto.stageId || stages.find((s) => s.isDefault)?.id || stages[0]?.id || null;
-    const deal = await this.deals.save(this.deals.create({
-      organizationId: caller.orgId, title: dto.title.trim(), accountId: dto.accountId ?? null, contactId: dto.contactId ?? null,
-      stageId, status: 'open', amount: dto.amount != null ? String(dto.amount) : null, currency: dto.currency?.toUpperCase() ?? 'INR',
-      assignedTo: dto.assignedTo ?? null, tags: dto.tags ?? [], notes: dto.notes ?? null,
-      expectedCloseDate: dto.expectedCloseDate ? new Date(dto.expectedCloseDate) : null, createdBy: caller.userId, isDeleted: false,
+  async addDocument(caller: SalesCaller, leadId: string, dto: CreateLeadDocumentDto) {
+    await this.requireLead(caller.orgId, leadId);
+    const saved = await this.leadDocuments.save(this.leadDocuments.create({
+      organizationId: caller.orgId, leadId, fileId: dto.fileId, fileName: dto.fileName,
+      mimeType: dto.mimeType ?? null, size: dto.size ?? null, title: dto.title?.trim() || null,
+      createdBy: caller.userId, isDeleted: false,
     }));
-    await this.logActivity(caller, 'deal', deal.id, 'system', 'Deal created');
-    return deal;
+    await this.logActivity(caller, 'lead', leadId, 'system', `Attached document “${saved.title || saved.fileName}”`);
+    return this.documentView(saved);
   }
 
-  async updateDeal(caller: SalesCaller, id: string, dto: UpdateDealDto): Promise<DealEntity> {
-    const d = await this.requireDeal(caller.orgId, id);
-    if (dto.title !== undefined) d.title = dto.title.trim();
-    if (dto.accountId !== undefined) d.accountId = dto.accountId || null;
-    if (dto.contactId !== undefined) d.contactId = dto.contactId || null;
-    if (dto.amount !== undefined) d.amount = dto.amount != null ? String(dto.amount) : null;
-    if (dto.currency !== undefined) d.currency = dto.currency.toUpperCase();
-    if (dto.assignedTo !== undefined) d.assignedTo = dto.assignedTo || null;
-    if (dto.expectedCloseDate !== undefined) d.expectedCloseDate = dto.expectedCloseDate ? new Date(dto.expectedCloseDate) : null;
-    if (dto.lostReason !== undefined) d.lostReason = dto.lostReason;
-    if (dto.tags !== undefined) d.tags = dto.tags;
-    if (dto.notes !== undefined) d.notes = dto.notes;
-    if (dto.status !== undefined) { d.status = dto.status as any; if (dto.status === 'won') d.wonAt = new Date(); if (dto.status === 'lost') d.lostAt = new Date(); }
-    if (dto.stageId !== undefined && dto.stageId !== d.stageId) return this.moveDealStage(caller, id, { stageId: dto.stageId });
-    return this.deals.save(d);
-  }
-
-  async moveDealStage(caller: SalesCaller, id: string, dto: MoveStageDto): Promise<DealEntity> {
-    const d = await this.requireDeal(caller.orgId, id);
-    const stage = await this.stages.findOne({ where: { id: dto.stageId, organizationId: caller.orgId, isDeleted: false } });
-    if (!stage) throw new BadRequestException('Stage not found');
-    d.stageId = stage.id;
-    if (stage.isWon) { d.status = 'won'; d.wonAt = new Date(); }
-    else if (stage.isLost) { d.status = 'lost'; d.lostAt = new Date(); }
-    else d.status = 'open';
-    const saved = await this.deals.save(d);
-    await this.logActivity(caller, 'deal', id, 'stage_change', `Moved to ${stage.name}`);
-    return saved;
-  }
-
-  async deleteDeal(orgId: string, id: string) {
-    await this.deals.update({ id, organizationId: orgId }, { isDeleted: true });
+  async removeDocument(orgId: string, leadId: string, docId: string) {
+    const d = await this.leadDocuments.findOne({ where: { id: docId, leadId, organizationId: orgId, isDeleted: false } });
+    if (!d) throw new NotFoundException('Document not found');
+    d.isDeleted = true;
+    await this.leadDocuments.save(d);
     return { success: true as const };
-  }
-
-  /** Set a deal's amount from its requirements' rolled-up estimate. */
-  async rollupDealAmount(caller: SalesCaller, id: string): Promise<DealEntity> {
-    const d = await this.requireDeal(caller.orgId, id);
-    const reqs = await this.requirements.find({ where: { organizationId: caller.orgId, entityType: 'deal', entityId: id, isDeleted: false } });
-    d.amount = String(this.rollupEffort(reqs).totalAmount);
-    return this.deals.save(d);
-  }
-
-  // ── lead → deal conversion ─────────────────────────────────────────────────────
-
-  async convertLead(caller: SalesCaller, leadId: string, dto: ConvertLeadDto) {
-    const lead = await this.requireLead(caller.orgId, leadId);
-    if (lead.convertedToDealId) throw new BadRequestException('This lead has already been converted');
-    let accountId: string | null = null;
-    let contactId: string | null = null;
-    if (dto.createAccount && lead.company) {
-      const acc = await this.accounts.save(this.accounts.create({ organizationId: caller.orgId, name: lead.company, tags: [], createdBy: caller.userId, isDeleted: false }));
-      accountId = acc.id;
-    }
-    if (dto.createContact) {
-      const con = await this.contacts.save(this.contacts.create({ organizationId: caller.orgId, name: lead.name, email: lead.email, phone: lead.phone, title: lead.title, accountId, tags: [], createdBy: caller.userId, isDeleted: false }));
-      contactId = con.id;
-    }
-    const deal = await this.deals.save(this.deals.create({
-      organizationId: caller.orgId, title: dto.title?.trim() || `${lead.company || lead.name} deal`,
-      accountId, contactId, sourceLeadId: lead.id, stageId: dto.stageId || lead.stageId,
-      status: 'open', amount: dto.amount != null ? String(dto.amount) : lead.value, currency: lead.currency,
-      assignedTo: lead.assignedTo, tags: lead.tags ?? [], createdBy: caller.userId, isDeleted: false,
-    }));
-    // Move the lead's open requirements onto the deal.
-    await this.requirements.update({ organizationId: caller.orgId, entityType: 'lead', entityId: lead.id, isDeleted: false }, { entityType: 'deal', entityId: deal.id });
-    lead.convertedToDealId = deal.id;
-    lead.convertedAt = new Date();
-    await this.leads.save(lead);
-    await this.logActivity(caller, 'deal', deal.id, 'system', `Converted from lead ${lead.name}`);
-    return this.getDeal(caller.orgId, deal.id);
   }
 
   // ── requirements (effort estimation) ───────────────────────────────────────────
@@ -506,29 +428,26 @@ export class SalesService {
     return { success: true as const };
   }
 
-  // ── won deal → client (bridge to the delivery Clients module) ───────────────────
+  // ── won lead → client (bridge to the delivery Clients module) ───────────────────
 
-  async convertDealToClient(caller: SalesCaller, dealId: string) {
-    const deal = await this.requireDeal(caller.orgId, dealId);
-    if (deal.clientId) throw new BadRequestException('This deal is already linked to a client');
-    const account = deal.accountId ? await this.accounts.findOne({ where: { id: deal.accountId, organizationId: caller.orgId } }) : null;
-    const contact = deal.contactId ? await this.contacts.findOne({ where: { id: deal.contactId, organizationId: caller.orgId } }) : null;
-    const companyName = account?.name || deal.title;
+  async convertLeadToClient(caller: SalesCaller, leadId: string) {
+    const lead = await this.requireLead(caller.orgId, leadId);
+    if (lead.clientId) throw new BadRequestException('This lead is already linked to a client');
+    const companyName = lead.company || lead.name;
     const client = await this.clientsService.create(
       { userId: caller.userId, orgId: caller.orgId, isAdmin: caller.isAdmin },
       {
         companyName,
-        industry: account?.industry ?? undefined,
-        website: account?.website ?? undefined,
-        notes: `Created from won deal "${deal.title}"${deal.amount ? ` (${deal.currency} ${Number(deal.amount)})` : ''}.`,
-        primaryContact: contact ? { name: contact.name, email: contact.email ?? undefined, phone: contact.phone ?? undefined, designation: contact.title ?? undefined } : undefined,
+        notes: `Created from won lead "${lead.name}"${lead.value ? ` (${lead.currency} ${Number(lead.value)})` : ''}.`,
+        primaryContact: (lead.email || lead.phone || lead.title)
+          ? { name: lead.name, email: lead.email ?? undefined, phone: lead.phone ?? undefined, designation: lead.title ?? undefined }
+          : undefined,
       } as any,
     );
-    deal.clientId = client.id;
-    await this.deals.save(deal);
-    if (deal.sourceLeadId) await this.leads.update({ id: deal.sourceLeadId, organizationId: caller.orgId }, { clientId: client.id });
-    await this.logActivity(caller, 'deal', dealId, 'system', `Onboarded as client "${companyName}"`);
-    return { clientId: client.id, dealId };
+    lead.clientId = client.id;
+    await this.leads.save(lead);
+    await this.logActivity(caller, 'lead', leadId, 'system', `Onboarded as client "${companyName}"`);
+    return { clientId: client.id, leadId };
   }
 
   // ── accounts + contacts ──────────────────────────────────────────────────────
@@ -591,10 +510,9 @@ export class SalesService {
   // ── dashboard overview ───────────────────────────────────────────────────────
 
   async overview(orgId: string) {
-    const [stages, all, allDeals] = await Promise.all([
+    const [stages, all] = await Promise.all([
       this.ensureStages(orgId),
       this.leads.find({ where: { organizationId: orgId, isDeleted: false } }),
-      this.deals.find({ where: { organizationId: orgId, isDeleted: false } }),
     ]);
     const probById = new Map(stages.map((s) => [s.id, s.probability]));
     const open = all.filter((l) => l.status === 'open');
@@ -609,71 +527,50 @@ export class SalesService {
       return { stageId: s.id, name: s.name, color: s.color, count: leads.length, value: leads.reduce((a, l) => a + val(l), 0) };
     });
 
-    // Deals (the qualified pipeline / real forecast).
-    const dval = (d: DealEntity) => Number(d.amount ?? 0);
-    const openDeals = allDeals.filter((d) => d.status === 'open');
-    const wonDeals = allDeals.filter((d) => d.status === 'won');
-    const closedDeals = allDeals.filter((d) => d.status === 'won' || d.status === 'lost').length;
-    const deals = {
-      total: allDeals.length, open: openDeals.length, won: wonDeals.length,
-      openValue: openDeals.reduce((s, d) => s + dval(d), 0),
-      weightedForecast: openDeals.reduce((s, d) => s + dval(d) * ((d.stageId ? probById.get(d.stageId) ?? 0 : 0) / 100), 0),
-      wonValue: wonDeals.reduce((s, d) => s + dval(d), 0),
-      winRate: closedDeals ? wonDeals.length / closedDeals : 0,
-      byStage: stages.map((s) => {
-        const ds = openDeals.filter((d) => d.stageId === s.id);
-        return { stageId: s.id, name: s.name, color: s.color, count: ds.length, value: ds.reduce((a, d) => a + dval(d), 0) };
-      }),
-    };
-
     return {
       totalLeads: all.length, openLeads: open.length, wonLeads: won.length,
       openValue, weightedForecast, wonValue,
       winRate: closed ? won.length / closed : 0,
       byStage,
-      deals,
     };
   }
 
   // ── analytics ──────────────────────────────────────────────────────────────────
 
   async analytics(orgId: string) {
-    const [stages, leads, deals] = await Promise.all([
+    const [stages, leads] = await Promise.all([
       this.ensureStages(orgId),
       this.leads.find({ where: { organizationId: orgId, isDeleted: false } }),
-      this.deals.find({ where: { organizationId: orgId, isDeleted: false } }),
     ]);
     const probById = new Map(stages.map((s) => [s.id, s.probability]));
-    const dval = (d: DealEntity) => Number(d.amount ?? 0);
+    const val = (l: LeadEntity) => Number(l.value ?? 0);
 
-    // Rep leaderboard (deal-centric revenue).
+    // Rep leaderboard (per assignee).
     const ownerIds = new Set<string>();
     leads.forEach((l) => l.assignedTo && ownerIds.add(l.assignedTo));
-    deals.forEach((d) => d.assignedTo && ownerIds.add(d.assignedTo));
     const users = ownerIds.size ? await this.users.find({ where: { id: In([...ownerIds]) } }) : [];
     const nameById = new Map(users.map((u) => [u.id, nameOf(u)]));
     const leaderboard = [...ownerIds].map((uid) => {
-      const myDeals = deals.filter((d) => d.assignedTo === uid);
-      const openD = myDeals.filter((d) => d.status === 'open');
-      const wonD = myDeals.filter((d) => d.status === 'won');
-      const closedD = myDeals.filter((d) => d.status === 'won' || d.status === 'lost').length;
+      const mine = leads.filter((l) => l.assignedTo === uid);
+      const openL = mine.filter((l) => l.status === 'open');
+      const wonL = mine.filter((l) => l.status === 'won');
+      const closedL = mine.filter((l) => l.status === 'won' || l.status === 'lost').length;
       return {
         userId: uid, name: nameById.get(uid) ?? 'Member',
-        leads: leads.filter((l) => l.assignedTo === uid).length,
-        deals: myDeals.length,
-        openValue: openD.reduce((s, d) => s + dval(d), 0),
-        wonValue: wonD.reduce((s, d) => s + dval(d), 0),
-        winRate: closedD ? wonD.length / closedD : 0,
+        leads: mine.length,
+        openValue: openL.reduce((s, l) => s + val(l), 0),
+        wonValue: wonL.reduce((s, l) => s + val(l), 0),
+        winRate: closedL ? wonL.length / closedL : 0,
       };
     }).sort((a, b) => b.wonValue - a.wonValue);
 
-    // Leads by source + conversion.
+    // Leads by source + won conversion.
     const bySource = [...new Set(leads.map((l) => l.source))].map((source) => {
       const rows = leads.filter((l) => l.source === source);
-      return { source, count: rows.length, converted: rows.filter((l) => l.convertedToDealId).length };
+      return { source, count: rows.length, converted: rows.filter((l) => l.status === 'won').length };
     }).sort((a, b) => b.count - a.count);
 
-    // Monthly won revenue (last 6 months).
+    // Monthly won revenue (last 6 months, by wonAt).
     const now = new Date();
     const months: { month: string; label: string; wonValue: number; wonCount: number }[] = [];
     for (let i = 5; i >= 0; i--) {
@@ -682,35 +579,35 @@ export class SalesService {
       months.push({ month: key, label: d.toLocaleString(undefined, { month: 'short' }), wonValue: 0, wonCount: 0 });
     }
     const monthIdx = new Map(months.map((m, i) => [m.month, i]));
-    for (const d of deals) {
-      if (d.status !== 'won' || !d.wonAt) continue;
-      const wa = new Date(d.wonAt);
+    for (const l of leads) {
+      if (l.status !== 'won' || !l.wonAt) continue;
+      const wa = new Date(l.wonAt);
       const key = `${wa.getFullYear()}-${String(wa.getMonth() + 1).padStart(2, '0')}`;
       const idx = monthIdx.get(key);
-      if (idx != null) { months[idx].wonValue += dval(d); months[idx].wonCount += 1; }
+      if (idx != null) { months[idx].wonValue += val(l); months[idx].wonCount += 1; }
     }
 
-    // Avg sales cycle (days from deal created → won).
-    const wonWithCycle = deals.filter((d) => d.status === 'won' && d.wonAt);
+    // Avg sales cycle (days from lead created → won).
+    const wonWithCycle = leads.filter((l) => l.status === 'won' && l.wonAt);
     const avgCycleDays = wonWithCycle.length
-      ? Math.round(wonWithCycle.reduce((s, d) => s + (new Date(d.wonAt!).getTime() - new Date(d.createdAt).getTime()) / 86_400_000, 0) / wonWithCycle.length)
+      ? Math.round(wonWithCycle.reduce((s, l) => s + (new Date(l.wonAt!).getTime() - new Date(l.createdAt).getTime()) / 86_400_000, 0) / wonWithCycle.length)
       : 0;
 
-    const openDeals = deals.filter((d) => d.status === 'open');
-    const wonDeals = deals.filter((d) => d.status === 'won');
-    const closedDeals = deals.filter((d) => d.status === 'won' || d.status === 'lost').length;
+    const open = leads.filter((l) => l.status === 'open');
+    const won = leads.filter((l) => l.status === 'won');
+    const closed = leads.filter((l) => l.status === 'won' || l.status === 'lost').length;
     return {
       totals: {
-        openValue: openDeals.reduce((s, d) => s + dval(d), 0),
-        weightedForecast: openDeals.reduce((s, d) => s + dval(d) * ((d.stageId ? probById.get(d.stageId) ?? 0 : 0) / 100), 0),
-        wonValue: wonDeals.reduce((s, d) => s + dval(d), 0),
-        winRate: closedDeals ? wonDeals.length / closedDeals : 0,
+        openValue: open.reduce((s, l) => s + val(l), 0),
+        weightedForecast: open.reduce((s, l) => s + val(l) * ((l.stageId ? probById.get(l.stageId) ?? 0 : 0) / 100), 0),
+        wonValue: won.reduce((s, l) => s + val(l), 0),
+        winRate: closed ? won.length / closed : 0,
         avgCycleDays,
-        totalLeads: leads.length, totalDeals: deals.length,
+        totalLeads: leads.length,
       },
       funnel: stages.map((s) => {
-        const ds = openDeals.filter((d) => d.stageId === s.id);
-        return { stageId: s.id, name: s.name, color: s.color, count: ds.length, value: ds.reduce((a, d) => a + dval(d), 0) };
+        const ls = open.filter((l) => l.stageId === s.id);
+        return { stageId: s.id, name: s.name, color: s.color, count: ls.length, value: ls.reduce((a, l) => a + val(l), 0) };
       }),
       leaderboard, bySource, monthly: months,
     };

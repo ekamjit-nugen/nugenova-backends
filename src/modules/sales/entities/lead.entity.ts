@@ -3,9 +3,11 @@ import { PgBaseEntity } from '../../../bootstrap/database/pg-base.entity';
 import { LeadSource, LeadStatus } from '../sales.constants';
 
 /**
- * A sales lead — a prospective customer moving through the pipeline. Org-scoped.
- * `company` is free text at this stage; once qualified it can be linked to an
- * account/contact (Phase 1b) and converted to a deal (Phase 2).
+ * A sales lead — the single record for a prospective piece of work. Org-scoped.
+ * Holds the pipeline position, the money the lead is worth (`value`), a rich-text
+ * `requirement` write-up, attached docs (see `sales_lead_documents`), a structured
+ * effort estimate (`sales_requirements`), quotes, and — once won — a bridge to the
+ * delivery Clients module (`clientId`). There is no separate "deal" record.
  */
 @Entity('leads')
 @Index('ix_leads_org_status', ['organizationId', 'status'])
@@ -39,9 +41,13 @@ export class LeadEntity extends PgBaseEntity {
   @Column({ type: 'varchar', default: 'open' })
   status: LeadStatus;
 
-  /** Estimated deal value (for pipeline weighting / forecasting). */
+  /** What the lead is worth — the amount they'll pay for the job (drives forecasting). */
   @Column({ type: 'numeric', precision: 14, scale: 2, nullable: true, default: null })
   value: string | null;
+
+  /** Rich-text requirement write-up (sanitized HTML). */
+  @Column({ type: 'text', nullable: true, default: null })
+  requirement: string | null;
 
   @Column({ type: 'varchar', default: 'INR' })
   currency: string;
@@ -64,13 +70,11 @@ export class LeadEntity extends PgBaseEntity {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   nextFollowUpAt: Date | null;
 
-  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
-  convertedToDealId: string | null;
-
+  /** Stamped when the lead reaches a won stage (feeds won-revenue analytics). */
   @Column({ type: 'timestamptz', nullable: true, default: null })
-  convertedAt: Date | null;
+  wonAt: Date | null;
 
-  /** Set when a won lead is onboarded into the Clients module (Phase 3 bridge). */
+  /** Set when a won lead is onboarded into the delivery Clients module. */
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   clientId: string | null;
 

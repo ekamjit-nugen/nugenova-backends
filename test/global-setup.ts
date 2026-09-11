@@ -81,6 +81,7 @@ import { ClientTickets1788350000000 } from '../src/bootstrap/database/migrations
 import { SalesPhase11788360000000 } from '../src/bootstrap/database/migrations/1788360000000-SalesPhase1';
 import { SalesPhase21788370000000 } from '../src/bootstrap/database/migrations/1788370000000-SalesPhase2';
 import { SalesPhase3Quotes1788380000000 } from '../src/bootstrap/database/migrations/1788380000000-SalesPhase3Quotes';
+import { SalesPhase4LeadCentric1788390000000 } from '../src/bootstrap/database/migrations/1788390000000-SalesPhase4LeadCentric';
 import { DiscussionBoardEntity } from '../src/modules/discussion-boards/entities/discussion-board.entity';
 import { BoardNoteEntity } from '../src/modules/discussion-boards/entities/board-note.entity';
 import { BoardNodeEntity } from '../src/modules/discussion-boards/entities/board-node.entity';
@@ -100,9 +101,9 @@ import { SalesAccountEntity } from '../src/modules/sales/entities/sales-account.
 import { SalesContactEntity } from '../src/modules/sales/entities/sales-contact.entity';
 import { SalesActivityEntity } from '../src/modules/sales/entities/sales-activity.entity';
 import { SalesFollowupEntity } from '../src/modules/sales/entities/sales-followup.entity';
-import { DealEntity } from '../src/modules/sales/entities/deal.entity';
 import { RequirementEntity } from '../src/modules/sales/entities/requirement.entity';
 import { QuoteEntity } from '../src/modules/sales/entities/quote.entity';
+import { LeadDocumentEntity } from '../src/modules/sales/entities/lead-document.entity';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -246,9 +247,9 @@ module.exports = async function globalSetup(): Promise<void> {
       SalesContactEntity,
       SalesActivityEntity,
       SalesFollowupEntity,
-      DealEntity,
       RequirementEntity,
       QuoteEntity,
+      LeadDocumentEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -314,6 +315,7 @@ module.exports = async function globalSetup(): Promise<void> {
       SalesPhase11788360000000,
       SalesPhase21788370000000,
       SalesPhase3Quotes1788380000000,
+      SalesPhase4LeadCentric1788390000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

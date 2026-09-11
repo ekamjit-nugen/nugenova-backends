@@ -17,6 +17,7 @@ export class CreateLeadDto {
   @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
   @IsOptional() @IsString() @MaxLength(8000) notes?: string;
+  @IsOptional() @IsString() @MaxLength(100000) requirement?: string;
 }
 
 export class UpdateLeadDto {
@@ -34,6 +35,16 @@ export class UpdateLeadDto {
   @IsOptional() @IsInt() @Min(0) @Max(100) score?: number;
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
   @IsOptional() @IsString() @MaxLength(8000) notes?: string;
+  @IsOptional() @IsString() @MaxLength(100000) requirement?: string;
+}
+
+/** Attach an uploaded file (from /media/upload) to a lead. */
+export class CreateLeadDocumentDto {
+  @IsString() @MaxLength(24) fileId: string;
+  @IsString() @MaxLength(500) fileName: string;
+  @IsOptional() @IsString() @MaxLength(200) mimeType?: string;
+  @IsOptional() @IsNumber() size?: number;
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
 }
 
 /** Kanban drag: move a lead to another stage. */
@@ -84,44 +95,6 @@ export class CreateContactDto {
 
 export class UpdateContactDto extends CreateContactDto {
   @IsOptional() @IsString() @MaxLength(200) declare name: string;
-}
-
-// ── deals ──
-export class CreateDealDto {
-  @IsString() @MaxLength(200) title: string;
-  @IsOptional() @IsString() @MaxLength(24) accountId?: string;
-  @IsOptional() @IsString() @MaxLength(24) contactId?: string;
-  @IsOptional() @IsString() @MaxLength(24) stageId?: string;
-  @IsOptional() @IsNumber() amount?: number;
-  @IsOptional() @IsString() @MaxLength(8) currency?: string;
-  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
-  @IsOptional() @IsDateString() expectedCloseDate?: string;
-  @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
-  @IsOptional() @IsString() @MaxLength(8000) notes?: string;
-}
-
-export class UpdateDealDto {
-  @IsOptional() @IsString() @MaxLength(200) title?: string;
-  @IsOptional() @IsString() @MaxLength(24) accountId?: string;
-  @IsOptional() @IsString() @MaxLength(24) contactId?: string;
-  @IsOptional() @IsString() @MaxLength(24) stageId?: string;
-  @IsOptional() @IsIn(['open', 'won', 'lost']) status?: string;
-  @IsOptional() @IsNumber() amount?: number;
-  @IsOptional() @IsString() @MaxLength(8) currency?: string;
-  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
-  @IsOptional() @IsDateString() expectedCloseDate?: string;
-  @IsOptional() @IsString() @MaxLength(500) lostReason?: string;
-  @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
-  @IsOptional() @IsString() @MaxLength(8000) notes?: string;
-}
-
-/** Convert a lead into a deal, optionally spinning up an account + contact. */
-export class ConvertLeadDto {
-  @IsOptional() @IsString() @MaxLength(200) title?: string;
-  @IsOptional() @IsNumber() amount?: number;
-  @IsOptional() @IsString() @MaxLength(24) stageId?: string;
-  @IsOptional() @IsBoolean() createAccount?: boolean;
-  @IsOptional() @IsBoolean() createContact?: boolean;
 }
 
 // ── requirements (effort estimation) ──

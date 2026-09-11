@@ -104,7 +104,33 @@ column (`clientId`) toward the delivery module.
   a full quote editor with live totals, send/accept/reject) on lead + deal detail;
   a **Create client** button on won deals (→ Clients module).
 
-## Phase 4 (IN PROGRESS) — analytics + import/export
+## Phase 5 (DONE) — lead-centric model (deals removed)
+
+Deals were folded into the lead. The **lead is now the single record** for a
+piece of work; there is no separate deal/opportunity. Migration
+`1788390000000-SalesPhase4LeadCentric` drops the `deals` table (and the
+`leads.converted_to_deal_id`/`converted_at` columns), adds `leads.requirement`
+(rich-text HTML) + `leads.won_at`, and creates `sales_lead_documents`.
+
+- **Requirement write-up** — `leads.requirement` holds sanitized HTML authored in
+  a Tiptap editor (`components/sales/requirement-editor.tsx`), saved via
+  `PATCH /sales/leads/:id { requirement }`. It's the headline of the lead detail.
+- **Documents** — `sales_lead_documents` mirrors the clients doc-vault pattern
+  (bytes via `/media/upload` → `fileId` + denormalised metadata). Routes
+  `GET/POST /sales/leads/:id/documents`, `DELETE /sales/leads/:id/documents/:docId`.
+- **Amount** — `leads.value` is the money the lead will pay; `POST /sales/leads/:id/rollup`
+  sets it from the structured requirements estimate.
+- **Requirements (effort) + quotes** now attach to leads only (the polymorphic
+  `entityType` is always `lead`). `getLead` returns `requirements`, `effort`, and
+  `documents` alongside the lead.
+- **Won→Client** moved onto the lead: `POST /sales/leads/:id/convert-to-client`
+  builds a client from the lead (company + contact) and links `lead.clientId`.
+  Guarded against double-linking.
+- **Dashboard/analytics/overview** are lead-centric (won/forecast/leaderboard/
+  monthly revenue all computed from leads; `won_at` drives monthly + avg cycle).
+- Removed: `/sales/deals*` routes + pages, the lead→deal `convert`, `DealEntity`.
+
+## Phase 4 (DONE) — analytics + import/export
 
 - **Analytics** (`GET /sales/analytics`) — a reporting rollup beyond the dashboard
   `overview`: headline totals (open pipeline, weighted forecast, won revenue, win
