@@ -76,6 +76,7 @@ import { Clients1788300000000 } from '../src/bootstrap/database/migrations/17883
 import { ClientAgreements1788310000000 } from '../src/bootstrap/database/migrations/1788310000000-ClientAgreements';
 import { ClientAgreementFields1788320000000 } from '../src/bootstrap/database/migrations/1788320000000-ClientAgreementFields';
 import { ClientDocuments1788330000000 } from '../src/bootstrap/database/migrations/1788330000000-ClientDocuments';
+import { ClientAgreementTemplatesReminders1788340000000 } from '../src/bootstrap/database/migrations/1788340000000-ClientAgreementTemplatesReminders';
 import { DiscussionBoardEntity } from '../src/modules/discussion-boards/entities/discussion-board.entity';
 import { BoardNoteEntity } from '../src/modules/discussion-boards/entities/board-note.entity';
 import { BoardNodeEntity } from '../src/modules/discussion-boards/entities/board-node.entity';
@@ -86,6 +87,7 @@ import { ClientAssignmentEntity } from '../src/modules/clients/entities/client-a
 import { BoardClientShareEntity } from '../src/modules/clients/entities/board-client-share.entity';
 import { ClientAgreementEntity } from '../src/modules/clients/entities/client-agreement.entity';
 import { ClientDocumentEntity } from '../src/modules/clients/entities/client-document.entity';
+import { ClientAgreementTemplateEntity } from '../src/modules/clients/entities/client-agreement-template.entity';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -219,6 +221,7 @@ module.exports = async function globalSetup(): Promise<void> {
       ClientAssignmentEntity,
       BoardClientShareEntity,
       ClientAgreementEntity,
+      ClientAgreementTemplateEntity,
       ClientDocumentEntity,
     ],
     // NOTE: keep this list in sync with every migration under
@@ -280,6 +283,7 @@ module.exports = async function globalSetup(): Promise<void> {
       ClientAgreements1788310000000,
       ClientAgreementFields1788320000000,
       ClientDocuments1788330000000,
+      ClientAgreementTemplatesReminders1788340000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

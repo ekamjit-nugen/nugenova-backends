@@ -3,7 +3,7 @@ import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ClientsCaller, ClientsService } from './clients.service';
 import {
-  AssignEmployeeDto, CreateAgreementDto, CreateClientDto, CreateContactDto, CreateDocumentDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, UpdateAgreementDto, UpdateClientDto, UpdateContactDto,
+  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto,
 } from './dto';
 
 /**
@@ -42,6 +42,27 @@ export class ClientsController {
   @Get('overview')
   async overview(@Req() req: any) {
     return { success: true, data: await this.clients.dashboardSummary(this.requireAdmin(this.caller(req)).orgId) };
+  }
+
+  // ── agreement templates (admin, org-level) ──
+  @Get('agreement-templates')
+  async listTemplates(@Req() req: any) {
+    return { success: true, data: await this.clients.listTemplates(this.requireAdmin(this.caller(req)).orgId) };
+  }
+
+  @Post('agreement-templates')
+  async createTemplate(@Req() req: any, @Body() dto: CreateAgreementTemplateDto) {
+    return { success: true, data: await this.clients.createTemplate(this.requireAdmin(this.caller(req)), dto) };
+  }
+
+  @Patch('agreement-templates/:tid')
+  async updateTemplate(@Req() req: any, @Param('tid') tid: string, @Body() dto: UpdateAgreementTemplateDto) {
+    return { success: true, data: await this.clients.updateTemplate(this.requireAdmin(this.caller(req)).orgId, tid, dto) };
+  }
+
+  @Delete('agreement-templates/:tid')
+  async deleteTemplate(@Req() req: any, @Param('tid') tid: string) {
+    return { success: true, data: await this.clients.deleteTemplate(this.requireAdmin(this.caller(req)).orgId, tid) };
   }
 
   /** Portal home for a client-role user. */
@@ -203,6 +224,11 @@ export class ClientsController {
   @Post(':id/agreements/:agreementId/void')
   async voidAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
     return { success: true, data: await this.clients.voidAgreement(this.requireAdmin(this.caller(req)).orgId, id, agreementId) };
+  }
+
+  @Post(':id/agreements/:agreementId/remind')
+  async remindAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
+    return { success: true, data: await this.clients.remindAgreement(this.requireAdmin(this.caller(req)).orgId, id, agreementId) };
   }
 
   @Delete(':id/agreements/:agreementId')

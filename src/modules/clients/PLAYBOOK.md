@@ -84,6 +84,8 @@ Agreements (portal): `GET /portal/agreements`, `GET /portal/agreements/:aid`,
 `POST /portal/agreements/:aid/sign`.
 Documents (admin): `GET/POST /:id/documents`, `DELETE /:id/documents/:docId`.
 Documents (portal): `GET /portal/documents`.
+Templates (admin): `GET/POST /agreement-templates`, `PATCH/DELETE /agreement-templates/:tid`.
+Reminders (admin): `POST /:id/agreements/:aid/remind` (manual nudge).
 Dashboard: `GET /overview` (admin) — client counts, agreement activity, and the
 clients-without-a-signed-agreement nudge set.
 
@@ -114,6 +116,16 @@ re-signed. Tables/columns: `client_agreements` (migrations `1788310000000` +
 soft-deletes its agreements. Frontend: admin manages them in an **Agreements**
 section on `/clients/[id]`; the client reviews + signs at `/portal/agreements/[id]`,
 with pending ones surfaced on the portal home.
+
+**Templates & reminders:** reusable `client_agreement_templates` (name + title +
+category + bodyHtml and/or a stored PDF with placed `fields`) let an org author an
+NDA/SOW once and spin up per-client agreements from it (the create form prefills
+from a template, and can save the current agreement back as one). Unsigned `sent`
+agreements get **reminders**: a manual "nudge" (`POST …/remind`) and a daily cron
+(`ClientsCronService.runAgreementReminders` → after 3 days, then every 3, capped
+at 3) that emails + in-app-notifies the client's active portal users; each fires
+`client_agreement_reminder` and stamps `lastReminderAt`/`reminderCount`.
+Migration `1788340000000` adds the templates table + the reminder columns.
 
 **In-PDF signing (DocuSign-style):** when the org attaches a PDF it can place
 signature/name/date boxes on it (`fields`, page-relative %) via

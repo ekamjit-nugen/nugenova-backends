@@ -202,6 +202,47 @@ export class UpdateAgreementDto {
   fields?: AgreementFieldDto[];
 }
 
+/** A reusable agreement template. */
+export class CreateAgreementTemplateDto {
+  @IsString() @MaxLength(200)
+  name: string;
+
+  @IsOptional() @IsString() @MaxLength(300)
+  title?: string;
+
+  @IsOptional() @IsIn(['nda', 'sow', 'msa', 'contract', 'other'])
+  category?: string;
+
+  @IsOptional() @IsString() @MaxLength(200000)
+  bodyHtml?: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  sourceFileId?: string;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AgreementFieldDto)
+  fields?: AgreementFieldDto[];
+}
+
+export class UpdateAgreementTemplateDto {
+  @IsOptional() @IsString() @MaxLength(200)
+  name?: string;
+
+  @IsOptional() @IsString() @MaxLength(300)
+  title?: string;
+
+  @IsOptional() @IsIn(['nda', 'sow', 'msa', 'contract', 'other'])
+  category?: string;
+
+  @IsOptional() @IsString() @MaxLength(200000)
+  bodyHtml?: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  sourceFileId?: string;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AgreementFieldDto)
+  fields?: AgreementFieldDto[];
+}
+
 /** Register a file (already uploaded to /media) into a client's document vault. */
 export class CreateDocumentDto {
   @IsString() @MaxLength(24)

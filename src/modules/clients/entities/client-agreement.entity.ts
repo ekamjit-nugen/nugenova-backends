@@ -97,6 +97,13 @@ export class ClientAgreementEntity extends PgBaseEntity {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   signedAt: Date | null;
 
+  /** Last time a "please sign" reminder was sent to the client (manual or cron). */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  lastReminderAt: Date | null;
+
+  @Column({ type: 'int', nullable: false, default: 0 })
+  reminderCount: number;
+
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   createdBy: string | null;
 

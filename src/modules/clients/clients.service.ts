@@ -8,6 +8,7 @@ import { ClientContactEntity } from './entities/client-contact.entity';
 import { ClientAssignmentEntity } from './entities/client-assignment.entity';
 import { BoardClientShareEntity } from './entities/board-client-share.entity';
 import { ClientAgreementEntity } from './entities/client-agreement.entity';
+import { ClientAgreementTemplateEntity } from './entities/client-agreement-template.entity';
 import { ClientDocumentEntity } from './entities/client-document.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
@@ -18,7 +19,7 @@ import { BoardCommentEntity } from '../discussion-boards/entities/board-comment.
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { NotifierService } from '../notification/notifier.service';
 import {
-  AssignEmployeeDto, CreateAgreementDto, CreateClientDto, CreateContactDto, CreateDocumentDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, UpdateAgreementDto, UpdateClientDto, UpdateContactDto,
+  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto,
 } from './dto';
 
 export interface ClientsCaller {
@@ -46,6 +47,7 @@ export class ClientsService {
     @InjectRepository(ClientAssignmentEntity) private readonly assignments: Repository<ClientAssignmentEntity>,
     @InjectRepository(BoardClientShareEntity) private readonly shares: Repository<BoardClientShareEntity>,
     @InjectRepository(ClientAgreementEntity) private readonly agreements: Repository<ClientAgreementEntity>,
+    @InjectRepository(ClientAgreementTemplateEntity) private readonly agreementTemplates: Repository<ClientAgreementTemplateEntity>,
     @InjectRepository(ClientDocumentEntity) private readonly documents: Repository<ClientDocumentEntity>,
     @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
@@ -486,6 +488,117 @@ export class ClientsService {
     return { success: true };
   }
 
+  // ── agreement templates (admin) ──────────────────────────────────────────────
+
+  async listTemplates(orgId: string) {
+    return this.agreementTemplates.find({ where: { organizationId: orgId, isDeleted: false }, order: { createdAt: 'DESC' } });
+  }
+
+  async createTemplate(caller: ClientsCaller, dto: CreateAgreementTemplateDto): Promise<ClientAgreementTemplateEntity> {
+    if (!dto.bodyHtml?.trim() && !dto.sourceFileId) {
+      throw new BadRequestException('Provide agreement text or attach a PDF');
+    }
+    return this.agreementTemplates.save(this.agreementTemplates.create({
+      organizationId: caller.orgId,
+      name: dto.name.trim(),
+      title: dto.title?.trim() || null,
+      category: dto.category ?? 'other',
+      bodyHtml: dto.bodyHtml ?? null,
+      sourceFileId: dto.sourceFileId ?? null,
+      fields: (dto.fields ?? null) as any,
+      createdBy: caller.userId, isDeleted: false,
+    }));
+  }
+
+  async updateTemplate(orgId: string, id: string, dto: UpdateAgreementTemplateDto): Promise<ClientAgreementTemplateEntity> {
+    const t = await this.agreementTemplates.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
+    if (!t) throw new NotFoundException('Template not found');
+    if (dto.name !== undefined) t.name = dto.name.trim();
+    if (dto.title !== undefined) t.title = dto.title;
+    if (dto.category !== undefined) t.category = dto.category;
+    if (dto.bodyHtml !== undefined) t.bodyHtml = dto.bodyHtml;
+    if (dto.sourceFileId !== undefined) t.sourceFileId = dto.sourceFileId;
+    if (dto.fields !== undefined) t.fields = dto.fields as any;
+    return this.agreementTemplates.save(t);
+  }
+
+  async deleteTemplate(orgId: string, id: string): Promise<{ success: true }> {
+    const t = await this.agreementTemplates.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
+    if (!t) throw new NotFoundException('Template not found');
+    t.isDeleted = true;
+    await this.agreementTemplates.save(t);
+    return { success: true };
+  }
+
+  // ── agreement reminders ──────────────────────────────────────────────────────
+
+  private static readonly REMIND_AFTER_DAYS = 3;
+  private static readonly REMIND_INTERVAL_DAYS = 3;
+  private static readonly MAX_REMINDERS = 3;
+
+  /** Email + in-app nudge to the client's active portal users to sign an agreement. */
+  private async notifyClientToSign(a: ClientAgreementEntity, companyName: string): Promise<number> {
+    if (!this.notifier) return 0;
+    const members = await this.memberships.find({ where: { organizationId: a.organizationId, clientId: a.clientId, role: 'client', status: 'active' } });
+    let sent = 0;
+    for (const m of members) {
+      if (!m.userId) continue;
+      await this.notifier.notify({
+        organizationId: a.organizationId,
+        userId: m.userId,
+        type: 'client_agreement_reminder',
+        title: `Reminder: please sign “${a.title}”`,
+        body: `${companyName} is waiting for your signature on “${a.title}”.`,
+        data: { actionUrl: `/portal/agreements/${a.id}`, agreementId: a.id },
+        email: { eyebrow: 'Signature requested', cta: 'Review & sign', subject: `Please sign “${a.title}”` },
+      }).catch(() => undefined);
+      sent++;
+    }
+    return sent;
+  }
+
+  /** Admin manually nudges the client to sign a sent (unsigned) agreement. */
+  async remindAgreement(orgId: string, clientId: string, id: string) {
+    const a = await this.requireAgreement(orgId, clientId, id);
+    if (a.status !== 'sent') throw new BadRequestException('Only a sent, unsigned agreement can be reminded');
+    const client = await this.clients.findOne({ where: { id: clientId } });
+    await this.notifyClientToSign(a, client?.companyName ?? 'The organization');
+    a.lastReminderAt = new Date();
+    a.reminderCount = (a.reminderCount ?? 0) + 1;
+    await this.agreements.save(a);
+    return this.agreementView(a);
+  }
+
+  /** Cron sweep: auto-remind clients about sent agreements they haven't signed. */
+  async runAgreementReminders(now: Date = new Date()): Promise<{ checked: number; notified: number }> {
+    const sent = await this.agreements.find({ where: { status: 'sent', isDeleted: false } });
+    let notified = 0;
+    const clientNameCache = new Map<string, string>();
+    for (const a of sent) {
+      const count = a.reminderCount ?? 0;
+      if (count >= ClientsService.MAX_REMINDERS) continue;
+      const baseline = a.lastReminderAt ?? a.sentAt;
+      if (!baseline) continue;
+      const days = (now.getTime() - new Date(baseline).getTime()) / 86_400_000;
+      const threshold = count === 0 ? ClientsService.REMIND_AFTER_DAYS : ClientsService.REMIND_INTERVAL_DAYS;
+      if (days < threshold) continue;
+      let name = clientNameCache.get(a.clientId);
+      if (name === undefined) {
+        const client = await this.clients.findOne({ where: { id: a.clientId } });
+        name = client?.companyName ?? 'The organization';
+        clientNameCache.set(a.clientId, name);
+      }
+      const n = await this.notifyClientToSign(a, name);
+      if (n > 0) {
+        a.lastReminderAt = now;
+        a.reminderCount = count + 1;
+        await this.agreements.save(a);
+        notified++;
+      }
+    }
+    return { checked: sent.length, notified };
+  }
+
   // ── document vault (admin) ───────────────────────────────────────────────────
 
   async listDocuments(orgId: string, clientId: string) {
@@ -610,6 +723,7 @@ export class ClientsService {
       id: a.id, clientId: a.clientId, title: a.title, description: a.description, category: a.category,
       bodyHtml: a.bodyHtml, sourceFileId: a.sourceFileId, fields: a.fields ?? [], signedFileId: a.signedFileId,
       status: a.status, signature: a.signature, sentAt: a.sentAt, signedAt: a.signedAt, createdAt: a.createdAt,
+      lastReminderAt: a.lastReminderAt, reminderCount: a.reminderCount ?? 0,
     };
   }
 }

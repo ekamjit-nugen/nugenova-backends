@@ -6,16 +6,17 @@ import { ClientsService } from './clients.service';
  * without a database. End-to-end behaviour is covered by clients.e2e-spec.ts.
  */
 describe('ClientsService', () => {
-  let clients: any, contacts: any, assignments: any, shares: any, agreements: any, memberships: any, users: any, boards: any, notes: any, nodes: any, comments: any, mail: any;
+  let clients: any, contacts: any, assignments: any, shares: any, agreements: any, agreementTemplates: any, documents: any, memberships: any, users: any, boards: any, notes: any, nodes: any, comments: any, mail: any, notifier: any;
   let service: ClientsService;
 
   const admin = { userId: 'owner1', orgId: 'orgA', isAdmin: true };
 
   beforeEach(() => {
     const repo = () => ({ find: jest.fn(), findOne: jest.fn(), save: jest.fn((v) => Promise.resolve({ id: 'new1', ...v })), create: jest.fn((v) => ({ ...v })), update: jest.fn(), delete: jest.fn(), count: jest.fn() });
-    clients = repo(); contacts = repo(); assignments = repo(); shares = repo(); agreements = repo(); memberships = repo(); users = repo(); boards = repo(); notes = repo(); nodes = repo(); comments = repo();
+    clients = repo(); contacts = repo(); assignments = repo(); shares = repo(); agreements = repo(); agreementTemplates = repo(); documents = repo(); memberships = repo(); users = repo(); boards = repo(); notes = repo(); nodes = repo(); comments = repo();
     mail = { send: jest.fn().mockResolvedValue(undefined) };
-    service = new ClientsService(clients, contacts, assignments, shares, agreements, memberships, users, boards, notes, nodes, comments, mail);
+    notifier = { notify: jest.fn().mockResolvedValue(undefined) };
+    service = new ClientsService(clients, contacts, assignments, shares, agreements, agreementTemplates, documents, memberships, users, boards, notes, nodes, comments, mail, notifier);
   });
 
   describe('create', () => {
@@ -240,6 +241,57 @@ describe('ClientsService', () => {
       expect(where.clientId).toBe('c1');
       // status filter is an In([...]) — drafts/voids are excluded
       expect(where.status).toBeDefined();
+    });
+  });
+
+  describe('templates', () => {
+    it('createTemplate requires body text or a PDF', async () => {
+      await expect(service.createTemplate(admin, { name: 'NDA' } as any)).rejects.toThrow(/text or attach a PDF/);
+    });
+    it('creates a template from body text', async () => {
+      const out = await service.createTemplate(admin, { name: 'Std NDA', bodyHtml: '<p>terms</p>', category: 'nda' } as any);
+      expect(out.name).toBe('Std NDA');
+      expect(out.organizationId).toBe('orgA');
+    });
+  });
+
+  describe('remindAgreement (manual)', () => {
+    it('refuses to remind an agreement that is not sent', async () => {
+      agreements.findOne.mockResolvedValue({ id: 'a1', clientId: 'c1', organizationId: 'orgA', isDeleted: false, status: 'signed' });
+      await expect(service.remindAgreement('orgA', 'c1', 'a1')).rejects.toThrow(/sent, unsigned/);
+    });
+    it('notifies the client portal users and stamps the reminder', async () => {
+      agreements.findOne.mockResolvedValue({ id: 'a1', clientId: 'c1', organizationId: 'orgA', isDeleted: false, status: 'sent', title: 'NDA', reminderCount: 0 });
+      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      memberships.find.mockResolvedValue([{ userId: 'p1' }]);
+      const out = await service.remindAgreement('orgA', 'c1', 'a1');
+      expect(notifier.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'client_agreement_reminder', userId: 'p1' }));
+      expect(out.reminderCount).toBe(1);
+      expect(out.lastReminderAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('runAgreementReminders (cron)', () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+    it('reminds a sent agreement past the threshold and stamps it', async () => {
+      agreements.find.mockResolvedValue([{ id: 'a1', clientId: 'c1', organizationId: 'orgA', title: 'NDA', status: 'sent', isDeleted: false, sentAt: daysAgo(5), lastReminderAt: null, reminderCount: 0 }]);
+      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      memberships.find.mockResolvedValue([{ userId: 'p1' }]);
+      const r = await service.runAgreementReminders(new Date());
+      expect(r.notified).toBe(1);
+      expect(notifier.notify).toHaveBeenCalled();
+      expect(agreements.save).toHaveBeenCalledWith(expect.objectContaining({ reminderCount: 1 }));
+    });
+    it('skips a recently-reminded agreement', async () => {
+      agreements.find.mockResolvedValue([{ id: 'a1', clientId: 'c1', organizationId: 'orgA', status: 'sent', isDeleted: false, sentAt: daysAgo(10), lastReminderAt: daysAgo(1), reminderCount: 1 }]);
+      const r = await service.runAgreementReminders(new Date());
+      expect(r.notified).toBe(0);
+      expect(notifier.notify).not.toHaveBeenCalled();
+    });
+    it('stops after the max number of reminders', async () => {
+      agreements.find.mockResolvedValue([{ id: 'a1', clientId: 'c1', organizationId: 'orgA', status: 'sent', isDeleted: false, sentAt: daysAgo(30), lastReminderAt: daysAgo(10), reminderCount: 3 }]);
+      const r = await service.runAgreementReminders(new Date());
+      expect(r.notified).toBe(0);
     });
   });
 });
