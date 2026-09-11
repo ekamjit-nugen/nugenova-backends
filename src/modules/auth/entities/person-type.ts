@@ -12,10 +12,10 @@ import { ObjectLiteral, SelectQueryBuilder } from 'typeorm';
  * leak). `staffScope()` makes that impossible by construction: it narrows a
  * membership query to `personType = 'staff'`.
  */
-export type PersonType = 'staff' | 'student' | 'guardian';
+export type PersonType = 'staff' | 'student' | 'guardian' | 'client';
 
 /** Every allowed personType (validation + docs). */
-export const PERSON_TYPES: readonly PersonType[] = ['staff', 'student', 'guardian'];
+export const PERSON_TYPES: readonly PersonType[] = ['staff', 'student', 'guardian', 'client'];
 
 /** The default — every existing row and every new org member is staff. */
 export const STAFF_PERSON_TYPE: PersonType = 'staff';

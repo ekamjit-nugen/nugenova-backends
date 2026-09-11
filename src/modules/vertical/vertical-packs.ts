@@ -49,6 +49,7 @@ const CORE_MODULES = [
   'payroll',
   'policy',
   'notification',
+  'clients',
 ];
 
 // The education-vertical modules that sit on the academic calendar.
