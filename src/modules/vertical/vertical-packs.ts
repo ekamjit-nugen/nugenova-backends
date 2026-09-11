@@ -50,6 +50,7 @@ const CORE_MODULES = [
   'policy',
   'notification',
   'clients',
+  'sales',
 ];
 
 // The education-vertical modules that sit on the academic calendar.

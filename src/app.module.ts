@@ -30,6 +30,7 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 import { DiscussionBoardsModule } from './modules/discussion-boards/discussion-boards.module';
 import { ClientsModule } from './modules/clients/clients.module';
+import { SalesModule } from './modules/sales/sales.module';
 
 /**
  * Nugenova backend root module.
@@ -76,6 +77,7 @@ import { ClientsModule } from './modules/clients/clients.module';
     AiChatModule,
     DiscussionBoardsModule,
     ClientsModule,
+    SalesModule,
   ],
 })
 export class AppModule {}

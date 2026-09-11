@@ -78,6 +78,7 @@ import { ClientAgreementFields1788320000000 } from '../src/bootstrap/database/mi
 import { ClientDocuments1788330000000 } from '../src/bootstrap/database/migrations/1788330000000-ClientDocuments';
 import { ClientAgreementTemplatesReminders1788340000000 } from '../src/bootstrap/database/migrations/1788340000000-ClientAgreementTemplatesReminders';
 import { ClientTickets1788350000000 } from '../src/bootstrap/database/migrations/1788350000000-ClientTickets';
+import { SalesPhase11788360000000 } from '../src/bootstrap/database/migrations/1788360000000-SalesPhase1';
 import { DiscussionBoardEntity } from '../src/modules/discussion-boards/entities/discussion-board.entity';
 import { BoardNoteEntity } from '../src/modules/discussion-boards/entities/board-note.entity';
 import { BoardNodeEntity } from '../src/modules/discussion-boards/entities/board-node.entity';
@@ -91,6 +92,12 @@ import { ClientDocumentEntity } from '../src/modules/clients/entities/client-doc
 import { ClientAgreementTemplateEntity } from '../src/modules/clients/entities/client-agreement-template.entity';
 import { ClientTicketEntity } from '../src/modules/clients/entities/client-ticket.entity';
 import { ClientTicketMessageEntity } from '../src/modules/clients/entities/client-ticket-message.entity';
+import { PipelineStageEntity } from '../src/modules/sales/entities/pipeline-stage.entity';
+import { LeadEntity } from '../src/modules/sales/entities/lead.entity';
+import { SalesAccountEntity } from '../src/modules/sales/entities/sales-account.entity';
+import { SalesContactEntity } from '../src/modules/sales/entities/sales-contact.entity';
+import { SalesActivityEntity } from '../src/modules/sales/entities/sales-activity.entity';
+import { SalesFollowupEntity } from '../src/modules/sales/entities/sales-followup.entity';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -228,6 +235,12 @@ module.exports = async function globalSetup(): Promise<void> {
       ClientDocumentEntity,
       ClientTicketEntity,
       ClientTicketMessageEntity,
+      PipelineStageEntity,
+      LeadEntity,
+      SalesAccountEntity,
+      SalesContactEntity,
+      SalesActivityEntity,
+      SalesFollowupEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -290,6 +303,7 @@ module.exports = async function globalSetup(): Promise<void> {
       ClientDocuments1788330000000,
       ClientAgreementTemplatesReminders1788340000000,
       ClientTickets1788350000000,
+      SalesPhase11788360000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
