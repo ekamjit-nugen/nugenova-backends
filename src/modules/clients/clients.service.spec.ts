@@ -6,17 +6,17 @@ import { ClientsService } from './clients.service';
  * without a database. End-to-end behaviour is covered by clients.e2e-spec.ts.
  */
 describe('ClientsService', () => {
-  let clients: any, contacts: any, assignments: any, shares: any, agreements: any, agreementTemplates: any, documents: any, memberships: any, users: any, boards: any, notes: any, nodes: any, comments: any, mail: any, notifier: any;
+  let clients: any, contacts: any, assignments: any, shares: any, agreements: any, agreementTemplates: any, documents: any, tickets: any, ticketMessages: any, memberships: any, users: any, boards: any, notes: any, nodes: any, comments: any, mail: any, notifier: any;
   let service: ClientsService;
 
   const admin = { userId: 'owner1', orgId: 'orgA', isAdmin: true };
 
   beforeEach(() => {
     const repo = () => ({ find: jest.fn(), findOne: jest.fn(), save: jest.fn((v) => Promise.resolve({ id: 'new1', ...v })), create: jest.fn((v) => ({ ...v })), update: jest.fn(), delete: jest.fn(), count: jest.fn() });
-    clients = repo(); contacts = repo(); assignments = repo(); shares = repo(); agreements = repo(); agreementTemplates = repo(); documents = repo(); memberships = repo(); users = repo(); boards = repo(); notes = repo(); nodes = repo(); comments = repo();
+    clients = repo(); contacts = repo(); assignments = repo(); shares = repo(); agreements = repo(); agreementTemplates = repo(); documents = repo(); tickets = repo(); ticketMessages = repo(); memberships = repo(); users = repo(); boards = repo(); notes = repo(); nodes = repo(); comments = repo();
     mail = { send: jest.fn().mockResolvedValue(undefined) };
     notifier = { notify: jest.fn().mockResolvedValue(undefined) };
-    service = new ClientsService(clients, contacts, assignments, shares, agreements, agreementTemplates, documents, memberships, users, boards, notes, nodes, comments, mail, notifier);
+    service = new ClientsService(clients, contacts, assignments, shares, agreements, agreementTemplates, documents, tickets, ticketMessages, memberships, users, boards, notes, nodes, comments, mail, notifier);
   });
 
   describe('create', () => {
@@ -292,6 +292,51 @@ describe('ClientsService', () => {
       agreements.find.mockResolvedValue([{ id: 'a1', clientId: 'c1', organizationId: 'orgA', status: 'sent', isDeleted: false, sentAt: daysAgo(30), lastReminderAt: daysAgo(10), reminderCount: 3 }]);
       const r = await service.runAgreementReminders(new Date());
       expect(r.notified).toBe(0);
+    });
+  });
+
+  describe('tickets', () => {
+    const portalMember = { userId: 'p1', clientId: 'c1', role: 'client', status: 'active' };
+
+    it('portalCreateTicket requires a subject', async () => {
+      memberships.findOne.mockResolvedValue(portalMember);
+      await expect(service.portalCreateTicket('orgA', 'p1', { subject: '  ' } as any)).rejects.toThrow(/subject/);
+    });
+
+    it('a client raises a ticket and the delivery team is notified', async () => {
+      memberships.findOne.mockResolvedValue(portalMember);
+      users.findOne.mockResolvedValue({ firstName: 'Jane', lastName: 'Doe' });
+      assignments.find.mockResolvedValue([{ userId: 'emp1' }]); // delivery team
+      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      const out = await service.portalCreateTicket('orgA', 'p1', { subject: 'Need help', description: 'x' } as any);
+      expect(out.status).toBe('open');
+      expect(out.createdByRole).toBe('client');
+      expect(notifier.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'client_ticket_created', userId: 'emp1' }));
+    });
+
+    it('a staff reply moves an open ticket to in_progress and notifies the client', async () => {
+      tickets.findOne.mockResolvedValue({ id: 't1', clientId: 'c1', organizationId: 'orgA', isDeleted: false, status: 'open', subject: 'Help' });
+      users.findOne.mockResolvedValue({ firstName: 'Sam', lastName: 'Staff' });
+      memberships.find.mockResolvedValue([{ userId: 'p1' }]); // client portal users
+      await service.staffReply(admin, 't1', { body: 'On it' } as any);
+      expect(tickets.save).toHaveBeenCalledWith(expect.objectContaining({ status: 'in_progress' }));
+      expect(notifier.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'client_ticket_reply', userId: 'p1' }));
+    });
+
+    it('a client reply reopens a resolved ticket', async () => {
+      memberships.findOne.mockResolvedValue(portalMember);
+      tickets.findOne.mockResolvedValue({ id: 't1', clientId: 'c1', organizationId: 'orgA', isDeleted: false, status: 'resolved', subject: 'Help', assignedToUserId: 'emp1' });
+      users.findOne.mockResolvedValue({ firstName: 'Jane' });
+      assignments.find.mockResolvedValue([{ userId: 'emp1' }]);
+      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      await service.portalReply('orgA', 'p1', 't1', { body: 'Still broken' } as any);
+      expect(tickets.save).toHaveBeenCalledWith(expect.objectContaining({ status: 'open' }));
+    });
+
+    it('rejects an empty ticket message', async () => {
+      memberships.findOne.mockResolvedValue(portalMember);
+      tickets.findOne.mockResolvedValue({ id: 't1', clientId: 'c1', organizationId: 'orgA', isDeleted: false, status: 'open' });
+      await expect(service.portalReply('orgA', 'p1', 't1', { body: '   ' } as any)).rejects.toThrow(/empty/);
     });
   });
 });

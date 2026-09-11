@@ -17,6 +17,8 @@ import { BoardClientShareEntity } from './entities/board-client-share.entity';
 import { ClientAgreementEntity } from './entities/client-agreement.entity';
 import { ClientAgreementTemplateEntity } from './entities/client-agreement-template.entity';
 import { ClientDocumentEntity } from './entities/client-document.entity';
+import { ClientTicketEntity } from './entities/client-ticket.entity';
+import { ClientTicketMessageEntity } from './entities/client-ticket-message.entity';
 import { ClientsService } from './clients.service';
 import { ClientsCronService } from './clients-cron.service';
 import { ClientsController } from './clients.controller';
@@ -38,6 +40,8 @@ import { ClientsController } from './clients.controller';
       ClientAgreementEntity,
       ClientAgreementTemplateEntity,
       ClientDocumentEntity,
+      ClientTicketEntity,
+      ClientTicketMessageEntity,
       OrgMembershipEntity,
       UserEntity,
       DiscussionBoardEntity,

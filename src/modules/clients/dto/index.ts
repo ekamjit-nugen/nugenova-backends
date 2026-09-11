@@ -264,6 +264,38 @@ export class CreateDocumentDto {
   description?: string;
 }
 
+// ── tickets ──────────────────────────────────────────────────────────────────
+
+export class CreateTicketDto {
+  @IsString() @MaxLength(300)
+  subject: string;
+
+  @IsOptional() @IsString() @MaxLength(8000)
+  description?: string;
+
+  @IsOptional() @IsIn(['question', 'issue', 'request', 'billing', 'other'])
+  category?: string;
+
+  @IsOptional() @IsIn(['low', 'normal', 'high', 'urgent'])
+  priority?: string;
+}
+
+export class UpdateTicketDto {
+  @IsOptional() @IsIn(['open', 'in_progress', 'resolved', 'closed'])
+  status?: string;
+
+  @IsOptional() @IsIn(['low', 'normal', 'high', 'urgent'])
+  priority?: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  assignedToUserId?: string;
+}
+
+export class TicketMessageDto {
+  @IsString() @MaxLength(8000)
+  body: string;
+}
+
 /** A client portal user signs an agreement (drawn image or typed name). */
 export class SignAgreementDto {
   @IsString() @MaxLength(200)

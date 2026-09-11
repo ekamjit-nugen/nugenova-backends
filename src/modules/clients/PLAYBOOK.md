@@ -86,6 +86,23 @@ Documents (admin): `GET/POST /:id/documents`, `DELETE /:id/documents/:docId`.
 Documents (portal): `GET /portal/documents`.
 Templates (admin): `GET/POST /agreement-templates`, `PATCH/DELETE /agreement-templates/:tid`.
 Reminders (admin): `POST /:id/agreements/:aid/remind` (manual nudge).
+Tickets (admin): `GET /tickets?status=` (org queue), `GET /:id/tickets`, `POST /:id/tickets`,
+`GET/PATCH /tickets/:tid`, `POST /tickets/:tid/messages`.
+Tickets (portal): `GET/POST /portal/tickets`, `GET /portal/tickets/:tid`, `POST /portal/tickets/:tid/messages`.
+
+## Support tickets
+
+Two-way requests: a client raises a ticket from the portal (or an org opens one
+for them), and the conversation lives in `client_ticket_messages`. Tables
+`client_tickets` + `client_ticket_messages` (migration `1788350000000`). Status
+`open → in_progress → resolved → closed`; a **client reply reopens** a
+resolved/closed ticket, and a **staff reply** moves `open → in_progress`.
+Notifications: a client action notifies the delivery team (assignments + assignee)
+via `client_ticket_created`/`client_ticket_reply`; a staff action notifies the
+client's portal users. Frontend: admin **Requests** section on `/clients/[id]`
+(list + a thread modal with status/priority + reply), and an org-wide queue
+endpoint for a future inbox; client `/portal/tickets` (list + new request) and
+`/portal/tickets/[tid]` (thread). Deleting a client soft-deletes its tickets.
 Dashboard: `GET /overview` (admin) — client counts, agreement activity, and the
 clients-without-a-signed-agreement nudge set.
 

@@ -10,6 +10,8 @@ import { BoardClientShareEntity } from './entities/board-client-share.entity';
 import { ClientAgreementEntity } from './entities/client-agreement.entity';
 import { ClientAgreementTemplateEntity } from './entities/client-agreement-template.entity';
 import { ClientDocumentEntity } from './entities/client-document.entity';
+import { ClientTicketEntity } from './entities/client-ticket.entity';
+import { ClientTicketMessageEntity } from './entities/client-ticket-message.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { DiscussionBoardEntity } from '../discussion-boards/entities/discussion-board.entity';
@@ -19,7 +21,7 @@ import { BoardCommentEntity } from '../discussion-boards/entities/board-comment.
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { NotifierService } from '../notification/notifier.service';
 import {
-  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto,
+  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateTicketDto,
 } from './dto';
 
 export interface ClientsCaller {
@@ -49,6 +51,8 @@ export class ClientsService {
     @InjectRepository(ClientAgreementEntity) private readonly agreements: Repository<ClientAgreementEntity>,
     @InjectRepository(ClientAgreementTemplateEntity) private readonly agreementTemplates: Repository<ClientAgreementTemplateEntity>,
     @InjectRepository(ClientDocumentEntity) private readonly documents: Repository<ClientDocumentEntity>,
+    @InjectRepository(ClientTicketEntity) private readonly tickets: Repository<ClientTicketEntity>,
+    @InjectRepository(ClientTicketMessageEntity) private readonly ticketMessages: Repository<ClientTicketMessageEntity>,
     @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
     @InjectRepository(DiscussionBoardEntity) private readonly boards: Repository<DiscussionBoardEntity>,
@@ -199,6 +203,7 @@ export class ClientsService {
     await this.contacts.update({ clientId: id }, { isDeleted: true });
     await this.agreements.update({ clientId: id }, { isDeleted: true });
     await this.documents.update({ clientId: id }, { isDeleted: true });
+    await this.tickets.update({ clientId: id }, { isDeleted: true });
     return { success: true };
   }
 
@@ -642,6 +647,164 @@ export class ClientsService {
       mimeType: d.mimeType, size: d.size != null ? Number(d.size) : null,
       description: d.description, createdAt: d.createdAt,
     };
+  }
+
+  // ── support tickets ──────────────────────────────────────────────────────────
+
+  private ticketView(t: ClientTicketEntity) {
+    return {
+      id: t.id, clientId: t.clientId, subject: t.subject, description: t.description,
+      category: t.category, status: t.status, priority: t.priority,
+      createdByName: t.createdByName, createdByRole: t.createdByRole,
+      assignedToUserId: t.assignedToUserId, lastMessageAt: t.lastMessageAt, createdAt: t.createdAt,
+    };
+  }
+  private ticketMessageView(m: ClientTicketMessageEntity) {
+    return { id: m.id, authorName: m.authorName, authorRole: m.authorRole, body: m.body, createdAt: m.createdAt };
+  }
+
+  /** Staff to notify about a client's ticket: its delivery team + assignee, minus the actor. */
+  private async ticketStaffRecipients(clientId: string, assignedTo: string | null, exclude?: string): Promise<string[]> {
+    const links = await this.assignments.find({ where: { clientId } });
+    const ids = new Set<string>(links.map((l) => l.userId));
+    if (assignedTo) ids.add(assignedTo);
+    if (exclude) ids.delete(exclude);
+    return [...ids];
+  }
+  private async ticketClientRecipients(orgId: string, clientId: string, exclude?: string): Promise<string[]> {
+    const members = await this.memberships.find({ where: { organizationId: orgId, clientId, role: 'client', status: 'active' } });
+    const ids = new Set<string>(members.map((m) => m.userId).filter(Boolean) as string[]);
+    if (exclude) ids.delete(exclude);
+    return [...ids];
+  }
+  private async notifyTicket(orgId: string, userIds: string[], type: string, title: string, body: string, ticketId: string, actionUrl: string) {
+    if (!this.notifier) return;
+    for (const userId of userIds) {
+      await this.notifier.notify({
+        organizationId: orgId, userId, type, title, body: body || null,
+        data: { actionUrl, ticketId }, email: { eyebrow: 'Support request', cta: 'View request' },
+      }).catch(() => undefined);
+    }
+  }
+
+  // admin
+  async listTicketsForClient(orgId: string, clientId: string) {
+    await this.require(orgId, clientId);
+    const rows = await this.tickets.find({ where: { clientId, organizationId: orgId, isDeleted: false }, order: { lastMessageAt: 'DESC', createdAt: 'DESC' } });
+    return rows.map((t) => this.ticketView(t));
+  }
+
+  async listTickets(orgId: string, q: { status?: string }) {
+    const where: Record<string, unknown> = { organizationId: orgId, isDeleted: false };
+    if (q.status) where.status = q.status;
+    const rows = await this.tickets.find({ where, order: { lastMessageAt: 'DESC', createdAt: 'DESC' } });
+    const clientIds = [...new Set(rows.map((t) => t.clientId))];
+    const clients = clientIds.length ? await this.clients.find({ where: { id: In(clientIds), organizationId: orgId } }) : [];
+    const nameById = new Map(clients.map((c) => [c.id, c.displayName || c.companyName]));
+    return rows.map((t) => ({ ...this.ticketView(t), clientName: nameById.get(t.clientId) ?? 'Client' }));
+  }
+
+  async getTicketAdmin(orgId: string, ticketId: string) {
+    const t = await this.tickets.findOne({ where: { id: ticketId, organizationId: orgId, isDeleted: false } });
+    if (!t) throw new NotFoundException('Ticket not found');
+    const msgs = await this.ticketMessages.find({ where: { ticketId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'ASC' } });
+    return { ticket: this.ticketView(t), messages: msgs.map((m) => this.ticketMessageView(m)) };
+  }
+
+  async createTicketAsStaff(caller: ClientsCaller, clientId: string, dto: CreateTicketDto) {
+    await this.require(caller.orgId, clientId);
+    const user = await this.users.findOne({ where: { id: caller.userId } });
+    const t = await this.tickets.save(this.tickets.create({
+      organizationId: caller.orgId, clientId, subject: dto.subject.trim(), description: dto.description ?? null,
+      category: dto.category ?? 'request', status: 'open', priority: (dto.priority ?? 'normal') as any,
+      createdBy: caller.userId, createdByName: nameOf(user), createdByRole: 'staff',
+      assignedToUserId: caller.userId, lastMessageAt: new Date(), isDeleted: false,
+    }));
+    const recips = await this.ticketClientRecipients(caller.orgId, clientId);
+    await this.notifyTicket(caller.orgId, recips, 'client_ticket_created', `New request: ${t.subject}`, t.description ?? '', t.id, `/portal/tickets/${t.id}`);
+    return this.ticketView(t);
+  }
+
+  async updateTicket(orgId: string, ticketId: string, dto: UpdateTicketDto) {
+    const t = await this.tickets.findOne({ where: { id: ticketId, organizationId: orgId, isDeleted: false } });
+    if (!t) throw new NotFoundException('Ticket not found');
+    if (dto.status !== undefined) t.status = dto.status as any;
+    if (dto.priority !== undefined) t.priority = dto.priority as any;
+    if (dto.assignedToUserId !== undefined) t.assignedToUserId = dto.assignedToUserId || null;
+    await this.tickets.save(t);
+    return this.ticketView(t);
+  }
+
+  async staffReply(caller: ClientsCaller, ticketId: string, dto: TicketMessageDto) {
+    const t = await this.tickets.findOne({ where: { id: ticketId, organizationId: caller.orgId, isDeleted: false } });
+    if (!t) throw new NotFoundException('Ticket not found');
+    const body = (dto.body || '').trim();
+    if (!body) throw new BadRequestException('Message cannot be empty');
+    const user = await this.users.findOne({ where: { id: caller.userId } });
+    const m = await this.ticketMessages.save(this.ticketMessages.create({
+      organizationId: caller.orgId, ticketId, authorId: caller.userId, authorName: nameOf(user), authorRole: 'staff', body, isDeleted: false,
+    }));
+    t.lastMessageAt = new Date();
+    if (t.status === 'open') t.status = 'in_progress';
+    await this.tickets.save(t);
+    const recips = await this.ticketClientRecipients(caller.orgId, t.clientId);
+    await this.notifyTicket(caller.orgId, recips, 'client_ticket_reply', `New reply: ${t.subject}`, body, t.id, `/portal/tickets/${t.id}`);
+    return this.ticketMessageView(m);
+  }
+
+  // portal
+  async portalListTickets(orgId: string, userId: string) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const rows = await this.tickets.find({ where: { clientId, organizationId: orgId, isDeleted: false }, order: { lastMessageAt: 'DESC', createdAt: 'DESC' } });
+    return rows.map((t) => this.ticketView(t));
+  }
+
+  async portalCreateTicket(orgId: string, userId: string, dto: CreateTicketDto) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const subject = dto.subject?.trim();
+    if (!subject) throw new BadRequestException('A subject is required');
+    const user = await this.users.findOne({ where: { id: userId } });
+    const t = await this.tickets.save(this.tickets.create({
+      organizationId: orgId, clientId, subject, description: dto.description ?? null,
+      category: dto.category ?? 'request', status: 'open', priority: (dto.priority ?? 'normal') as any,
+      createdBy: userId, createdByName: nameOf(user), createdByRole: 'client',
+      assignedToUserId: null, lastMessageAt: new Date(), isDeleted: false,
+    }));
+    const client = await this.clients.findOne({ where: { id: clientId } });
+    const recips = await this.ticketStaffRecipients(clientId, null, userId);
+    await this.notifyTicket(orgId, recips, 'client_ticket_created', `New request from ${client?.companyName ?? 'a client'}: ${t.subject}`, t.description ?? '', t.id, `/clients/${clientId}`);
+    return this.ticketView(t);
+  }
+
+  async portalGetTicket(orgId: string, userId: string, ticketId: string) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const t = await this.tickets.findOne({ where: { id: ticketId, clientId, organizationId: orgId, isDeleted: false } });
+    if (!t) throw new NotFoundException('Ticket not found');
+    const msgs = await this.ticketMessages.find({ where: { ticketId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'ASC' } });
+    return { ticket: this.ticketView(t), messages: msgs.map((m) => this.ticketMessageView(m)) };
+  }
+
+  async portalReply(orgId: string, userId: string, ticketId: string, dto: TicketMessageDto) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const t = await this.tickets.findOne({ where: { id: ticketId, clientId, organizationId: orgId, isDeleted: false } });
+    if (!t) throw new NotFoundException('Ticket not found');
+    const body = (dto.body || '').trim();
+    if (!body) throw new BadRequestException('Message cannot be empty');
+    const user = await this.users.findOne({ where: { id: userId } });
+    const m = await this.ticketMessages.save(this.ticketMessages.create({
+      organizationId: orgId, ticketId, authorId: userId, authorName: nameOf(user), authorRole: 'client', body, isDeleted: false,
+    }));
+    t.lastMessageAt = new Date();
+    if (t.status === 'resolved' || t.status === 'closed') t.status = 'open'; // a client reply reopens
+    await this.tickets.save(t);
+    const client = await this.clients.findOne({ where: { id: clientId } });
+    const recips = await this.ticketStaffRecipients(clientId, t.assignedToUserId, userId);
+    await this.notifyTicket(orgId, recips, 'client_ticket_reply', `Reply from ${client?.companyName ?? 'a client'}: ${t.subject}`, body, t.id, `/clients/${clientId}`);
+    return this.ticketMessageView(m);
   }
 
   // ── agreements (portal) ──────────────────────────────────────────────────────

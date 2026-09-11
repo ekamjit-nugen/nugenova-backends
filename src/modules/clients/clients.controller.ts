@@ -3,7 +3,7 @@ import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ClientsCaller, ClientsService } from './clients.service';
 import {
-  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto,
+  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateTicketDto,
 } from './dto';
 
 /**
@@ -65,6 +65,27 @@ export class ClientsController {
     return { success: true, data: await this.clients.deleteTemplate(this.requireAdmin(this.caller(req)).orgId, tid) };
   }
 
+  // ── tickets (admin, org-wide) ──
+  @Get('tickets')
+  async listTickets(@Req() req: any, @Query('status') status?: string) {
+    return { success: true, data: await this.clients.listTickets(this.requireAdmin(this.caller(req)).orgId, { status }) };
+  }
+
+  @Get('tickets/:ticketId')
+  async getTicket(@Req() req: any, @Param('ticketId') ticketId: string) {
+    return { success: true, data: await this.clients.getTicketAdmin(this.requireAdmin(this.caller(req)).orgId, ticketId) };
+  }
+
+  @Patch('tickets/:ticketId')
+  async updateTicket(@Req() req: any, @Param('ticketId') ticketId: string, @Body() dto: UpdateTicketDto) {
+    return { success: true, data: await this.clients.updateTicket(this.requireAdmin(this.caller(req)).orgId, ticketId, dto) };
+  }
+
+  @Post('tickets/:ticketId/messages')
+  async staffTicketReply(@Req() req: any, @Param('ticketId') ticketId: string, @Body() dto: TicketMessageDto) {
+    return { success: true, data: await this.clients.staffReply(this.requireAdmin(this.caller(req)), ticketId, dto) };
+  }
+
   /** Portal home for a client-role user. */
   @Get('portal/overview')
   async portalOverview(@Req() req: any) {
@@ -91,6 +112,31 @@ export class ClientsController {
   async portalDocuments(@Req() req: any) {
     const c = this.caller(req);
     return { success: true, data: await this.clients.portalDocuments(c.orgId, c.userId) };
+  }
+
+  // ── portal tickets ──
+  @Get('portal/tickets')
+  async portalListTickets(@Req() req: any) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.portalListTickets(c.orgId, c.userId) };
+  }
+
+  @Post('portal/tickets')
+  async portalCreateTicket(@Req() req: any, @Body() dto: CreateTicketDto) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.portalCreateTicket(c.orgId, c.userId, dto) };
+  }
+
+  @Get('portal/tickets/:ticketId')
+  async portalGetTicket(@Req() req: any, @Param('ticketId') ticketId: string) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.portalGetTicket(c.orgId, c.userId, ticketId) };
+  }
+
+  @Post('portal/tickets/:ticketId/messages')
+  async portalTicketReply(@Req() req: any, @Param('ticketId') ticketId: string, @Body() dto: TicketMessageDto) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.portalReply(c.orgId, c.userId, ticketId, dto) };
   }
 
   /** Portal: agreements sent to the caller's client. */
@@ -250,5 +296,16 @@ export class ClientsController {
   @Delete(':id/documents/:docId')
   async removeDocument(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string) {
     return { success: true, data: await this.clients.removeDocument(this.requireAdmin(this.caller(req)).orgId, id, docId) };
+  }
+
+  // ── tickets (admin, per client) ──
+  @Get(':id/tickets')
+  async listClientTickets(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.clients.listTicketsForClient(this.requireAdmin(this.caller(req)).orgId, id) };
+  }
+
+  @Post(':id/tickets')
+  async createClientTicket(@Req() req: any, @Param('id') id: string, @Body() dto: CreateTicketDto) {
+    return { success: true, data: await this.clients.createTicketAsStaff(this.requireAdmin(this.caller(req)), id, dto) };
   }
 }
