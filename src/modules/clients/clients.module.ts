@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
+import { NotificationModule } from '../notification/notification.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { DiscussionBoardEntity } from '../discussion-boards/entities/discussion-board.entity';
@@ -13,6 +14,8 @@ import { ClientEntity } from './entities/client.entity';
 import { ClientContactEntity } from './entities/client-contact.entity';
 import { ClientAssignmentEntity } from './entities/client-assignment.entity';
 import { BoardClientShareEntity } from './entities/board-client-share.entity';
+import { ClientAgreementEntity } from './entities/client-agreement.entity';
+import { ClientDocumentEntity } from './entities/client-document.entity';
 import { ClientsService } from './clients.service';
 import { ClientsController } from './clients.controller';
 
@@ -24,11 +27,14 @@ import { ClientsController } from './clients.controller';
 @Module({
   imports: [
     AuthModule,
+    NotificationModule,
     TypeOrmModule.forFeature([
       ClientEntity,
       ClientContactEntity,
       ClientAssignmentEntity,
       BoardClientShareEntity,
+      ClientAgreementEntity,
+      ClientDocumentEntity,
       OrgMembershipEntity,
       UserEntity,
       DiscussionBoardEntity,

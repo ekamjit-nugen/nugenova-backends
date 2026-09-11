@@ -7,6 +7,8 @@ import { ClientEntity } from './entities/client.entity';
 import { ClientContactEntity } from './entities/client-contact.entity';
 import { ClientAssignmentEntity } from './entities/client-assignment.entity';
 import { BoardClientShareEntity } from './entities/board-client-share.entity';
+import { ClientAgreementEntity } from './entities/client-agreement.entity';
+import { ClientDocumentEntity } from './entities/client-document.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { DiscussionBoardEntity } from '../discussion-boards/entities/discussion-board.entity';
@@ -14,8 +16,9 @@ import { BoardNoteEntity } from '../discussion-boards/entities/board-note.entity
 import { BoardNodeEntity } from '../discussion-boards/entities/board-node.entity';
 import { BoardCommentEntity } from '../discussion-boards/entities/board-comment.entity';
 import { MailService } from '../../bootstrap/mail/mail.service';
+import { NotifierService } from '../notification/notifier.service';
 import {
-  AssignEmployeeDto, CreateClientDto, CreateContactDto, InviteContactDto, PortalCommentDto, ShareBoardDto, UpdateClientDto, UpdateContactDto,
+  AssignEmployeeDto, CreateAgreementDto, CreateClientDto, CreateContactDto, CreateDocumentDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, UpdateAgreementDto, UpdateClientDto, UpdateContactDto,
 } from './dto';
 
 export interface ClientsCaller {
@@ -42,6 +45,8 @@ export class ClientsService {
     @InjectRepository(ClientContactEntity) private readonly contacts: Repository<ClientContactEntity>,
     @InjectRepository(ClientAssignmentEntity) private readonly assignments: Repository<ClientAssignmentEntity>,
     @InjectRepository(BoardClientShareEntity) private readonly shares: Repository<BoardClientShareEntity>,
+    @InjectRepository(ClientAgreementEntity) private readonly agreements: Repository<ClientAgreementEntity>,
+    @InjectRepository(ClientDocumentEntity) private readonly documents: Repository<ClientDocumentEntity>,
     @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
     @InjectRepository(DiscussionBoardEntity) private readonly boards: Repository<DiscussionBoardEntity>,
@@ -49,6 +54,7 @@ export class ClientsService {
     @InjectRepository(BoardNodeEntity) private readonly nodes: Repository<BoardNodeEntity>,
     @InjectRepository(BoardCommentEntity) private readonly comments: Repository<BoardCommentEntity>,
     @Optional() private readonly mail?: MailService,
+    @Optional() private readonly notifier?: NotifierService,
   ) {}
 
   // ── clients CRUD ────────────────────────────────────────────────────────────
@@ -90,6 +96,35 @@ export class ClientsService {
     const tally = (arr: any[], key: string) => arr.reduce((m, r) => m.set(r[key], (m.get(r[key]) || 0) + 1), new Map<string, number>());
     const c = tally(contactCounts, 'clientId'), p = tally(portalCounts, 'clientId'), b = tally(boardCounts, 'clientId');
     return filtered.map((cl) => ({ ...cl, counts: { contacts: c.get(cl.id) || 0, portalUsers: p.get(cl.id) || 0, sharedBoards: b.get(cl.id) || 0 } }));
+  }
+
+  /** Admin dashboard summary: client counts + agreement activity for the org. */
+  async dashboardSummary(orgId: string) {
+    const [activeClientRows, allAgreements] = await Promise.all([
+      this.clients.find({ where: { organizationId: orgId, status: 'active', isDeleted: false }, select: { id: true, companyName: true, displayName: true } }),
+      this.agreements.find({ where: { organizationId: orgId, isDeleted: false }, order: { signedAt: 'DESC', createdAt: 'DESC' } }),
+    ]);
+    const pending = allAgreements.filter((a) => a.status === 'sent');
+    const signed = allAgreements.filter((a) => a.status === 'signed');
+    // Active clients that have not yet had ANY agreement signed → the nudge set.
+    const signedClientIds = new Set(signed.map((a) => a.clientId));
+    const needing = activeClientRows.filter((c) => !signedClientIds.has(c.id));
+
+    const nameById = new Map(activeClientRows.map((c) => [c.id, c.displayName || c.companyName]));
+    const shape = (a: ClientAgreementEntity) => ({
+      id: a.id, clientId: a.clientId, clientName: nameById.get(a.clientId) ?? 'Client',
+      title: a.title, status: a.status, signerName: a.signature?.signerName ?? null,
+      signedAt: a.signedAt, sentAt: a.sentAt,
+    });
+    return {
+      activeClients: activeClientRows.length,
+      agreementsPending: pending.length,
+      agreementsSigned: signed.length,
+      clientsNeedingAgreement: needing.length,
+      needingAgreement: needing.slice(0, 6).map((c) => ({ id: c.id, name: c.displayName || c.companyName })),
+      pending: pending.slice(0, 5).map(shape),
+      recentlySigned: signed.slice(0, 5).map(shape),
+    };
   }
 
   private async require(orgId: string, id: string): Promise<ClientEntity> {
@@ -160,6 +195,8 @@ export class ClientsService {
     await this.shares.delete({ clientId: id });
     await this.assignments.delete({ clientId: id });
     await this.contacts.update({ clientId: id }, { isDeleted: true });
+    await this.agreements.update({ clientId: id }, { isDeleted: true });
+    await this.documents.update({ clientId: id }, { isDeleted: true });
     return { success: true };
   }
 
@@ -378,5 +415,201 @@ export class ClientsService {
       organizationId: orgId, boardId, noteId: dto.noteId ?? null,
       authorId: userId, authorName: nameOf(user), text, isDeleted: false,
     }));
+  }
+
+  // ── agreements (admin) ───────────────────────────────────────────────────────
+
+  private async requireAgreement(orgId: string, clientId: string, id: string): Promise<ClientAgreementEntity> {
+    const a = await this.agreements.findOne({ where: { id, clientId, organizationId: orgId, isDeleted: false } });
+    if (!a) throw new NotFoundException('Agreement not found');
+    return a;
+  }
+
+  async listAgreements(orgId: string, clientId: string) {
+    await this.require(orgId, clientId);
+    return this.agreements.find({ where: { clientId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'DESC' } });
+  }
+
+  async createAgreement(caller: ClientsCaller, clientId: string, dto: CreateAgreementDto): Promise<ClientAgreementEntity> {
+    await this.require(caller.orgId, clientId);
+    if (!dto.bodyHtml?.trim() && !dto.sourceFileId) {
+      throw new BadRequestException('Provide agreement text or attach a PDF');
+    }
+    return this.agreements.save(this.agreements.create({
+      organizationId: caller.orgId, clientId,
+      title: dto.title.trim(),
+      description: dto.description ?? null,
+      category: dto.category ?? 'other',
+      bodyHtml: dto.bodyHtml ?? null,
+      sourceFileId: dto.sourceFileId ?? null,
+      fields: (dto.fields ?? null) as any,
+      signedFileId: null,
+      status: 'draft',
+      signature: null, sentAt: null, signedAt: null,
+      createdBy: caller.userId, isDeleted: false,
+    }));
+  }
+
+  async updateAgreement(orgId: string, clientId: string, id: string, dto: UpdateAgreementDto): Promise<ClientAgreementEntity> {
+    const a = await this.requireAgreement(orgId, clientId, id);
+    if (a.status === 'signed') throw new BadRequestException('A signed agreement cannot be edited');
+    if (dto.title !== undefined) a.title = dto.title.trim();
+    if (dto.description !== undefined) a.description = dto.description;
+    if (dto.category !== undefined) a.category = dto.category;
+    if (dto.bodyHtml !== undefined) a.bodyHtml = dto.bodyHtml;
+    if (dto.sourceFileId !== undefined) a.sourceFileId = dto.sourceFileId;
+    if (dto.fields !== undefined) a.fields = dto.fields as any;
+    return this.agreements.save(a);
+  }
+
+  /** Send the agreement to the client portal (draft → sent). */
+  async sendAgreement(orgId: string, clientId: string, id: string): Promise<ClientAgreementEntity> {
+    const a = await this.requireAgreement(orgId, clientId, id);
+    if (a.status === 'signed') throw new BadRequestException('This agreement is already signed');
+    a.status = 'sent';
+    a.sentAt = a.sentAt ?? new Date();
+    return this.agreements.save(a);
+  }
+
+  /** Withdraw a sent (unsigned) agreement (sent/draft → void). */
+  async voidAgreement(orgId: string, clientId: string, id: string): Promise<ClientAgreementEntity> {
+    const a = await this.requireAgreement(orgId, clientId, id);
+    if (a.status === 'signed') throw new BadRequestException('A signed agreement cannot be voided');
+    a.status = 'void';
+    return this.agreements.save(a);
+  }
+
+  async deleteAgreement(orgId: string, clientId: string, id: string): Promise<{ success: true }> {
+    const a = await this.requireAgreement(orgId, clientId, id);
+    a.isDeleted = true;
+    await this.agreements.save(a);
+    return { success: true };
+  }
+
+  // ── document vault (admin) ───────────────────────────────────────────────────
+
+  async listDocuments(orgId: string, clientId: string) {
+    await this.require(orgId, clientId);
+    const rows = await this.documents.find({ where: { clientId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'DESC' } });
+    return rows.map((d) => this.documentView(d));
+  }
+
+  async addDocument(caller: ClientsCaller, clientId: string, dto: CreateDocumentDto) {
+    await this.require(caller.orgId, clientId);
+    const saved = await this.documents.save(this.documents.create({
+      organizationId: caller.orgId, clientId,
+      fileId: dto.fileId, fileName: dto.fileName,
+      mimeType: dto.mimeType ?? null, size: dto.size ?? null,
+      title: dto.title?.trim() || null, description: dto.description?.trim() || null,
+      createdBy: caller.userId, isDeleted: false,
+    }));
+    return this.documentView(saved);
+  }
+
+  async removeDocument(orgId: string, clientId: string, docId: string): Promise<{ success: true }> {
+    const d = await this.documents.findOne({ where: { id: docId, clientId, organizationId: orgId, isDeleted: false } });
+    if (!d) throw new NotFoundException('Document not found');
+    d.isDeleted = true;
+    await this.documents.save(d);
+    return { success: true };
+  }
+
+  /** Documents shared with the caller's client (portal). */
+  async portalDocuments(orgId: string, userId: string) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const rows = await this.documents.find({ where: { clientId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'DESC' } });
+    return rows.map((d) => this.documentView(d));
+  }
+
+  private documentView(d: ClientDocumentEntity) {
+    return {
+      id: d.id, clientId: d.clientId, fileId: d.fileId,
+      name: d.title || d.fileName, fileName: d.fileName,
+      mimeType: d.mimeType, size: d.size != null ? Number(d.size) : null,
+      description: d.description, createdAt: d.createdAt,
+    };
+  }
+
+  // ── agreements (portal) ──────────────────────────────────────────────────────
+
+  /** Agreements sent to the caller's client (drafts are hidden from the portal). */
+  async portalAgreements(orgId: string, userId: string) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const rows = await this.agreements.find({
+      where: { clientId, organizationId: orgId, isDeleted: false, status: In(['sent', 'signed']) },
+      order: { createdAt: 'DESC' },
+    });
+    return rows.map((a) => this.agreementView(a));
+  }
+
+  async portalAgreement(orgId: string, userId: string, id: string) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const a = await this.agreements.findOne({ where: { id, clientId, organizationId: orgId, isDeleted: false } });
+    if (!a || a.status === 'draft' || a.status === 'void') throw new NotFoundException('Agreement not found');
+    return this.agreementView(a);
+  }
+
+  /** A portal user signs an agreement (sent → signed) with an audit trail. */
+  async signAgreement(orgId: string, userId: string, id: string, dto: SignAgreementDto, ip?: string, ua?: string) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const a = await this.agreements.findOne({ where: { id, clientId, organizationId: orgId, isDeleted: false } });
+    if (!a || a.status === 'draft' || a.status === 'void') throw new NotFoundException('Agreement not found');
+    if (a.status === 'signed') throw new BadRequestException('This agreement is already signed');
+    if (!dto.signerName?.trim()) throw new BadRequestException('A signer name is required to sign');
+    const now = new Date();
+    a.signature = {
+      signerName: dto.signerName.trim(),
+      signerEmail: null,
+      signedByUserId: userId,
+      signedAt: now.toISOString(),
+      ipAddress: ip ?? null,
+      userAgent: ua ?? null,
+      method: dto.method || (dto.signatureFileId ? 'drawn' : 'typed'),
+      signatureFileId: dto.signatureFileId ?? null,
+      fieldValues: (dto.fieldValues || []).reduce<Record<string, string>>((acc, f) => {
+        if (f.value != null) acc[f.key] = f.value;
+        return acc;
+      }, {}),
+    };
+    a.signedFileId = dto.signedFileId ?? null;
+    a.status = 'signed';
+    a.signedAt = now;
+    await this.agreements.save(a);
+
+    // Notify the sender + the client's delivery team that it's been signed.
+    void this.notifyAgreementSigned(a, dto.signerName.trim()).catch(() => undefined);
+    return this.agreementView(a);
+  }
+
+  /** In-app + email alert to the agreement's creator and the client's assigned staff. */
+  private async notifyAgreementSigned(a: ClientAgreementEntity, signerName: string): Promise<void> {
+    if (!this.notifier) return;
+    const client = await this.clients.findOne({ where: { id: a.clientId } });
+    const companyName = client?.companyName ?? 'a client';
+    const assigned = await this.assignments.find({ where: { clientId: a.clientId } });
+    const recipients = new Set<string>([...(a.createdBy ? [a.createdBy] : []), ...assigned.map((x) => x.userId)]);
+    for (const userId of recipients) {
+      await this.notifier.notify({
+        organizationId: a.organizationId,
+        userId,
+        type: 'client_agreement_signed',
+        title: `${signerName} signed “${a.title}”`,
+        body: `${companyName} signed the agreement “${a.title}”.`,
+        data: { actionUrl: `/clients/${a.clientId}`, clientId: a.clientId, agreementId: a.id },
+        email: { eyebrow: 'Agreement signed', cta: 'View agreement', subject: `${companyName} signed “${a.title}”` },
+      }).catch(() => undefined);
+    }
+  }
+
+  private agreementView(a: ClientAgreementEntity) {
+    return {
+      id: a.id, clientId: a.clientId, title: a.title, description: a.description, category: a.category,
+      bodyHtml: a.bodyHtml, sourceFileId: a.sourceFileId, fields: a.fields ?? [], signedFileId: a.signedFileId,
+      status: a.status, signature: a.signature, sentAt: a.sentAt, signedAt: a.signedAt, createdAt: a.createdAt,
+    };
   }
 }

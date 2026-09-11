@@ -70,6 +70,22 @@ import { AiUsage1788120000000 } from '../src/bootstrap/database/migrations/17881
 import { KnowledgeChunks1788130000000 } from '../src/bootstrap/database/migrations/1788130000000-KnowledgeChunks';
 import { AiChat1788140000000 } from '../src/bootstrap/database/migrations/1788140000000-AiChat';
 import { EmployeeHrFields1788150000000 } from '../src/bootstrap/database/migrations/1788150000000-EmployeeHrFields';
+import { DiscussionBoards1788170000000 } from '../src/bootstrap/database/migrations/1788170000000-DiscussionBoards';
+import { BoardNoteDue1788180000000 } from '../src/bootstrap/database/migrations/1788180000000-BoardNoteDue';
+import { Clients1788300000000 } from '../src/bootstrap/database/migrations/1788300000000-Clients';
+import { ClientAgreements1788310000000 } from '../src/bootstrap/database/migrations/1788310000000-ClientAgreements';
+import { ClientAgreementFields1788320000000 } from '../src/bootstrap/database/migrations/1788320000000-ClientAgreementFields';
+import { ClientDocuments1788330000000 } from '../src/bootstrap/database/migrations/1788330000000-ClientDocuments';
+import { DiscussionBoardEntity } from '../src/modules/discussion-boards/entities/discussion-board.entity';
+import { BoardNoteEntity } from '../src/modules/discussion-boards/entities/board-note.entity';
+import { BoardNodeEntity } from '../src/modules/discussion-boards/entities/board-node.entity';
+import { BoardCommentEntity } from '../src/modules/discussion-boards/entities/board-comment.entity';
+import { ClientEntity } from '../src/modules/clients/entities/client.entity';
+import { ClientContactEntity } from '../src/modules/clients/entities/client-contact.entity';
+import { ClientAssignmentEntity } from '../src/modules/clients/entities/client-assignment.entity';
+import { BoardClientShareEntity } from '../src/modules/clients/entities/board-client-share.entity';
+import { ClientAgreementEntity } from '../src/modules/clients/entities/client-agreement.entity';
+import { ClientDocumentEntity } from '../src/modules/clients/entities/client-document.entity';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -194,6 +210,16 @@ module.exports = async function globalSetup(): Promise<void> {
       AiConversationEntity,
       AiMessageEntity,
       AiJobEntity,
+      DiscussionBoardEntity,
+      BoardNoteEntity,
+      BoardNodeEntity,
+      BoardCommentEntity,
+      ClientEntity,
+      ClientContactEntity,
+      ClientAssignmentEntity,
+      BoardClientShareEntity,
+      ClientAgreementEntity,
+      ClientDocumentEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -248,6 +274,12 @@ module.exports = async function globalSetup(): Promise<void> {
       KnowledgeChunks1788130000000,
       AiChat1788140000000,
       EmployeeHrFields1788150000000,
+      DiscussionBoards1788170000000,
+      BoardNoteDue1788180000000,
+      Clients1788300000000,
+      ClientAgreements1788310000000,
+      ClientAgreementFields1788320000000,
+      ClientDocuments1788330000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,
