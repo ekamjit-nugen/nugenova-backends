@@ -5,6 +5,9 @@ import { AuthModule } from '../auth/auth.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { DiscussionBoardEntity } from '../discussion-boards/entities/discussion-board.entity';
+import { BoardNoteEntity } from '../discussion-boards/entities/board-note.entity';
+import { BoardNodeEntity } from '../discussion-boards/entities/board-node.entity';
+import { BoardCommentEntity } from '../discussion-boards/entities/board-comment.entity';
 
 import { ClientEntity } from './entities/client.entity';
 import { ClientContactEntity } from './entities/client-contact.entity';
@@ -29,6 +32,9 @@ import { ClientsController } from './clients.controller';
       OrgMembershipEntity,
       UserEntity,
       DiscussionBoardEntity,
+      BoardNoteEntity,
+      BoardNodeEntity,
+      BoardCommentEntity,
     ]),
   ],
   controllers: [ClientsController],

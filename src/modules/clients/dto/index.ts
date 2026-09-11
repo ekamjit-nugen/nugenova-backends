@@ -115,3 +115,12 @@ export class ShareBoardDto {
   @IsOptional() @IsIn(['view', 'comment'])
   permission?: 'view' | 'comment';
 }
+
+/** Portal user posts a comment on a shared board (optionally on a note). */
+export class PortalCommentDto {
+  @IsString() @MaxLength(4000)
+  text: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  noteId?: string;
+}

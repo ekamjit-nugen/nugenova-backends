@@ -10,9 +10,12 @@ import { BoardClientShareEntity } from './entities/board-client-share.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { DiscussionBoardEntity } from '../discussion-boards/entities/discussion-board.entity';
+import { BoardNoteEntity } from '../discussion-boards/entities/board-note.entity';
+import { BoardNodeEntity } from '../discussion-boards/entities/board-node.entity';
+import { BoardCommentEntity } from '../discussion-boards/entities/board-comment.entity';
 import { MailService } from '../../bootstrap/mail/mail.service';
 import {
-  AssignEmployeeDto, CreateClientDto, CreateContactDto, InviteContactDto, ShareBoardDto, UpdateClientDto, UpdateContactDto,
+  AssignEmployeeDto, CreateClientDto, CreateContactDto, InviteContactDto, PortalCommentDto, ShareBoardDto, UpdateClientDto, UpdateContactDto,
 } from './dto';
 
 export interface ClientsCaller {
@@ -42,6 +45,9 @@ export class ClientsService {
     @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
     @InjectRepository(DiscussionBoardEntity) private readonly boards: Repository<DiscussionBoardEntity>,
+    @InjectRepository(BoardNoteEntity) private readonly notes: Repository<BoardNoteEntity>,
+    @InjectRepository(BoardNodeEntity) private readonly nodes: Repository<BoardNodeEntity>,
+    @InjectRepository(BoardCommentEntity) private readonly comments: Repository<BoardCommentEntity>,
     @Optional() private readonly mail?: MailService,
   ) {}
 
@@ -337,5 +343,40 @@ export class ClientsService {
         .filter((s) => boardById.has(s.boardId))
         .map((s) => ({ boardId: s.boardId, title: boardById.get(s.boardId)!.title, description: boardById.get(s.boardId)!.description, permission: s.permission })),
     };
+  }
+
+  /** The share row for (portal user → board), or null if not shared with them. */
+  private async portalShare(orgId: string, userId: string, boardId: string): Promise<BoardClientShareEntity | null> {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) return null;
+    return this.shares.findOne({ where: { organizationId: orgId, clientId, boardId } });
+  }
+
+  /** Read a board the portal user's client has been shared (notes + comments). */
+  async portalBoard(orgId: string, userId: string, boardId: string) {
+    const share = await this.portalShare(orgId, userId, boardId);
+    if (!share) throw new ForbiddenException('This board is not shared with you');
+    const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
+    if (!board) throw new NotFoundException('Board not found');
+    const [notes, nodes, comments] = await Promise.all([
+      this.notes.find({ where: { boardId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'ASC' } }),
+      this.nodes.find({ where: { boardId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'ASC' } }),
+      this.comments.find({ where: { boardId, organizationId: orgId, isDeleted: false }, order: { createdAt: 'ASC' } }),
+    ]);
+    return { board: { id: board.id, title: board.title, description: board.description }, notes, nodes, comments, permission: share.permission };
+  }
+
+  /** Portal user posts a comment (requires 'comment' permission on the board). */
+  async portalComment(orgId: string, userId: string, boardId: string, dto: PortalCommentDto): Promise<BoardCommentEntity> {
+    const share = await this.portalShare(orgId, userId, boardId);
+    if (!share) throw new ForbiddenException('This board is not shared with you');
+    if (share.permission !== 'comment') throw new ForbiddenException('You have view-only access to this board');
+    const text = (dto.text || '').trim();
+    if (!text) throw new BadRequestException('Comment cannot be empty');
+    const user = await this.users.findOne({ where: { id: userId } });
+    return this.comments.save(this.comments.create({
+      organizationId: orgId, boardId, noteId: dto.noteId ?? null,
+      authorId: userId, authorName: nameOf(user), text, isDeleted: false,
+    }));
   }
 }

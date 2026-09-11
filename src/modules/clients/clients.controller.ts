@@ -3,7 +3,7 @@ import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ClientsCaller, ClientsService } from './clients.service';
 import {
-  AssignEmployeeDto, CreateClientDto, CreateContactDto, InviteContactDto, ShareBoardDto, UpdateClientDto, UpdateContactDto,
+  AssignEmployeeDto, CreateClientDto, CreateContactDto, InviteContactDto, PortalCommentDto, ShareBoardDto, UpdateClientDto, UpdateContactDto,
 } from './dto';
 
 /**
@@ -43,6 +43,20 @@ export class ClientsController {
   async portalOverview(@Req() req: any) {
     const c = this.caller(req);
     return { success: true, data: await this.clients.portalOverview(c.orgId, c.userId) };
+  }
+
+  /** Portal: read a board shared with the caller's client (notes + comments). */
+  @Get('portal/boards/:boardId')
+  async portalBoard(@Req() req: any, @Param('boardId') boardId: string) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.portalBoard(c.orgId, c.userId, boardId) };
+  }
+
+  /** Portal: comment on a shared board (needs 'comment' permission). */
+  @Post('portal/boards/:boardId/comments')
+  async portalComment(@Req() req: any, @Param('boardId') boardId: string, @Body() dto: PortalCommentDto) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.portalComment(c.orgId, c.userId, boardId, dto) };
   }
 
   // ── clients CRUD ──
