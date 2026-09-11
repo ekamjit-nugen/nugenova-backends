@@ -85,6 +85,64 @@ export class UpdateContactDto extends CreateContactDto {
   @IsOptional() @IsString() @MaxLength(200) declare name: string;
 }
 
+// ── deals ──
+export class CreateDealDto {
+  @IsString() @MaxLength(200) title: string;
+  @IsOptional() @IsString() @MaxLength(24) accountId?: string;
+  @IsOptional() @IsString() @MaxLength(24) contactId?: string;
+  @IsOptional() @IsString() @MaxLength(24) stageId?: string;
+  @IsOptional() @IsNumber() amount?: number;
+  @IsOptional() @IsString() @MaxLength(8) currency?: string;
+  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
+  @IsOptional() @IsDateString() expectedCloseDate?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
+  @IsOptional() @IsString() @MaxLength(8000) notes?: string;
+}
+
+export class UpdateDealDto {
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
+  @IsOptional() @IsString() @MaxLength(24) accountId?: string;
+  @IsOptional() @IsString() @MaxLength(24) contactId?: string;
+  @IsOptional() @IsString() @MaxLength(24) stageId?: string;
+  @IsOptional() @IsIn(['open', 'won', 'lost']) status?: string;
+  @IsOptional() @IsNumber() amount?: number;
+  @IsOptional() @IsString() @MaxLength(8) currency?: string;
+  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
+  @IsOptional() @IsDateString() expectedCloseDate?: string;
+  @IsOptional() @IsString() @MaxLength(500) lostReason?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
+  @IsOptional() @IsString() @MaxLength(8000) notes?: string;
+}
+
+/** Convert a lead into a deal, optionally spinning up an account + contact. */
+export class ConvertLeadDto {
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
+  @IsOptional() @IsNumber() amount?: number;
+  @IsOptional() @IsString() @MaxLength(24) stageId?: string;
+  @IsOptional() @IsBoolean() createAccount?: boolean;
+  @IsOptional() @IsBoolean() createContact?: boolean;
+}
+
+// ── requirements (effort estimation) ──
+export class CreateRequirementDto {
+  @IsString() @MaxLength(300) title: string;
+  @IsOptional() @IsString() @MaxLength(8000) details?: string;
+  @IsOptional() @IsString() @MaxLength(120) category?: string;
+  @IsOptional() @IsString() @MaxLength(120) role?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(60, { each: true }) skills?: string[];
+  @IsOptional() @IsIn(['must_have', 'should_have', 'could_have', 'wont_have']) priority?: string;
+  @IsOptional() @IsIn(['open', 'in_progress', 'fulfilled', 'dropped']) status?: string;
+  @IsOptional() @IsIn(['hours', 'days', 'fixed']) unit?: string;
+  @IsOptional() @IsNumber() quantity?: number;
+  @IsOptional() @IsNumber() rate?: number;
+  @IsOptional() @IsDateString() neededBy?: string;
+  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
+}
+
+export class UpdateRequirementDto extends CreateRequirementDto {
+  @IsOptional() @IsString() @MaxLength(300) declare title: string;
+}
+
 export class CreateStageDto {
   @IsString() @MaxLength(80) name: string;
   @IsOptional() @IsInt() order?: number;

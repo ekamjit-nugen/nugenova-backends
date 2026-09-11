@@ -11,6 +11,8 @@ import { SalesAccountEntity } from './entities/sales-account.entity';
 import { SalesContactEntity } from './entities/sales-contact.entity';
 import { SalesActivityEntity } from './entities/sales-activity.entity';
 import { SalesFollowupEntity } from './entities/sales-followup.entity';
+import { DealEntity } from './entities/deal.entity';
+import { RequirementEntity } from './entities/requirement.entity';
 import { SalesService } from './sales.service';
 import { SalesController } from './sales.controller';
 
@@ -29,6 +31,8 @@ import { SalesController } from './sales.controller';
       SalesContactEntity,
       SalesActivityEntity,
       SalesFollowupEntity,
+      DealEntity,
+      RequirementEntity,
       UserEntity,
     ]),
   ],

@@ -1,16 +1,16 @@
 import { SalesService } from './sales.service';
 
 describe('SalesService', () => {
-  let stages: any, leads: any, accounts: any, contacts: any, activities: any, followups: any, users: any, notifier: any;
+  let stages: any, leads: any, accounts: any, contacts: any, activities: any, followups: any, deals: any, requirements: any, users: any, notifier: any;
   let service: SalesService;
   const caller = { userId: 'u1', orgId: 'orgA', isAdmin: true };
 
   beforeEach(() => {
     const repo = () => ({ find: jest.fn(), findOne: jest.fn(), save: jest.fn((v) => Promise.resolve(Array.isArray(v) ? v : { id: 'new1', ...v })), create: jest.fn((v) => v), update: jest.fn() });
-    stages = repo(); leads = repo(); accounts = repo(); contacts = repo(); activities = repo(); followups = repo(); users = repo();
+    stages = repo(); leads = repo(); accounts = repo(); contacts = repo(); activities = repo(); followups = repo(); deals = repo(); requirements = repo(); users = repo();
     notifier = { notify: jest.fn().mockResolvedValue(undefined) };
     users.findOne.mockResolvedValue({ firstName: 'A', lastName: 'B' });
-    service = new SalesService(stages, leads, accounts, contacts, activities, followups, users, notifier);
+    service = new SalesService(stages, leads, accounts, contacts, activities, followups, deals, requirements, users, notifier);
   });
 
   const seededStages = [
@@ -57,11 +57,55 @@ describe('SalesService', () => {
       { stageId: 's-won', status: 'won', value: '50000' },
       { stageId: 's-lost', status: 'lost', value: '20000' },
     ]);
+    deals.find.mockResolvedValue([]);
     const ov = await service.overview('orgA');
     expect(ov.openValue).toBe(100000);
     expect(Math.round(ov.weightedForecast)).toBe(60000);
     expect(ov.wonValue).toBe(50000);
     expect(ov.winRate).toBe(0.5); // 1 won of 2 closed
+  });
+
+  describe('deals + requirements', () => {
+    it('converts a lead to a deal, links source, and moves requirements over', async () => {
+      leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false, name: 'Acme', company: 'Acme Co', value: '90000', currency: 'INR', stageId: 's-prop', tags: [], convertedToDealId: null });
+      deals.save.mockResolvedValue({ id: 'd1', organizationId: 'orgA', stageId: 's-prop', status: 'open', amount: '90000', assignedTo: null });
+      // getDeal (called at the end)
+      deals.findOne.mockResolvedValue({ id: 'd1', organizationId: 'orgA', isDeleted: false, stageId: 's-prop', status: 'open', amount: '90000', assignedTo: null });
+      stages.findOne.mockResolvedValue(seededStages[1]);
+      activities.find.mockResolvedValue([]); followups.find.mockResolvedValue([]); requirements.find.mockResolvedValue([]);
+      const out = await service.convertLead(caller, 'l1', { createAccount: true } as any);
+      expect(deals.save).toHaveBeenCalled();
+      expect(requirements.update).toHaveBeenCalledWith(
+        expect.objectContaining({ entityType: 'lead', entityId: 'l1' }),
+        expect.objectContaining({ entityType: 'deal', entityId: 'd1' }),
+      );
+      expect(leads.save).toHaveBeenCalledWith(expect.objectContaining({ convertedToDealId: 'd1' }));
+      expect(out.deal).toBeDefined();
+    });
+
+    it('refuses to convert an already-converted lead', async () => {
+      leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false, convertedToDealId: 'd0' });
+      await expect(service.convertLead(caller, 'l1', {} as any)).rejects.toThrow(/already been converted/);
+    });
+
+    it('rolls up requirement effort into a deal amount (skips dropped)', async () => {
+      deals.findOne.mockResolvedValue({ id: 'd1', organizationId: 'orgA', isDeleted: false });
+      requirements.find.mockResolvedValue([
+        { unit: 'hours', quantity: '40', rate: '100', status: 'open' },   // 4000
+        { unit: 'days', quantity: '5', rate: '8000', status: 'in_progress' }, // 40000
+        { unit: 'hours', quantity: '10', rate: '100', status: 'dropped' }, // skipped
+      ]);
+      const out = await service.rollupDealAmount(caller, 'd1');
+      expect(deals.save).toHaveBeenCalledWith(expect.objectContaining({ amount: '44000' }));
+      expect(out).toBeDefined();
+    });
+
+    it('addRequirement stores effort + computes amount in the view', async () => {
+      requirements.save.mockImplementation((v: any) => Promise.resolve({ id: 'r1', ...v }));
+      const r = await service.addRequirement(caller, 'deal', 'd1', { title: 'Backend API', unit: 'days', quantity: 6, rate: 9000, role: 'Backend dev' } as any);
+      expect(r.amount).toBe(54000);
+      expect(r.role).toBe('Backend dev');
+    });
   });
 
   it('rejects a move to an unknown stage', async () => {

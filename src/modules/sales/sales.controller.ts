@@ -3,8 +3,9 @@ import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SalesCaller, SalesService } from './sales.service';
 import {
-  CreateAccountDto, CreateActivityDto, CreateContactDto, CreateFollowupDto, CreateLeadDto, CreateStageDto,
-  MoveStageDto, UpdateAccountDto, UpdateContactDto, UpdateFollowupDto, UpdateLeadDto,
+  ConvertLeadDto, CreateAccountDto, CreateActivityDto, CreateContactDto, CreateDealDto, CreateFollowupDto, CreateLeadDto,
+  CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto, UpdateDealDto, UpdateFollowupDto,
+  UpdateLeadDto, UpdateRequirementDto,
 } from './dto';
 
 /**
@@ -82,6 +83,81 @@ export class SalesController {
   @Post('leads/:id/followups')
   async addLeadFollowup(@Req() req: any, @Param('id') id: string, @Body() dto: CreateFollowupDto) {
     return this.ok(await this.sales.addFollowup(this.caller(req), 'lead', id, dto));
+  }
+
+  @Get('leads/:id/requirements')
+  async leadRequirements(@Req() req: any, @Param('id') id: string) {
+    return this.ok(await this.sales.listRequirements(this.caller(req).orgId, 'lead', id));
+  }
+
+  @Post('leads/:id/requirements')
+  async addLeadRequirement(@Req() req: any, @Param('id') id: string, @Body() dto: CreateRequirementDto) {
+    return this.ok(await this.sales.addRequirement(this.caller(req), 'lead', id, dto));
+  }
+
+  @Post('leads/:id/convert')
+  async convertLead(@Req() req: any, @Param('id') id: string, @Body() dto: ConvertLeadDto) {
+    return this.ok(await this.sales.convertLead(this.caller(req), id, dto));
+  }
+
+  // ── deals ──
+  @Get('deals/board')
+  async dealBoard(@Req() req: any, @Query('closed') closed?: string) {
+    return this.ok(await this.sales.dealBoard(this.caller(req).orgId, closed === '1'));
+  }
+
+  @Get('deals')
+  async listDeals(@Req() req: any, @Query('status') status?: string, @Query('stageId') stageId?: string, @Query('assignedTo') assignedTo?: string, @Query('q') q?: string) {
+    return this.ok(await this.sales.listDeals(this.caller(req).orgId, { status, stageId, assignedTo, q }));
+  }
+
+  @Post('deals')
+  async createDeal(@Req() req: any, @Body() dto: CreateDealDto) { return this.ok(await this.sales.createDeal(this.caller(req), dto)); }
+
+  @Get('deals/:id')
+  async getDeal(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.getDeal(this.caller(req).orgId, id)); }
+
+  @Patch('deals/:id')
+  async updateDeal(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateDealDto) { return this.ok(await this.sales.updateDeal(this.caller(req), id, dto)); }
+
+  @Post('deals/:id/move')
+  async moveDeal(@Req() req: any, @Param('id') id: string, @Body() dto: MoveStageDto) { return this.ok(await this.sales.moveDealStage(this.caller(req), id, dto)); }
+
+  @Post('deals/:id/rollup')
+  async rollupDeal(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.rollupDealAmount(this.caller(req), id)); }
+
+  @Delete('deals/:id')
+  async deleteDeal(@Req() req: any, @Param('id') id: string) { return this.ok(await this.sales.deleteDeal(this.caller(req).orgId, id)); }
+
+  @Post('deals/:id/activities')
+  async addDealActivity(@Req() req: any, @Param('id') id: string, @Body() dto: CreateActivityDto) {
+    return this.ok(await this.sales.addActivity(this.caller(req), 'deal', id, dto));
+  }
+
+  @Post('deals/:id/followups')
+  async addDealFollowup(@Req() req: any, @Param('id') id: string, @Body() dto: CreateFollowupDto) {
+    return this.ok(await this.sales.addFollowup(this.caller(req), 'deal', id, dto));
+  }
+
+  @Get('deals/:id/requirements')
+  async dealRequirements(@Req() req: any, @Param('id') id: string) {
+    return this.ok(await this.sales.listRequirements(this.caller(req).orgId, 'deal', id));
+  }
+
+  @Post('deals/:id/requirements')
+  async addDealRequirement(@Req() req: any, @Param('id') id: string, @Body() dto: CreateRequirementDto) {
+    return this.ok(await this.sales.addRequirement(this.caller(req), 'deal', id, dto));
+  }
+
+  // ── requirements (by id) ──
+  @Patch('requirements/:id')
+  async updateRequirement(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateRequirementDto) {
+    return this.ok(await this.sales.updateRequirement(this.caller(req).orgId, id, dto));
+  }
+
+  @Delete('requirements/:id')
+  async deleteRequirement(@Req() req: any, @Param('id') id: string) {
+    return this.ok(await this.sales.deleteRequirement(this.caller(req).orgId, id));
   }
 
   // ── accounts ──

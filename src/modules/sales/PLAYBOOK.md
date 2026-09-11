@@ -65,10 +65,29 @@ The legacy had no first-class **effort/work estimation** on requirements, no
 loss-reason/BANT qualification. Phase 1 adds `tags` on leads and a clean bridge
 column (`clientId`) toward the delivery module.
 
+## Phase 2 (DONE) — deals + requirements/effort
+
+- **Deals** (`deals`, migration `1788370000000`) — qualified opportunities on the
+  same pipeline: amount, currency, stage, status (open/won/lost), assignee,
+  expected close, loss reason, `sourceLeadId` + dormant `clientId`. Kanban board
+  with drag-to-move; won/lost stages set status + stamp wonAt/lostAt.
+- **Requirements** (`sales_requirements`) — first-class **effort estimation** on a
+  lead or deal: title, role, skills, MoSCoW priority, status, and
+  `unit`(hours|days|fixed)·`quantity`·`rate` → line amount. Rolls up to total
+  effort (hours/days) + value; `POST /deals/:id/rollup` sets the deal amount from it.
+- **Lead→Deal conversion** (`POST /leads/:id/convert`) — creates the deal, moves
+  the lead's requirements onto it, optionally spins up an account + contact, and
+  stamps the lead `convertedToDealId`.
+- Overview now also returns a **deals** block (open value, weighted forecast, won
+  value, win rate, funnel).
+- Routes: `/deals` (+ `/board`, `:id`, `:id/move|rollup|activities|followups|
+  requirements`), `/leads/:id/requirements|convert`, `/requirements/:id`.
+- Frontend: `/sales/deals` (board+list+create), `/sales/deals/[id]` (detail with
+  the **Requirements & effort** panel + roll-up), the panel is reused on the lead
+  detail, and a **Convert to deal** button on leads.
+
 ## Roadmap
 
-- **Phase 2** — Deals/opportunities + Lead→Deal conversion + **requirements with
-  effort estimation** (role·hours·rate → cost).
 - **Phase 3** — **Quotes/proposals** (line items → amount, tax/discount, send/
   accept) + **Won→Client** bridge into the Clients module.
 - **Phase 4** — analytics (forecast/leaderboard), lead scoring, follow-up
