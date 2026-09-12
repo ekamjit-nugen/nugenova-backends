@@ -42,6 +42,10 @@ export class RequirementEntity extends PgBaseEntity {
   @Column({ type: 'varchar', default: 'must_have' })
   priority: string;
 
+  /** Free-text label when `priority` is 'other'. */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  priorityDetail: string | null;
+
   @Column({ type: 'varchar', default: 'open' })
   status: string;
 

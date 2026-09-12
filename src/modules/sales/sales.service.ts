@@ -254,7 +254,7 @@ export class SalesService {
     const rate = Number(r.rate ?? 0);
     return {
       id: r.id, entityType: r.entityType, entityId: r.entityId, title: r.title, details: r.details, category: r.category,
-      role: r.role, skills: r.skills ?? [], priority: r.priority, status: r.status, unit: r.unit, unitDetail: r.unitDetail,
+      role: r.role, skills: r.skills ?? [], priority: r.priority, priorityDetail: r.priorityDetail, status: r.status, unit: r.unit, unitDetail: r.unitDetail,
       quantity, rate, amount: quantity * rate, neededBy: r.neededBy, assignedTo: r.assignedTo, createdAt: r.createdAt,
     };
   }
@@ -281,7 +281,9 @@ export class SalesService {
     const r = await this.requirements.save(this.requirements.create({
       organizationId: caller.orgId, entityType, entityId, title: dto.title.trim(), details: dto.details ?? null,
       category: dto.category ?? null, role: dto.role ?? null, skills: dto.skills ?? [],
-      priority: dto.priority ?? 'must_have', status: dto.status ?? 'open', unit: dto.unit ?? 'hours',
+      priority: dto.priority ?? 'must_have',
+      priorityDetail: (dto.priority ?? 'must_have') === 'other' ? (dto.priorityDetail?.trim() || null) : null,
+      status: dto.status ?? 'open', unit: dto.unit ?? 'hours',
       unitDetail: (dto.unit ?? 'hours') === 'other' ? (dto.unitDetail?.trim() || null) : null,
       quantity: String(dto.quantity ?? 0), rate: String(dto.rate ?? 0),
       neededBy: dto.neededBy ? new Date(dto.neededBy) : null, assignedTo: dto.assignedTo ?? null, createdBy: caller.userId, isDeleted: false,
@@ -297,7 +299,8 @@ export class SalesService {
     if (dto.category !== undefined) r.category = dto.category;
     if (dto.role !== undefined) r.role = dto.role;
     if (dto.skills !== undefined) r.skills = dto.skills;
-    if (dto.priority !== undefined) r.priority = dto.priority;
+    if (dto.priorityDetail !== undefined) r.priorityDetail = dto.priorityDetail?.trim() || null;
+    if (dto.priority !== undefined) { r.priority = dto.priority; if (dto.priority !== 'other') r.priorityDetail = null; }
     if (dto.status !== undefined) r.status = dto.status;
     if (dto.unitDetail !== undefined) r.unitDetail = dto.unitDetail?.trim() || null;
     if (dto.unit !== undefined) { r.unit = dto.unit; if (dto.unit !== 'other') r.unitDetail = null; }

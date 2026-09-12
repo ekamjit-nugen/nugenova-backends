@@ -108,7 +108,8 @@ export class CreateRequirementDto {
   @IsOptional() @IsString() @MaxLength(120) category?: string;
   @IsOptional() @IsString() @MaxLength(120) role?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(60, { each: true }) skills?: string[];
-  @IsOptional() @IsIn(['must_have', 'should_have', 'could_have', 'wont_have']) priority?: string;
+  @IsOptional() @IsIn(['must_have', 'should_have', 'could_have', 'wont_have', 'other']) priority?: string;
+  @IsOptional() @IsString() @MaxLength(40) priorityDetail?: string;
   @IsOptional() @IsIn(['open', 'in_progress', 'fulfilled', 'dropped']) status?: string;
   @IsOptional() @IsIn(['hours', 'days', 'fixed', 'other']) unit?: string;
   @IsOptional() @IsString() @MaxLength(40) unitDetail?: string;
