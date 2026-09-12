@@ -60,8 +60,9 @@ In progress, then Won/Lost; search + import/export; NOT a kanban board),
 `/sales/leads/new` (full create page — contact fields, Tiptap requirement,
 attachments, owner/priority/tags/value/currency/source/stage, first follow-up,
 notes; attachments + follow-up are posted after the lead is created),
-`/sales/leads/[id]` (hero + stage stepper + activity timeline/composer +
-follow-ups + quick edit), `/sales/accounts`, `/sales/contacts`.
+`/sales/leads/[id]` (hero + stage stepper + rich-text **Requirement** +
+**Effort estimate** panel + quotes + documents + follow-ups + quick edit; the
+activity timeline was removed), `/sales/accounts`, `/sales/contacts`.
 
 ## Gaps found in the legacy (addressed later)
 
