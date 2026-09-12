@@ -125,7 +125,6 @@ export class SalesService {
       assignedTo: dto.assignedTo ?? null, score: dto.score ?? 0, tags: dto.tags ?? [], notes: dto.notes ?? null,
       createdBy: caller.userId, isDeleted: false,
     }));
-    await this.logActivity(caller, 'lead', lead.id, 'system', 'Lead created');
     if (dto.assignedTo && dto.assignedTo !== caller.userId) this.notifyAssignment(caller.orgId, dto.assignedTo, lead, caller.userId);
     return lead;
   }
@@ -155,7 +154,7 @@ export class SalesService {
     return saved;
   }
 
-  /** Move a lead to another stage; won/lost stages set the lead status + a timeline note. */
+  /** Move a lead to another stage; won/lost stages set the lead status. */
   async moveStage(caller: SalesCaller, id: string, dto: MoveStageDto): Promise<LeadEntity> {
     const l = await this.requireLead(caller.orgId, id);
     const stage = await this.stages.findOne({ where: { id: dto.stageId, organizationId: caller.orgId, isDeleted: false } });
@@ -163,9 +162,7 @@ export class SalesService {
     l.stageId = stage.id;
     l.status = stage.isWon ? 'won' : stage.isLost ? 'lost' : 'open';
     l.wonAt = stage.isWon ? (l.wonAt ?? new Date()) : null;
-    const saved = await this.leads.save(l);
-    await this.logActivity(caller, 'lead', id, 'stage_change', `Moved to ${stage.name}`);
-    return saved;
+    return this.leads.save(l);
   }
 
   async deleteLead(orgId: string, id: string): Promise<{ success: true }> {
@@ -176,15 +173,6 @@ export class SalesService {
   }
 
   // ── activities + follow-ups ──────────────────────────────────────────────────
-
-  private async logActivity(caller: SalesCaller, entityType: SalesEntityType, entityId: string, type: string, body: string | null) {
-    const user = caller.userId ? await this.users.findOne({ where: { id: caller.userId } }) : null;
-    await this.activities.save(this.activities.create({
-      organizationId: caller.orgId, entityType, entityId, type: type as any, body,
-      occurredAt: new Date(), createdBy: caller.userId ?? null, createdByName: nameOf(user), isDeleted: false,
-    }));
-    await this.touchEntity(caller.orgId, entityType, entityId);
-  }
 
   async addActivity(caller: SalesCaller, entityType: SalesEntityType, entityId: string, dto: CreateActivityDto) {
     const user = await this.users.findOne({ where: { id: caller.userId } });
@@ -235,7 +223,6 @@ export class SalesService {
       mimeType: dto.mimeType ?? null, size: dto.size ?? null, title: dto.title?.trim() || null,
       createdBy: caller.userId, isDeleted: false,
     }));
-    await this.logActivity(caller, 'lead', leadId, 'system', `Attached document “${saved.title || saved.fileName}”`);
     return this.documentView(saved);
   }
 
@@ -455,7 +442,6 @@ export class SalesService {
     );
     lead.clientId = client.id;
     await this.leads.save(lead);
-    await this.logActivity(caller, 'lead', leadId, 'system', `Onboarded as client "${companyName}"`);
     return { clientId: client.id, leadId };
   }
 

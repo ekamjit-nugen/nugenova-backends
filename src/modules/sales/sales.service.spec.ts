@@ -28,13 +28,13 @@ describe('SalesService', () => {
     expect(out).toHaveLength(4);
   });
 
-  it('createLead defaults to the isDefault stage, stores the requirement, and logs an activity', async () => {
+  it('createLead defaults to the isDefault stage and stores the requirement (no activity log)', async () => {
     stages.find.mockResolvedValue(seededStages);
     const lead = await service.createLead(caller, { name: 'Acme', value: 1000, requirement: '<p>Build an app</p>' } as any);
     expect(lead.stageId).toBe('s-new');
     expect(lead.status).toBe('open');
     expect(lead.requirement).toBe('<p>Build an app</p>');
-    expect(activities.save).toHaveBeenCalled(); // "Lead created"
+    expect(activities.save).not.toHaveBeenCalled(); // system activity logging removed
   });
 
   it('moveStage to a won stage marks the lead won and stamps wonAt', async () => {
@@ -98,12 +98,12 @@ describe('SalesService', () => {
   });
 
   describe('lead documents', () => {
-    it('attaches an uploaded file to a lead and logs it', async () => {
+    it('attaches an uploaded file to a lead (no activity log)', async () => {
       leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false });
       leadDocuments.save.mockImplementation((v: any) => Promise.resolve({ id: 'doc1', ...v }));
       const d = await service.addDocument(caller, 'l1', { fileId: 'f1', fileName: 'brief.pdf', mimeType: 'application/pdf', size: 2048, title: 'Brief' } as any);
       expect(d).toMatchObject({ leadId: 'l1', fileId: 'f1', name: 'Brief', size: 2048 });
-      expect(activities.save).toHaveBeenCalled();
+      expect(activities.save).not.toHaveBeenCalled(); // system activity logging removed
     });
   });
 
