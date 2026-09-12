@@ -54,7 +54,9 @@ accounts + contacts `GET/POST/PATCH/DELETE`.
 ## Frontend (`_wt-clouddrive-fe`, admin nav "Sales" section)
 
 `/sales` (dashboard: KPIs + funnel + due follow-ups), `/sales/leads`
-(kanban board with **drag-to-move-stage** + list toggle + create),
+(**smart-buckets** action view — leads grouped by what needs attention: Needs
+follow-up, Unassigned, Waiting on client, Hot/high-value (₹1L+), New this week,
+In progress, then Won/Lost; search + import/export + create; NOT a kanban board),
 `/sales/leads/[id]` (hero + stage stepper + activity timeline/composer +
 follow-ups + quick edit), `/sales/accounts`, `/sales/contacts`.
 
