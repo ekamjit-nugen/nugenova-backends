@@ -56,7 +56,10 @@ accounts + contacts `GET/POST/PATCH/DELETE`.
 `/sales` (dashboard: KPIs + funnel + due follow-ups), `/sales/leads`
 (**smart-buckets** action view — leads grouped by what needs attention: Needs
 follow-up, Unassigned, Waiting on client, Hot/high-value (₹1L+), New this week,
-In progress, then Won/Lost; search + import/export + create; NOT a kanban board),
+In progress, then Won/Lost; search + import/export; NOT a kanban board),
+`/sales/leads/new` (full create page — contact fields, Tiptap requirement,
+attachments, owner/priority/tags/value/currency/source/stage, first follow-up,
+notes; attachments + follow-up are posted after the lead is created),
 `/sales/leads/[id]` (hero + stage stepper + activity timeline/composer +
 follow-ups + quick edit), `/sales/accounts`, `/sales/contacts`.
 

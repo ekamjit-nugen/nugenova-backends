@@ -15,6 +15,7 @@ export class CreateLeadDto {
   @IsOptional() @IsNumber() value?: number;
   @IsOptional() @IsString() @MaxLength(8) currency?: string;
   @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(100) score?: number;
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
   @IsOptional() @IsString() @MaxLength(8000) notes?: string;
   @IsOptional() @IsString() @MaxLength(100000) requirement?: string;

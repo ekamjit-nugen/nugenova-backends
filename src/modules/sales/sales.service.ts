@@ -120,7 +120,7 @@ export class SalesService {
       title: dto.title ?? null, source: (dto.source ?? 'other') as any, stageId, status: 'open',
       value: dto.value != null ? String(dto.value) : null, currency: dto.currency?.toUpperCase() ?? 'INR',
       requirement: dto.requirement ?? null,
-      assignedTo: dto.assignedTo ?? null, score: 0, tags: dto.tags ?? [], notes: dto.notes ?? null,
+      assignedTo: dto.assignedTo ?? null, score: dto.score ?? 0, tags: dto.tags ?? [], notes: dto.notes ?? null,
       createdBy: caller.userId, isDeleted: false,
     }));
     await this.logActivity(caller, 'lead', lead.id, 'system', 'Lead created');
