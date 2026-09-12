@@ -10,7 +10,7 @@ export type LeadStatus = (typeof LEAD_STATUSES)[number];
 export const SALES_ENTITY_TYPES = ['lead', 'deal', 'account', 'contact'] as const;
 export type SalesEntityType = (typeof SALES_ENTITY_TYPES)[number];
 
-export const ACTIVITY_TYPES = ['note', 'call', 'email', 'meeting', 'whatsapp', 'visit', 'stage_change', 'system'] as const;
+export const ACTIVITY_TYPES = ['note', 'call', 'email', 'meeting', 'whatsapp', 'visit', 'other', 'stage_change', 'system'] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export const FOLLOWUP_STATUSES = ['pending', 'done', 'snoozed'] as const;

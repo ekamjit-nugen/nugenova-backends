@@ -57,6 +57,7 @@ export class MoveStageDto {
 
 export class CreateActivityDto {
   @IsIn(ACTIVITY_TYPES as unknown as string[]) type: string;
+  @IsOptional() @IsString() @MaxLength(60) typeDetail?: string;
   @IsOptional() @IsString() @MaxLength(8000) body?: string;
   @IsOptional() @IsDateString() occurredAt?: string;
 }
@@ -109,7 +110,8 @@ export class CreateRequirementDto {
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(60, { each: true }) skills?: string[];
   @IsOptional() @IsIn(['must_have', 'should_have', 'could_have', 'wont_have']) priority?: string;
   @IsOptional() @IsIn(['open', 'in_progress', 'fulfilled', 'dropped']) status?: string;
-  @IsOptional() @IsIn(['hours', 'days', 'fixed']) unit?: string;
+  @IsOptional() @IsIn(['hours', 'days', 'fixed', 'other']) unit?: string;
+  @IsOptional() @IsString() @MaxLength(40) unitDetail?: string;
   @IsOptional() @IsNumber() quantity?: number;
   @IsOptional() @IsNumber() rate?: number;
   @IsOptional() @IsDateString() neededBy?: string;

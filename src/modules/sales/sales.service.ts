@@ -189,7 +189,8 @@ export class SalesService {
   async addActivity(caller: SalesCaller, entityType: SalesEntityType, entityId: string, dto: CreateActivityDto) {
     const user = await this.users.findOne({ where: { id: caller.userId } });
     const a = await this.activities.save(this.activities.create({
-      organizationId: caller.orgId, entityType, entityId, type: dto.type as any, body: dto.body ?? null,
+      organizationId: caller.orgId, entityType, entityId, type: dto.type as any,
+      typeDetail: dto.type === 'other' ? (dto.typeDetail?.trim() || null) : null, body: dto.body ?? null,
       occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : new Date(), createdBy: caller.userId, createdByName: nameOf(user), isDeleted: false,
     }));
     await this.touchEntity(caller.orgId, entityType, entityId);
@@ -253,7 +254,7 @@ export class SalesService {
     const rate = Number(r.rate ?? 0);
     return {
       id: r.id, entityType: r.entityType, entityId: r.entityId, title: r.title, details: r.details, category: r.category,
-      role: r.role, skills: r.skills ?? [], priority: r.priority, status: r.status, unit: r.unit,
+      role: r.role, skills: r.skills ?? [], priority: r.priority, status: r.status, unit: r.unit, unitDetail: r.unitDetail,
       quantity, rate, amount: quantity * rate, neededBy: r.neededBy, assignedTo: r.assignedTo, createdAt: r.createdAt,
     };
   }
@@ -281,6 +282,7 @@ export class SalesService {
       organizationId: caller.orgId, entityType, entityId, title: dto.title.trim(), details: dto.details ?? null,
       category: dto.category ?? null, role: dto.role ?? null, skills: dto.skills ?? [],
       priority: dto.priority ?? 'must_have', status: dto.status ?? 'open', unit: dto.unit ?? 'hours',
+      unitDetail: (dto.unit ?? 'hours') === 'other' ? (dto.unitDetail?.trim() || null) : null,
       quantity: String(dto.quantity ?? 0), rate: String(dto.rate ?? 0),
       neededBy: dto.neededBy ? new Date(dto.neededBy) : null, assignedTo: dto.assignedTo ?? null, createdBy: caller.userId, isDeleted: false,
     }));
@@ -297,7 +299,8 @@ export class SalesService {
     if (dto.skills !== undefined) r.skills = dto.skills;
     if (dto.priority !== undefined) r.priority = dto.priority;
     if (dto.status !== undefined) r.status = dto.status;
-    if (dto.unit !== undefined) r.unit = dto.unit;
+    if (dto.unitDetail !== undefined) r.unitDetail = dto.unitDetail?.trim() || null;
+    if (dto.unit !== undefined) { r.unit = dto.unit; if (dto.unit !== 'other') r.unitDetail = null; }
     if (dto.quantity !== undefined) r.quantity = String(dto.quantity);
     if (dto.rate !== undefined) r.rate = String(dto.rate);
     if (dto.neededBy !== undefined) r.neededBy = dto.neededBy ? new Date(dto.neededBy) : null;
@@ -389,7 +392,7 @@ export class SalesService {
     const reqs = await this.requirements.find({ where: { organizationId: caller.orgId, entityType, entityId, isDeleted: false } });
     const items: QuoteItem[] = reqs.filter((r) => r.status !== 'dropped').map((r) => ({
       description: r.role ? `${r.title} (${r.role})` : r.title,
-      unit: r.unit, quantity: Number(r.quantity) || 0, rate: Number(r.rate) || 0,
+      unit: ['hours', 'days', 'fixed'].includes(r.unit) ? r.unit : 'unit', quantity: Number(r.quantity) || 0, rate: Number(r.rate) || 0,
     }));
     return this.createQuote(caller, entityType, entityId, { title: 'Proposal', items });
   }

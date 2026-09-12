@@ -45,9 +45,13 @@ export class RequirementEntity extends PgBaseEntity {
   @Column({ type: 'varchar', default: 'open' })
   status: string;
 
-  /** hours | days | fixed — the unit `quantity` and `rate` are expressed in. */
+  /** hours | days | fixed | other — the unit `quantity` and `rate` are expressed in. */
   @Column({ type: 'varchar', default: 'hours' })
   unit: string;
+
+  /** Free-text unit label when `unit` is 'other' (e.g. "per seat", "retainer"). */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  unitDetail: string | null;
 
   /** Amount of work: number of hours/days (or 1 for a fixed-price line). */
   @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })

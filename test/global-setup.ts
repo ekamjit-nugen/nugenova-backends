@@ -83,6 +83,7 @@ import { SalesPhase21788370000000 } from '../src/bootstrap/database/migrations/1
 import { SalesPhase3Quotes1788380000000 } from '../src/bootstrap/database/migrations/1788380000000-SalesPhase3Quotes';
 import { SalesPhase4LeadCentric1788390000000 } from '../src/bootstrap/database/migrations/1788390000000-SalesPhase4LeadCentric';
 import { LeadSourceDetail1788400000000 } from '../src/bootstrap/database/migrations/1788400000000-LeadSourceDetail';
+import { ActivityRequirementOther1788410000000 } from '../src/bootstrap/database/migrations/1788410000000-ActivityRequirementOther';
 import { DiscussionBoardEntity } from '../src/modules/discussion-boards/entities/discussion-board.entity';
 import { BoardNoteEntity } from '../src/modules/discussion-boards/entities/board-note.entity';
 import { BoardNodeEntity } from '../src/modules/discussion-boards/entities/board-node.entity';
@@ -318,6 +319,7 @@ module.exports = async function globalSetup(): Promise<void> {
       SalesPhase3Quotes1788380000000,
       SalesPhase4LeadCentric1788390000000,
       LeadSourceDetail1788400000000,
+      ActivityRequirementOther1788410000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

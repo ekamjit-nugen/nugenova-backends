@@ -18,6 +18,10 @@ export class SalesActivityEntity extends PgBaseEntity {
   @Column({ type: 'varchar' })
   type: ActivityType;
 
+  /** Free-text label when `type` is 'other'. */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  typeDetail: string | null;
+
   @Column({ type: 'text', nullable: true, default: null })
   body: string | null;
 
