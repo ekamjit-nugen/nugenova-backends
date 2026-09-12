@@ -117,7 +117,9 @@ export class SalesService {
     const lead = await this.leads.save(this.leads.create({
       organizationId: caller.orgId,
       name: dto.name.trim(), company: dto.company ?? null, email: dto.email?.toLowerCase() ?? null, phone: dto.phone ?? null,
-      title: dto.title ?? null, source: (dto.source ?? 'other') as any, stageId, status: 'open',
+      title: dto.title ?? null, source: (dto.source ?? 'other') as any,
+      sourceDetail: (dto.source ?? 'other') === 'other' ? (dto.sourceDetail?.trim() || null) : null,
+      stageId, status: 'open',
       value: dto.value != null ? String(dto.value) : null, currency: dto.currency?.toUpperCase() ?? 'INR',
       requirement: dto.requirement ?? null,
       assignedTo: dto.assignedTo ?? null, score: dto.score ?? 0, tags: dto.tags ?? [], notes: dto.notes ?? null,
@@ -136,7 +138,8 @@ export class SalesService {
     if (dto.email !== undefined) l.email = dto.email?.toLowerCase() ?? null;
     if (dto.phone !== undefined) l.phone = dto.phone;
     if (dto.title !== undefined) l.title = dto.title;
-    if (dto.source !== undefined) l.source = dto.source as any;
+    if (dto.sourceDetail !== undefined) l.sourceDetail = dto.sourceDetail?.trim() || null;
+    if (dto.source !== undefined) { l.source = dto.source as any; if (dto.source !== 'other') l.sourceDetail = null; }
     if (dto.status !== undefined) l.status = dto.status as any;
     if (dto.value !== undefined) l.value = dto.value != null ? String(dto.value) : null;
     if (dto.currency !== undefined) l.currency = dto.currency.toUpperCase();
@@ -628,7 +631,7 @@ export class SalesService {
     const lines = [header.join(',')];
     for (const l of rows) {
       lines.push([
-        l.name, l.company, l.email, l.phone, l.title, l.source, l.stageId ? stageName.get(l.stageId) ?? '' : '',
+        l.name, l.company, l.email, l.phone, l.title, l.source === 'other' && l.sourceDetail ? l.sourceDetail : l.source, l.stageId ? stageName.get(l.stageId) ?? '' : '',
         l.status, l.value ?? '', l.currency, (l.tags ?? []).join('; '), new Date(l.createdAt).toISOString().slice(0, 10),
       ].map((c) => this.csvCell(c)).join(','));
     }

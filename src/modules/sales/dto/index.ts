@@ -11,6 +11,7 @@ export class CreateLeadDto {
   @IsOptional() @IsString() @MaxLength(40) phone?: string;
   @IsOptional() @IsString() @MaxLength(120) title?: string;
   @IsOptional() @IsIn(LEAD_SOURCES as unknown as string[]) source?: string;
+  @IsOptional() @IsString() @MaxLength(120) sourceDetail?: string;
   @IsOptional() @IsString() @MaxLength(24) stageId?: string;
   @IsOptional() @IsNumber() value?: number;
   @IsOptional() @IsString() @MaxLength(8) currency?: string;
@@ -28,6 +29,7 @@ export class UpdateLeadDto {
   @IsOptional() @IsString() @MaxLength(40) phone?: string;
   @IsOptional() @IsString() @MaxLength(120) title?: string;
   @IsOptional() @IsIn(LEAD_SOURCES as unknown as string[]) source?: string;
+  @IsOptional() @IsString() @MaxLength(120) sourceDetail?: string;
   @IsOptional() @IsString() @MaxLength(24) stageId?: string;
   @IsOptional() @IsIn(LEAD_STATUSES as unknown as string[]) status?: string;
   @IsOptional() @IsNumber() value?: number;

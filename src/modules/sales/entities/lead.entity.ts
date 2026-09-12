@@ -35,6 +35,10 @@ export class LeadEntity extends PgBaseEntity {
   @Column({ type: 'varchar', default: 'other' })
   source: LeadSource;
 
+  /** Free-text source label when `source` is 'other'. */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  sourceDetail: string | null;
+
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   stageId: string | null;
 
