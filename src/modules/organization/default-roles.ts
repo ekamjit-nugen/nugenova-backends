@@ -36,7 +36,7 @@ const ALL = ['view', 'create', 'edit', 'delete', 'export', 'assign'];
 const ALL_RESOURCES = [
   'dashboard', 'employees', 'departments', 'roles', 'attendance', 'leaves',
   'payroll', 'policies', 'reports', 'settings', 'projects', 'tasks', 'invoices',
-  'expenses', 'clients',
+  'expenses', 'clients', 'recruitment',
 ];
 
 /** Full access — every resource × every action, so the Owner/Admin matrix shows
@@ -87,6 +87,7 @@ export const DEFAULT_ROLES: DefaultRoleDef[] = [
       { resource: 'invoices', actions: ['view'] },
       { resource: 'expenses', actions: ['view'] },
       { resource: 'clients', actions: ['view'] },
+      { resource: 'recruitment', actions: [...ALL] },
     ],
   },
   {

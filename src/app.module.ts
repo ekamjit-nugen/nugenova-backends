@@ -34,6 +34,7 @@ import { SalesModule } from './modules/sales/sales.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { RecruitmentModule } from './modules/recruitment/recruitment.module';
 
 /**
  * Nugenova backend root module.
@@ -84,6 +85,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
     ActivityModule,
     MeetingsModule,
     CalendarModule,
+    RecruitmentModule,
   ],
 })
 export class AppModule {}

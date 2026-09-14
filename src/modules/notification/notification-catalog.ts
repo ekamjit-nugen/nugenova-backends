@@ -48,6 +48,13 @@ export const NOTIFICATION_EMAIL: Record<string, NotificationEmailMeta> = {
   wfh_request_submitted: { eyebrow: 'WFH request', cta: 'Review request' },
   wfh_request_reviewed: { eyebrow: 'WFH request', cta: 'View request' },
 
+  // ── Recruitment ──
+  recruitment_candidate_assigned: { eyebrow: 'Recruitment', cta: 'View candidate' },
+  recruitment_interview_scheduled: { eyebrow: 'Interview scheduled', cta: 'View interview' },
+  recruitment_interview_cancelled: { eyebrow: 'Interview cancelled', cta: 'View interview' },
+  recruitment_feedback_due: { eyebrow: 'Interview feedback due', cta: 'Submit feedback' },
+  recruitment_offer_accepted: { eyebrow: 'Offer accepted', cta: 'View candidate' },
+
   // ── Chat ──
   chat_mention: { eyebrow: 'You were mentioned', cta: 'Open conversation' },
 
@@ -130,6 +137,14 @@ export const NOTIFICATION_TYPE_CATALOG: NotificationTypeMeta[] = [
   // Policy
   { type: 'policy_published', label: 'New policy published', category: 'policy', audience: 'employee' },
   { type: 'policy_ack_reminder', label: 'Policy acknowledgement reminder', category: 'policy', audience: 'employee' },
+  // Recruitment
+  { type: 'recruitment_candidate_assigned', label: 'Candidate assigned to you', category: 'recruitment', audience: 'manager' },
+  { type: 'recruitment_stage_changed', label: 'Candidate moved to a new stage', category: 'recruitment', audience: 'manager' },
+  { type: 'recruitment_interview_scheduled', label: 'Interview scheduled', category: 'recruitment', audience: 'employee' },
+  { type: 'recruitment_interview_cancelled', label: 'Interview cancelled / rescheduled', category: 'recruitment', audience: 'employee' },
+  { type: 'recruitment_feedback_due', label: 'Interview feedback reminder', category: 'recruitment', audience: 'employee' },
+  { type: 'recruitment_feedback_submitted', label: 'Interview feedback submitted', category: 'recruitment', audience: 'manager' },
+  { type: 'recruitment_offer_accepted', label: 'Offer accepted', category: 'recruitment', audience: 'manager' },
   // Chat
   { type: 'chat_mention', label: 'You were @mentioned', category: 'chat', audience: 'employee' },
 ];

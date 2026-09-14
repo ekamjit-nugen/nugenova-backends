@@ -26,6 +26,8 @@ export type AiUsageFeature =
   | 'org_qa'
   // ai-chat module (/ai/chat/* — async RAG-grounded chatbot conversations)
   | 'chatbot'
+  // recruitment module (CV → structured candidate profile)
+  | 'recruitment_cv_parse'
   // catch-all for a caller that did not name a feature
   | 'other';
 

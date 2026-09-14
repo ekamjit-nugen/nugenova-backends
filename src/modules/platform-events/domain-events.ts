@@ -29,6 +29,10 @@ export const DOMAIN_EVENTS = {
   DOCUMENT_EXPIRING: 'document.expiring',
   // ── academic / LMS ──────────────────────────────────────────────────────
   ENROLMENT_CREATED: 'enrolment.created',
+  // ── recruitment ─────────────────────────────────────────────────────────
+  CANDIDATE_CREATED: 'candidate.created',
+  APPLICATION_STAGE_CHANGED: 'application.stageChanged',
+  CANDIDATE_HIRED: 'candidate.hired',
 } as const;
 
 /** The union of every wire name the platform emits. */
@@ -102,6 +106,25 @@ export interface EnrolmentCreatedPayload extends DomainEventBase {
   studentMembershipId: string;
 }
 
+export interface CandidateCreatedPayload extends DomainEventBase {
+  candidateId: string;
+  source: string;
+}
+
+export interface ApplicationStageChangedPayload extends DomainEventBase {
+  applicationId: string;
+  candidateId: string;
+  openingId: string;
+  fromStageId: string | null;
+  toStageId: string;
+}
+
+export interface CandidateHiredPayload extends DomainEventBase {
+  applicationId: string;
+  candidateId: string;
+  openingId: string;
+}
+
 /**
  * The compile-time map from an event NAME to its payload type. The
  * DomainEventsService `emit` is generic over this, so a mismatched payload is a
@@ -117,6 +140,9 @@ export interface DomainEventPayloads {
   [DOMAIN_EVENTS.ASSESSMENT_GRADED]: AssessmentGradedPayload;
   [DOMAIN_EVENTS.DOCUMENT_EXPIRING]: DocumentExpiringPayload;
   [DOMAIN_EVENTS.ENROLMENT_CREATED]: EnrolmentCreatedPayload;
+  [DOMAIN_EVENTS.CANDIDATE_CREATED]: CandidateCreatedPayload;
+  [DOMAIN_EVENTS.APPLICATION_STAGE_CHANGED]: ApplicationStageChangedPayload;
+  [DOMAIN_EVENTS.CANDIDATE_HIRED]: CandidateHiredPayload;
 }
 
 /** An emitted envelope as it reaches a listener (payload + resolved metadata). */
