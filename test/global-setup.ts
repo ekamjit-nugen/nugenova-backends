@@ -85,6 +85,7 @@ import { SalesPhase4LeadCentric1788390000000 } from '../src/bootstrap/database/m
 import { LeadSourceDetail1788400000000 } from '../src/bootstrap/database/migrations/1788400000000-LeadSourceDetail';
 import { ActivityRequirementOther1788410000000 } from '../src/bootstrap/database/migrations/1788410000000-ActivityRequirementOther';
 import { RequirementPriorityOther1788420000000 } from '../src/bootstrap/database/migrations/1788420000000-RequirementPriorityOther';
+import { Activity1788220000000 } from '../src/bootstrap/database/migrations/1788220000000-Activity';
 import { DiscussionBoardEntity } from '../src/modules/discussion-boards/entities/discussion-board.entity';
 import { BoardNoteEntity } from '../src/modules/discussion-boards/entities/board-note.entity';
 import { BoardNodeEntity } from '../src/modules/discussion-boards/entities/board-node.entity';
@@ -107,6 +108,8 @@ import { SalesFollowupEntity } from '../src/modules/sales/entities/sales-followu
 import { RequirementEntity } from '../src/modules/sales/entities/requirement.entity';
 import { QuoteEntity } from '../src/modules/sales/entities/quote.entity';
 import { LeadDocumentEntity } from '../src/modules/sales/entities/lead-document.entity';
+import { ActivityEventEntity } from '../src/modules/activity/entities/activity-event.entity';
+import { ActivityRetentionRunEntity } from '../src/modules/activity/entities/activity-retention-run.entity';
 import { PlatformTermsEntity } from '../src/modules/terms/entities/platform-terms.entity';
 import { AttendanceEntity } from '../src/modules/attendance/entities/attendance.entity';
 import { HolidayEntity } from '../src/modules/attendance/entities/holiday.entity';
@@ -253,6 +256,8 @@ module.exports = async function globalSetup(): Promise<void> {
       RequirementEntity,
       QuoteEntity,
       LeadDocumentEntity,
+      ActivityEventEntity,
+      ActivityRetentionRunEntity,
     ],
     // NOTE: keep this list in sync with every migration under
     // src/bootstrap/database/migrations — ts-jest can't load the glob
@@ -322,6 +327,7 @@ module.exports = async function globalSetup(): Promise<void> {
       LeadSourceDetail1788400000000,
       ActivityRequirementOther1788410000000,
       RequirementPriorityOther1788420000000,
+      Activity1788220000000,
     ],
     namingStrategy: new SnakeNamingStrategy(),
     synchronize: false,

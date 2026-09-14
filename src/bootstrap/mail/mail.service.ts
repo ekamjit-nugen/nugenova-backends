@@ -11,6 +11,12 @@ export interface MailRecipient {
   name?: string;
 }
 
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 export interface MailSendOptions {
   to: string | string[] | MailRecipient | MailRecipient[];
   subject: string;
@@ -19,6 +25,8 @@ export interface MailSendOptions {
   from?: { email: string; name?: string };
   cc?: string | string[];
   replyTo?: string;
+  /** Binary attachments (e.g. a log-export zip). Forwarded by the SMTP + ZeptoMail drivers. */
+  attachments?: MailAttachment[];
   /** For the outbox record only — coarse UI grouping + org scoping. */
   category?: string;
   organizationId?: string | null;
@@ -141,6 +149,9 @@ export class MailService {
       ...(opts.text ? { text: opts.text } : {}),
       ...(opts.cc ? { cc: opts.cc } : {}),
       ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+      ...(opts.attachments?.length
+        ? { attachments: opts.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })) }
+        : {}),
     });
   }
 
@@ -163,6 +174,9 @@ export class MailService {
       subject: opts.subject,
       htmlbody: opts.html,
       ...(opts.text ? { textbody: opts.text } : {}),
+      ...(opts.attachments?.length
+        ? { attachments: opts.attachments.map((a) => ({ name: a.filename, content: a.content.toString('base64'), mime_type: a.contentType || 'application/octet-stream' })) }
+        : {}),
     };
 
     const res = await fetch(url, {
