@@ -32,6 +32,7 @@ import { DiscussionBoardsModule } from './modules/discussion-boards/discussion-b
 import { ClientsModule } from './modules/clients/clients.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { ActivityModule } from './modules/activity/activity.module';
+import { MeetingsModule } from './modules/meetings/meetings.module';
 
 /**
  * Nugenova backend root module.
@@ -80,6 +81,7 @@ import { ActivityModule } from './modules/activity/activity.module';
     ClientsModule,
     SalesModule,
     ActivityModule,
+    MeetingsModule,
   ],
 })
 export class AppModule {}
