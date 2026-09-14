@@ -34,6 +34,9 @@ export interface ResolvedVerticalPack {
   aiTierCeiling: number;
   /** Whether any per-org override is applied on top of the orgType default. */
   hasOverride: boolean;
+  /** Whether an explicit per-org MODULE list has been set (distinct from any
+   *  other override). When false, module gating defaults to "all allowed". */
+  modulesConfigured: boolean;
 }
 
 /**
@@ -92,6 +95,7 @@ export class VerticalPackService {
       enabledModules,
       aiTierCeiling,
       hasOverride: !!override,
+      modulesConfigured: !!(override?.enabledModules && override.enabledModules.length),
     };
   }
 
@@ -99,6 +103,34 @@ export class VerticalPackService {
   async isModuleEnabled(orgId: string, moduleKey: string): Promise<boolean> {
     const pack = await this.resolvePack(orgId);
     return pack.enabledModules.includes(moduleKey);
+  }
+
+  /**
+   * Module-gate check with an opt-in default: a module is ALLOWED when the org
+   * has no explicit module list (unconfigured orgs keep everything), and only
+   * gated once a super admin has set the list. Used by {@link RequireModule}.
+   */
+  async isModuleAllowed(orgId: string, moduleKey: string): Promise<boolean> {
+    const pack = await this.resolvePack(orgId);
+    return !pack.modulesConfigured || pack.enabledModules.includes(moduleKey);
+  }
+
+  /**
+   * Super-admin: set the org's explicit enabled-module list, PRESERVING any
+   * other override fields (vocabulary / AI tier). An empty list clears the
+   * module override (org reverts to "all modules" until set again).
+   */
+  async setEnabledModules(orgId: string, modules: string[], actorId: string): Promise<ResolvedVerticalPack> {
+    const org = await this.requireOrg(orgId);
+    const current = org.verticalPack ?? {};
+    const enabled = [...new Set((modules ?? []).map((m) => String(m).trim()).filter(Boolean))];
+    const next = { ...current, enabledModules: enabled.length ? enabled : undefined };
+    // Drop an override object that has become entirely empty.
+    const isEmpty = !next.vocabulary && !next.enabledModules && next.aiTierCeiling === undefined;
+    org.verticalPack = isEmpty ? null : next;
+    await this.orgs.save(org);
+    this.logger.log(`Enabled modules for org ${orgId} set to [${enabled.join(', ') || '—'}] by ${actorId}`);
+    return this.resolveForOrg(org);
   }
 
   /** The org's AI tier ceiling (0–3). */

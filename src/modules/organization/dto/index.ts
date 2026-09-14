@@ -314,6 +314,14 @@ export class UpdatePlatformSettingsDto {
   defaultMaxMembers?: number | null;
 }
 
+/** Super-admin: set the org's enabled-module list (empty = all modules on). */
+export class SetOrgModulesDto {
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  modules: string[];
+}
+
 /**
  * Super-admin: per-org limit overrides. Storage writes `drive_quotas`; the seat
  * cap writes `organizations.limits`. Any field omitted = leave unchanged; send

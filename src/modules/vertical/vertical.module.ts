@@ -6,6 +6,7 @@ import { OrganizationEntity } from '../organization/entities/organization.entity
 import { RoleEntity } from '../auth/entities/role.entity';
 import { VerticalPackService } from './vertical-pack.service';
 import { VerticalAdminGuard } from './guards/vertical-admin.guard';
+import { ModuleEnabledGuard } from './guards/module-enabled.guard';
 import { VerticalController } from './vertical.controller';
 
 /**
@@ -20,7 +21,7 @@ import { VerticalController } from './vertical.controller';
     TypeOrmModule.forFeature([OrganizationEntity, RoleEntity]),
   ],
   controllers: [VerticalController],
-  providers: [VerticalPackService, VerticalAdminGuard],
-  exports: [VerticalPackService],
+  providers: [VerticalPackService, VerticalAdminGuard, ModuleEnabledGuard],
+  exports: [VerticalPackService, ModuleEnabledGuard],
 })
 export class VerticalModule {}

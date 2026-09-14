@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { PolicyModule } from '../policy/policy.module';
 import { NotificationModule } from '../notification/notification.module';
 import { DriveModule } from '../storage/drive.module';
+import { VerticalModule } from '../vertical/vertical.module';
 import { OrganizationEntity } from './entities/organization.entity';
 import { DepartmentEntity } from './entities/department.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
@@ -42,6 +43,7 @@ import { AdminTermsController } from './admin-terms.controller';
     PolicyModule,
     NotificationModule,
     DriveModule, // DriveService — per-org storage allocation writes drive_quotas
+    VerticalModule, // VerticalPackService — per-org module enable/disable
     TypeOrmModule.forFeature([
       OrganizationEntity,
       DepartmentEntity,

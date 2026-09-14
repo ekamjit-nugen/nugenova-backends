@@ -14,7 +14,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/guards/platform-admin.guard';
 import { OrganizationService } from './services/organization.service';
 import { OrgLimitsService } from './services/org-limits.service';
-import { CreateOrganizationDto, UpdateOrgLimitsDto } from './dto';
+import { VerticalPackService } from '../vertical/vertical-pack.service';
+import { CreateOrganizationDto, SetOrgModulesDto, UpdateOrgLimitsDto } from './dto';
 
 /**
  * Platform-admin organization provisioning. Effective paths (global prefix):
@@ -27,6 +28,7 @@ export class AdminOrganizationController {
   constructor(
     private readonly orgService: OrganizationService,
     private readonly limits: OrgLimitsService,
+    private readonly vertical: VerticalPackService,
   ) {}
 
   @Post()
@@ -91,6 +93,35 @@ export class AdminOrganizationController {
   async getLimits(@Param('id') id: string) {
     const data = await this.limits.getOrgLimits(id);
     return { success: true, data };
+  }
+
+  /**
+   * The org's enabled modules: the effective list, whether it's been explicitly
+   * configured, and the org type. The module catalog/labels live on the client.
+   */
+  @Get(':id/modules')
+  async getModules(@Param('id') id: string) {
+    const pack = await this.vertical.resolvePack(id);
+    return {
+      success: true,
+      data: {
+        orgType: pack.orgType,
+        enabledModules: pack.enabledModules,
+        configured: pack.modulesConfigured,
+      },
+    };
+  }
+
+  /** Set which modules this org can see/access. Empty list = all modules on. */
+  @Put(':id/modules')
+  @HttpCode(HttpStatus.OK)
+  async setModules(@Param('id') id: string, @Body() dto: SetOrgModulesDto, @Req() req: any) {
+    const pack = await this.vertical.setEnabledModules(id, dto.modules, req.user.userId);
+    return {
+      success: true,
+      message: 'Organization modules updated',
+      data: { orgType: pack.orgType, enabledModules: pack.enabledModules, configured: pack.modulesConfigured },
+    };
   }
 
   /** Set this org's storage allocation and/or member seat cap. */
