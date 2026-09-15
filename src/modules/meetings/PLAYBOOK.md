@@ -79,6 +79,7 @@ host / admins are always `moderator: true`.
 |---|---|---|---|
 | POST | `/meetings` | any member | Schedule a meeting (+ invites). |
 | POST | `/meetings/instant` | any member | Start now; returns join config. |
+| GET | `/meetings/incoming` | any member | Meetings the caller is **invited to** (not hosting) that are joinable now: live, scheduled from 5 min before start until end (60 min default length), or undated and created in the last hour. Feeds the join popup. |
 | GET | `/meetings` | any member | The caller's accessible meetings (admins: all). |
 | GET | `/meetings/:id` | host / invitee / admin | One meeting. |
 | PATCH | `/meetings/:id` | host / admin | Edit (title/desc/time/lobby/invitees). |
@@ -143,3 +144,14 @@ Unit
 config (no jwt), participant-can/stranger-cannot access, addParticipants
 host-only + dedupe + notify, `endStale` ends abandoned but keeps a recurring
 room.
+
+## Join popup (frontend)
+
+`components/meetings/incoming-meeting-popup.tsx`, mounted in the app shell when the
+`meetings` module is allowed (not for super admins). Polls `GET /meetings/incoming`
+every 15 s (and when the tab becomes visible; paused while hidden) and shows a
+top-centre card per meeting — "Live now" / "Starts in N min", title, host — with
+**Join** (→ `/meetings/:id`) and **Dismiss**. Joined/dismissed meetings are remembered
+per browser for 24 h; no card inside the meeting you're already in; polling stops on
+401/403/404 (module disabled).
+

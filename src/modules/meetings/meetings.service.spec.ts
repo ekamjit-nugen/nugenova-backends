@@ -88,4 +88,41 @@ describe('MeetingsService', () => {
     expect(store.get(a.meeting.id).status).toBe('ended');
     expect(store.get(r.id).status).toBe('live'); // recurring persists
   });
+
+  describe('incoming (join popup)', () => {
+    const NOW = new Date('2026-09-15T10:00:00Z');
+    const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+    const seed = (over: any) => { const m = { organizationId: 'orgA', isDeleted: false, hostId: 'host1', hostName: 'Host One', title: 'x', participants: [{ userId: 'u2', name: 'u2' }], createdAt: at(-240), ...over }; store.set(m.id, m); return m; };
+    beforeEach(() => {
+      // incoming() filters status with In([...]); match on the operator's values.
+      meetingsRepo.find = jest.fn(({ where }) => {
+        const statuses: string[] = where.status?._value ?? where.status?.value ?? [where.status];
+        return Promise.resolve([...store.values()].filter((m) => m.organizationId === where.organizationId && !m.isDeleted && statuses.includes(m.status)));
+      });
+    });
+
+    it('returns live meetings and scheduled ones inside their window, only for invitees', async () => {
+      seed({ id: 'live', status: 'live', isInstant: true });
+      seed({ id: 'soon', status: 'scheduled', scheduledStart: at(4) });                      // 4 min away → in (5 min early window)
+      seed({ id: 'running', status: 'scheduled', scheduledStart: at(-20), scheduledEnd: at(10) });
+      seed({ id: 'later', status: 'scheduled', scheduledStart: at(30) });                    // too early
+      seed({ id: 'over', status: 'scheduled', scheduledStart: at(-120), scheduledEnd: at(-60) });
+      seed({ id: 'noEndOld', status: 'scheduled', scheduledStart: at(-90) });                // past default 60 min length
+      seed({ id: 'undatedNew', status: 'scheduled', scheduledStart: null, createdAt: at(-10) });
+      seed({ id: 'undatedOld', status: 'scheduled', scheduledStart: null, createdAt: at(-90) });
+      seed({ id: 'ended', status: 'ended' });
+      seed({ id: 'cancelled', status: 'cancelled', scheduledStart: at(0) });
+      seed({ id: 'notInvited', status: 'live', participants: [{ userId: 'u9', name: 'u9' }] });
+      seed({ id: 'otherOrg', status: 'live', organizationId: 'orgB' });
+
+      const ids = (await service.incoming('orgA', member('u2'), NOW)).map((m) => m.id).sort();
+      expect(ids).toEqual(['live', 'running', 'soon', 'undatedNew']);
+    });
+
+    it("doesn't pop up for the host, and admins only see meetings they're invited to", async () => {
+      seed({ id: 'live', status: 'live' });
+      expect(await service.incoming('orgA', host, NOW)).toEqual([]);
+      expect(await service.incoming('orgA', admin, NOW)).toEqual([]);
+    });
+  });
 });
