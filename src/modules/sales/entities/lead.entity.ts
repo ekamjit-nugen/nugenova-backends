@@ -39,6 +39,14 @@ export class LeadEntity extends PgBaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   sourceDetail: string | null;
 
+  /** The existing client this lead came from, when `source` is 'client'. */
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  sourceClientId: string | null;
+
+  /** Source-specific details (see `LEAD_SOURCE_FIELDS`), e.g. `{ eventName, eventDate }`. */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  sourceMeta: Record<string, string> | null;
+
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   stageId: string | null;
 

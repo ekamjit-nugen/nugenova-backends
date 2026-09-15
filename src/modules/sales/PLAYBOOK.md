@@ -158,7 +158,44 @@ piece of work; there is no separate deal/opportunity. Migration
 Still open in Phase 4: lead scoring, follow-up reminder cron, portal quote
 acceptance, and `@RequireModule('sales')` once the vertical guard reaches main.
 
+## Lead source = client + follow-up updates (migration `1788450000000-LeadClientSourceFollowups`)
+
+- **Source `client`** — a lead can come from an existing client. `leads.sourceClientId`
+  holds that client (distinct from `clientId`, which is set when a *won* lead is
+  onboarded as a client). With `source = 'client'` a live client in the same org is
+  required (`400 Choose the client this lead came from` / `400 Client not found`);
+  any other source clears it. Lead responses carry `sourceClientName`; CSV export
+  writes `Client: <name>`. A client-sourced lead needs **no contact**: `name` is
+  optional and falls back to the client's primary contact name (then the client's
+  display/company name); company/email/phone/title fill from the client too.
+  Other sources still require `name` (`400 Contact name is required`).
+- **Source details** (`leads.sourceMeta` jsonb, keys per `LEAD_SOURCE_FIELDS`):
+  website → `page`, `utm`; referral → `referrerName`, `referrerContact`; campaign →
+  `campaignName`, `channel`; cold_call → `calledBy`, `callDate`; event → `eventName`,
+  `eventDate`, `eventLocation`; social → `platform`, `profileUrl`. Keys not belonging
+  to the lead's source are dropped, values trimmed (≤300 chars), empty → null.
+  Changing the source clears the old details unless new ones are sent in the same
+  PATCH. The headline field shows next to the source ("Event · Nasscom Summit") and
+  in CSV export. UI: `components/sales/source-fields.tsx` (new-lead page under the
+  source chips; lead detail saves each field on blur/change).
+- **Frontend** — the new-lead page asks for the **Source first** (chips; `import` is
+  importer-only). **Client** → client picker and no Contact card; any other source →
+  the Contact card (name required). Lead detail's Source dropdown also has **Client**;
+  choosing it shows a searchable client picker (`components/sales/client-source-picker.tsx`)
+  over `GET /clients?status=active`. If the client isn't there, **Create "<name>" as a
+  new client** opens the same modal as the Clients page
+  (`components/clients/create-client-modal.tsx` → `POST /clients`, owner/admin only),
+  so the new client goes through the normal Clients flow, then it's selected.
+- **Follow-ups** — each follow-up records the update (`note`, e.g. "Sent proposal v2"),
+  whose court the ball is in (`waitingOn`: `client` | `us`) and the **expected-by** date
+  (`dueAt`). `lead.nextFollowUpAt` is kept as the soonest still-open follow-up (add,
+  reschedule, complete). Lead detail has a follow-ups panel
+  (`components/sales/followups-panel.tsx`: add form, overdue/today highlighting,
+  mark done/reopen); the new-lead page's first follow-up uses the same fields.
+
 ## Tests
 
 - Unit — `sales.service.spec.ts`: stage seeding, create-lead default stage,
-  move→won/lost, overview math, unknown-stage guard.
+  move→won/lost, overview math, unknown-stage guard, client source validation
+  (required, same-org, cleared on other sources, name in listings), follow-up
+  `waitingOn` + `nextFollowUpAt` sync on add/complete.
