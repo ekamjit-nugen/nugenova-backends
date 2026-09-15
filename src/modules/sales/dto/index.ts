@@ -5,7 +5,8 @@ import {
 import { ACTIVITY_TYPES, FOLLOWUP_STATUSES, FOLLOWUP_WAITING_ON, LEAD_SOURCES, LEAD_STATUSES } from '../sales.constants';
 
 export class CreateLeadDto {
-  @IsString() @MaxLength(200) name: string;
+  /** Contact name. Optional when `source` is 'client' — then it comes from the client's primary contact. */
+  @IsOptional() @IsString() @MaxLength(200) name?: string;
   @IsOptional() @IsString() @MaxLength(200) company?: string;
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsString() @MaxLength(40) phone?: string;

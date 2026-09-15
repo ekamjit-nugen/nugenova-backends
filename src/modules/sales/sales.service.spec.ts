@@ -233,6 +233,25 @@ describe('SalesService', () => {
       expect(fromWeb.sourceClientId).toBeNull();
     });
 
+    it('fills the contact from the client when none is given', async () => {
+      clientRecords.findOne.mockResolvedValue({
+        id: 'c1', organizationId: 'orgA', companyName: 'Acme Private Limited', displayName: 'Acme',
+        primaryContact: { name: 'Riya Shah', email: 'Riya@Acme.com', phone: '+91 98', designation: 'CTO' },
+      });
+      const lead = await service.createLead(caller, { source: 'client', sourceClientId: 'c1' } as any);
+      expect(lead).toMatchObject({ name: 'Riya Shah', company: 'Acme', email: 'riya@acme.com', phone: '+91 98', title: 'CTO', sourceClientId: 'c1' });
+    });
+
+    it('names a client-sourced lead after the client when it has no primary contact', async () => {
+      clientRecords.findOne.mockResolvedValue({ id: 'c2', organizationId: 'orgA', companyName: 'Globex', displayName: null, primaryContact: null });
+      const lead = await service.createLead(caller, { source: 'client', sourceClientId: 'c2' } as any);
+      expect(lead).toMatchObject({ name: 'Globex', company: 'Globex', email: null, phone: null });
+    });
+
+    it('still requires a contact name for non-client sources', async () => {
+      await expect(service.createLead(caller, { source: 'website' } as any)).rejects.toThrow(/Contact name is required/);
+    });
+
     it('switching a client-sourced lead to another source clears the client', async () => {
       leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false, source: 'client', sourceClientId: 'c1', stageId: 's-new' });
       users.find.mockResolvedValue([]);

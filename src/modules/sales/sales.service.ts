@@ -115,15 +115,23 @@ export class SalesService {
 
   async createLead(caller: SalesCaller, dto: CreateLeadDto): Promise<LeadEntity> {
     const source = dto.source ?? 'other';
-    const sourceClientId = await this.resolveSourceClient(caller.orgId, source, dto.sourceClientId);
+    const client = await this.findSourceClient(caller.orgId, source, dto.sourceClientId);
+    // A client-sourced lead needs no separate contact: fall back to the client's record.
+    const contact = client?.primaryContact ?? null;
+    const name = dto.name?.trim() || contact?.name?.trim() || (client ? client.displayName || client.companyName : '');
+    if (!name) throw new BadRequestException('Contact name is required');
     const stages = await this.ensureStages(caller.orgId);
     const stageId = dto.stageId || stages.find((s) => s.isDefault)?.id || stages[0]?.id || null;
     const lead = await this.leads.save(this.leads.create({
       organizationId: caller.orgId,
-      name: dto.name.trim(), company: dto.company ?? null, email: dto.email?.toLowerCase() ?? null, phone: dto.phone ?? null,
-      title: dto.title ?? null, source: source as any,
+      name,
+      company: dto.company ?? (client ? client.displayName || client.companyName : null),
+      email: (dto.email ?? contact?.email)?.toLowerCase() ?? null,
+      phone: dto.phone ?? contact?.phone ?? null,
+      title: dto.title ?? contact?.designation ?? null,
+      source: source as any,
       sourceDetail: source === 'other' ? (dto.sourceDetail?.trim() || null) : null,
-      sourceClientId,
+      sourceClientId: client?.id ?? null,
       stageId, status: 'open',
       value: dto.value != null ? String(dto.value) : null, currency: dto.currency?.toUpperCase() ?? 'INR',
       requirement: dto.requirement ?? null,
@@ -716,11 +724,15 @@ export class SalesService {
    * any other source carries no client. Returns the id to store.
    */
   private async resolveSourceClient(orgId: string, source: string, sourceClientId: string | null | undefined): Promise<string | null> {
+    return (await this.findSourceClient(orgId, source, sourceClientId))?.id ?? null;
+  }
+
+  private async findSourceClient(orgId: string, source: string, sourceClientId: string | null | undefined): Promise<ClientEntity | null> {
     if (source !== 'client') return null;
     if (!sourceClientId) throw new BadRequestException('Choose the client this lead came from');
     const client = await this.clientRecords.findOne({ where: { id: sourceClientId, organizationId: orgId, isDeleted: false } });
     if (!client) throw new BadRequestException('Client not found');
-    return client.id;
+    return client;
   }
 
   private notifyAssignment(orgId: string, userId: string, lead: LeadEntity, actorId: string) {
