@@ -46,6 +46,12 @@ export class MeetingsController {
     return { success: true, data: await this.meetings.list(this.orgId(req), this.caller(req)) };
   }
 
+  /** Meetings the caller is invited to and can join right now (for the join popup). */
+  @Get('incoming')
+  async incoming(@Req() req: any) {
+    return { success: true, data: await this.meetings.incoming(this.orgId(req), this.caller(req)) };
+  }
+
   @Get(':id')
   async get(@Req() req: any, @Param('id') id: string) {
     return { success: true, data: await this.meetings.get(this.orgId(req), this.caller(req), id) };

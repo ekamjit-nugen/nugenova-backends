@@ -33,6 +33,11 @@ export interface MeetingJoinConfig {
 
 const JOIN_TOKEN_TTL_SEC = 4 * 60 * 60; // 4h
 
+/** Invitees see the join popup this long before a scheduled start. */
+const INCOMING_EARLY_MS = 5 * 60 * 1000;
+/** Assumed length of a meeting with no end time (and how long an undated one stays joinable). */
+const INCOMING_DEFAULT_LENGTH_MS = 60 * 60 * 1000;
+
 @Injectable()
 export class MeetingsService {
   private readonly logger = new Logger(MeetingsService.name);
@@ -206,6 +211,34 @@ export class MeetingsService {
   async list(orgId: string, caller: MeetingCaller) {
     const all = await this.meetings.find({ where: { organizationId: orgId, isDeleted: false }, order: { scheduledStart: 'DESC', createdAt: 'DESC' } });
     return all.filter((m) => this.canAccess(m, caller)).map((m) => this.map(m, caller));
+  }
+
+  /**
+   * Meetings the caller has been invited to (not ones they host) that they can
+   * join right now — drives the in-app "join meeting" popup. Joinable = live, or
+   * scheduled and inside its window (from a few minutes before the start until the
+   * end / a default length), or scheduled with no time and created recently.
+   */
+  async incoming(orgId: string, caller: MeetingCaller, now = new Date()) {
+    const rows = await this.meetings.find({
+      where: { organizationId: orgId, isDeleted: false, status: In(['live', 'scheduled']) },
+      order: { createdAt: 'DESC' },
+      take: 200,
+    });
+    const t = now.getTime();
+    const joinable = (m: MeetingEntity) => {
+      if (m.status === 'live') return true;
+      if (m.scheduledStart) {
+        const start = m.scheduledStart.getTime();
+        const end = m.scheduledEnd?.getTime() ?? start + INCOMING_DEFAULT_LENGTH_MS;
+        return t >= start - INCOMING_EARLY_MS && t <= end;
+      }
+      return t - (m.createdAt?.getTime() ?? 0) <= INCOMING_DEFAULT_LENGTH_MS;
+    };
+    return rows
+      .filter((m) => m.hostId !== caller.userId && (m.participants ?? []).some((p) => p.userId === caller.userId))
+      .filter(joinable)
+      .map((m) => this.map(m, caller));
   }
 
   async get(orgId: string, caller: MeetingCaller, id: string) {
