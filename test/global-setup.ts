@@ -85,6 +85,7 @@ import { SalesPhase4LeadCentric1788390000000 } from '../src/bootstrap/database/m
 import { LeadSourceDetail1788400000000 } from '../src/bootstrap/database/migrations/1788400000000-LeadSourceDetail';
 import { ActivityRequirementOther1788410000000 } from '../src/bootstrap/database/migrations/1788410000000-ActivityRequirementOther';
 import { Recruitment1788430000000 } from '../src/bootstrap/database/migrations/1788430000000-Recruitment';
+import { RecruitmentLeadSubmissions1788440000000 } from '../src/bootstrap/database/migrations/1788440000000-RecruitmentLeadSubmissions';
 import { LeadClientSourceFollowups1788450000000 } from '../src/bootstrap/database/migrations/1788450000000-LeadClientSourceFollowups';
 import { RECRUITMENT_ENTITIES } from '../src/modules/recruitment/entities';
 import { RequirementPriorityOther1788420000000 } from '../src/bootstrap/database/migrations/1788420000000-RequirementPriorityOther';
@@ -336,6 +337,7 @@ module.exports = async function globalSetup(): Promise<void> {
       ActivityRequirementOther1788410000000,
       RequirementPriorityOther1788420000000,
       Recruitment1788430000000,
+      RecruitmentLeadSubmissions1788440000000,
       LeadClientSourceFollowups1788450000000,
       Meetings1788200000000,
       MeetingRecurrence1788210000000,

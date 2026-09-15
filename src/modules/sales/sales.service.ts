@@ -265,7 +265,7 @@ export class SalesService {
     return {
       id: r.id, entityType: r.entityType, entityId: r.entityId, title: r.title, details: r.details, category: r.category,
       role: r.role, skills: r.skills ?? [], priority: r.priority, priorityDetail: r.priorityDetail, status: r.status, unit: r.unit, unitDetail: r.unitDetail,
-      quantity, rate, amount: quantity * rate, neededBy: r.neededBy, assignedTo: r.assignedTo, createdAt: r.createdAt,
+      quantity, rate, amount: quantity * rate, neededBy: r.neededBy, assignedTo: r.assignedTo, positions: r.positions ?? null, createdAt: r.createdAt,
     };
   }
 
@@ -296,7 +296,8 @@ export class SalesService {
       status: dto.status ?? 'open', unit: dto.unit ?? 'hours',
       unitDetail: (dto.unit ?? 'hours') === 'other' ? (dto.unitDetail?.trim() || null) : null,
       quantity: String(dto.quantity ?? 0), rate: String(dto.rate ?? 0),
-      neededBy: dto.neededBy ? new Date(dto.neededBy) : null, assignedTo: dto.assignedTo ?? null, createdBy: caller.userId, isDeleted: false,
+      neededBy: dto.neededBy ? new Date(dto.neededBy) : null, assignedTo: dto.assignedTo ?? null, positions: dto.positions ?? null,
+      createdBy: caller.userId, isDeleted: false,
     }));
     return this.requirementView(r);
   }
@@ -318,6 +319,7 @@ export class SalesService {
     if (dto.rate !== undefined) r.rate = String(dto.rate);
     if (dto.neededBy !== undefined) r.neededBy = dto.neededBy ? new Date(dto.neededBy) : null;
     if (dto.assignedTo !== undefined) r.assignedTo = dto.assignedTo || null;
+    if (dto.positions !== undefined) r.positions = dto.positions ?? null;
     return this.requirementView(await this.requirements.save(r));
   }
 

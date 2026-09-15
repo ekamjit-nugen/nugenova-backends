@@ -12,6 +12,7 @@ import { CandidateFieldsDto, ImportCandidatesDto, ImportRowDto } from '../dto';
 import { CandidateListQuery, CandidatesService } from './candidates.service';
 import { OpeningsService } from './openings.service';
 import { PipelineService } from './pipeline.service';
+import { SubmissionsService } from './submissions.service';
 import { RecruitmentCaller, assertCan } from './recruitment-caller';
 
 export type ImportOutcome = 'created' | 'merged' | 'skipped' | 'error';
@@ -25,6 +26,20 @@ export interface ImportRowResult {
   opening: string | null;
   openingCreated: boolean;
   appliedToOpening: boolean;
+  /** "Acme — Senior Data Engineer" when the row was shortlisted against a client lead. */
+  lead: string | null;
+  submittedToLead: boolean;
+  /** No opening and no lead → the candidate sits in the talent pool. */
+  talentPool: boolean;
+  /** Duplicate detection shown in the preview: merged into a match, or flagged for review. */
+  duplicate: {
+    kind: 'existing' | 'file';
+    action: 'merged' | 'flagged';
+    matchedOn: ('email' | 'phone' | 'name')[];
+    candidateId: string | null;
+    fullName: string;
+    row: number | null;
+  } | null;
   messages: string[];
 }
 
@@ -54,6 +69,7 @@ export class ImportExportService {
     private readonly candidatesService: CandidatesService,
     private readonly openingsService: OpeningsService,
     private readonly pipeline: PipelineService,
+    private readonly submissions: SubmissionsService,
   ) {}
 
   /** Normalise one spreadsheet row into profile fields + side info. */
@@ -81,7 +97,7 @@ export class ImportExportService {
       source: explicitSource ?? defaultSource,
       sourceDetail: remarks.sourceLabel && remarks.sourceLabel.toLowerCase() !== 'resume' ? remarks.sourceLabel.slice(0, 200) : null,
     };
-    return { fields, openingTitle, notes: remarks.notes, stageName: cleanCell(row.stage) };
+    return { fields, openingTitle, notes: remarks.notes, stageName: cleanCell(row.stage), leadName: cleanCell(row.lead), requirementTitle: cleanCell(row.requirement) };
   }
 
   async importRows(caller: RecruitmentCaller, dto: ImportCandidatesDto) {
@@ -93,17 +109,20 @@ export class ImportExportService {
     const results: ImportRowResult[] = [];
     // In-batch identity so the same person on two sheets is merged even in a dry run.
     const batch = new Map<string, string>();
+    const batchRows = new Map<string, { row: number | null; fullName: string }>();
+    const nameRows = new Map<string, { row: number | null; fullName: string }>();
     const openingCache = new Map<string, { id: string | null; title: string; created: boolean }>();
     const dryApplied = new Set<string>();
+    const leadCache = new Map<string, Awaited<ReturnType<SubmissionsService['findLeadTarget']>>>();
 
     for (const row of dto.rows) {
       const res: ImportRowResult = {
         rowNumber: row.rowNumber ?? null, sheet: row.sheet ?? null, fullName: null, outcome: 'skipped', candidateId: null,
-        opening: null, openingCreated: false, appliedToOpening: false, messages: [],
+        opening: null, openingCreated: false, appliedToOpening: false, lead: null, submittedToLead: false, talentPool: false, duplicate: null, messages: [],
       };
       results.push(res);
       try {
-        const { fields, openingTitle, notes, stageName } = this.normalizeRow(row, defaultSource);
+        const { fields, openingTitle, notes, stageName, leadName, requirementTitle } = this.normalizeRow(row, defaultSource);
         res.fullName = fields.fullName ?? null;
         if (!fields.fullName) {
           res.messages.push('No candidate name — row skipped');
@@ -114,10 +133,30 @@ export class ImportExportService {
         if (extraTags.length) fields.tags = extraTags;
 
         const keys = [fields.email && `e:${fields.email}`, fields.phone && `p:${fields.phone}`, !fields.email && !fields.phone && `n:${fields.fullName.toLowerCase()}`].filter(Boolean) as string[];
-        let candidateId = keys.map((k) => batch.get(k)).find(Boolean) ?? null;
-        if (!candidateId) {
-          const existing = await this.candidatesService.findExisting(caller.orgId, { email: fields.email ?? null, phone: fields.phone ?? null, name: fields.fullName });
-          candidateId = existing?.id ?? null;
+        const fileKey = keys.find((k) => batch.has(k));
+        let candidateId: string | null = fileKey ? batch.get(fileKey)! : null;
+        const nameKey = fields.fullName.toLowerCase();
+        if (fileKey) {
+          const earlier = batchRows.get(fileKey)!;
+          const fileMatchId = batch.get(fileKey)!;
+          res.duplicate = {
+            kind: 'file', action: 'merged', candidateId: fileMatchId.startsWith('dry:') ? null : fileMatchId, fullName: earlier.fullName, row: earlier.row,
+            matchedOn: keys.filter((k) => batch.get(k) === fileMatchId).map((k) => (k[0] === 'e' ? 'email' : k[0] === 'p' ? 'phone' : 'name')),
+          };
+          res.messages.push(`Same person as ${earlier.row ? `row ${earlier.row}` : 'an earlier row'} in this file — merged`);
+        } else {
+          const { merged, possible } = await this.candidatesService.matchForImport(caller.orgId, { email: fields.email ?? null, phone: fields.phone ?? null, name: fields.fullName });
+          if (merged) {
+            candidateId = merged.id;
+            res.duplicate = { kind: 'existing', action: 'merged', candidateId: merged.id, fullName: merged.fullName, row: null, matchedOn: merged.matchedOn };
+          } else if (possible) {
+            res.duplicate = { kind: 'existing', action: 'flagged', candidateId: possible.id, fullName: possible.fullName, row: null, matchedOn: possible.matchedOn };
+            res.messages.push(`Possible duplicate of existing “${possible.fullName}” (same name, different contact details) — review before importing`);
+          } else if (nameRows.has(nameKey)) {
+            const earlier = nameRows.get(nameKey)!;
+            res.duplicate = { kind: 'file', action: 'flagged', candidateId: null, fullName: earlier.fullName, row: earlier.row, matchedOn: ['name'] };
+            res.messages.push(`Same name as ${earlier.row ? `row ${earlier.row}` : 'an earlier row'} but different contact details — review before importing`);
+          }
         }
 
         if (candidateId) {
@@ -150,7 +189,11 @@ export class ImportExportService {
           if (fields.externalResumeUrl) res.messages.push('CV link saved — upload the file on the profile to enable search & AI');
         }
         res.candidateId = candidateId.startsWith('dry:') ? null : candidateId;
-        keys.forEach((k) => batch.set(k, candidateId!));
+        keys.forEach((k) => {
+          if (!batchRows.has(k)) batchRows.set(k, { row: row.rowNumber ?? null, fullName: fields.fullName! });
+          batch.set(k, candidateId!);
+        });
+        if (!nameRows.has(nameKey)) nameRows.set(nameKey, { row: row.rowNumber ?? null, fullName: fields.fullName });
 
         if (notes && !dryRun && res.candidateId) {
           await this.pipeline.logActivity(caller.orgId, res.candidateId, 'note', `Imported remark: ${notes}`, { actorId: caller.userId });
@@ -183,6 +226,36 @@ export class ImportExportService {
             }
           }
         }
+
+        if (leadName) {
+          const key = `${leadName.toLowerCase()}|${(requirementTitle ?? '').toLowerCase()}`;
+          let target = leadCache.get(key);
+          if (target === undefined) {
+            target = await this.submissions.findLeadTarget(caller.orgId, leadName, requirementTitle);
+            leadCache.set(key, target);
+          }
+          if (!target) {
+            res.messages.push(`Lead “${leadName}” not found — create it in Sales first; candidate kept in the talent pool`);
+          } else if (target.requirementMissing) {
+            res.messages.push(`Requirement “${requirementTitle}” not found on ${target.label} — shortlisted against the lead`);
+          }
+          if (target) {
+            res.lead = target.label;
+            const subKey = `${candidateId}|${target.leadId}|${target.requirementId ?? ''}`;
+            if (dryRun) {
+              res.submittedToLead = !dryApplied.has(subKey);
+              dryApplied.add(subKey);
+            } else if (res.candidateId) {
+              try {
+                await this.submissions.create(caller, { leadId: target.leadId, requirementId: target.requirementId ?? undefined, candidateId: res.candidateId, note: 'Imported from spreadsheet' }, { silentNotify: true });
+                res.submittedToLead = true;
+              } catch (e: any) {
+                if (e?.status !== 409) res.messages.push(e?.response?.message ?? e?.message ?? 'Could not shortlist against the lead');
+              }
+            }
+          }
+        }
+        res.talentPool = !openingTitle && !res.lead;
       } catch (err: any) {
         res.outcome = 'error';
         res.messages.push(err?.response?.message ?? err?.message ?? 'Unexpected error');
@@ -197,6 +270,10 @@ export class ImportExportService {
       errors: results.filter((r) => r.outcome === 'error').length,
       openingsCreated: [...openingCache.values()].filter((o) => o.created).map((o) => o.title),
       applications: results.filter((r) => r.appliedToOpening).length,
+      submissions: results.filter((r) => r.submittedToLead).length,
+      talentPool: results.filter((r) => r.talentPool && (r.outcome === 'created' || r.outcome === 'merged')).length,
+      duplicatesMerged: results.filter((r) => r.duplicate?.action === 'merged').length,
+      duplicatesFlagged: results.filter((r) => r.duplicate?.action === 'flagged').length,
     };
     if (!dryRun) {
       this.pipeline.audit(caller, 'recruitment.import', `Imported ${summary.created} new and merged ${summary.merged} candidates`, undefined, summary);

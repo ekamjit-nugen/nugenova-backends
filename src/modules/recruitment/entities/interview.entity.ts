@@ -10,15 +10,23 @@ export class InterviewEntity extends PgBaseEntity {
   @Column({ type: 'varchar', length: 24 })
   organizationId: string;
 
-  @Column({ type: 'varchar', length: 24 })
-  applicationId: string;
+  /** Internal rounds hang off an opening application… */
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  applicationId: string | null;
+
+  /** …client rounds hang off a lead submission. */
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  submissionId: string | null;
+
+  @Column({ type: 'varchar', default: 'internal' })
+  kind: 'internal' | 'client';
 
   /** Denormalised for fast "interviews for this candidate" reads. */
   @Column({ type: 'varchar', length: 24 })
   candidateId: string;
 
-  @Column({ type: 'varchar', length: 24 })
-  openingId: string;
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  openingId: string | null;
 
   @Column({ type: 'varchar' })
   roundName: string;

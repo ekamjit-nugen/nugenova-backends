@@ -124,6 +124,7 @@ export class CreateRequirementDto {
   @IsOptional() @IsNumber() rate?: number;
   @IsOptional() @IsDateString() neededBy?: string;
   @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(1000) positions?: number;
 }
 
 export class UpdateRequirementDto extends CreateRequirementDto {
