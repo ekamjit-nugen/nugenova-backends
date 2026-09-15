@@ -332,6 +332,7 @@ export class MembershipService {
       where: { id: membershipId, organizationId: orgId },
     });
     if (!m) throw new NotFoundException('Member not found');
+    const prevTier = m.role;
 
     // Temporary disable / re-enable (org-scoped). The owner can never be disabled.
     if (patch.status !== undefined && patch.status !== m.status) {
@@ -380,6 +381,15 @@ export class MembershipService {
       const resolved = await this.resolveRole(orgId, { role: patch.role });
       m.role = resolved.tier;
       m.roleId = resolved.roleId;
+    }
+
+    // Ownership is not a role you can hand out or take away from a member edit
+    // (e.g. adding people to a role from the Roles page).
+    if (prevTier === 'owner' && m.role !== 'owner') {
+      throw new BadRequestException("The organization owner's role can't be changed.");
+    }
+    if (prevTier !== 'owner' && m.role === 'owner') {
+      throw new BadRequestException('The owner role can’t be assigned to another member.');
     }
 
     await this.membershipRepo.save(m);
