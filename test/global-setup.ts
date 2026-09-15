@@ -123,6 +123,8 @@ import { PolicyEntity } from '../src/modules/policy/entities/policy.entity';
 import { PolicyAcknowledgementEntity } from '../src/modules/policy/entities/policy-acknowledgement.entity';
 import { PolicyVersionEntity } from '../src/modules/policy/entities/policy-version.entity';
 import { NotificationEntity } from '../src/modules/notification/entities/notification.entity';
+import { PushTokenEntity } from '../src/modules/notification/entities/push-token.entity';
+import { PushTokens1788460000000 } from '../src/bootstrap/database/migrations/1788460000000-PushTokens';
 import { NotificationPreferenceEntity } from '../src/modules/notification/entities/notification-preference.entity';
 import { OrgNotificationSettingEntity } from '../src/modules/notification/entities/org-notification-setting.entity';
 import { SalaryStructureEntity } from '../src/modules/payroll/entities/salary-structure.entity';
@@ -206,6 +208,7 @@ module.exports = async function globalSetup(): Promise<void> {
       PolicyAcknowledgementEntity,
       PolicyVersionEntity,
       NotificationEntity,
+      PushTokenEntity,
       NotificationPreferenceEntity,
       LeaveRequestEntity,
       LeaveBalanceEntity,
@@ -335,6 +338,7 @@ module.exports = async function globalSetup(): Promise<void> {
       ActivityRequirementOther1788410000000,
       RequirementPriorityOther1788420000000,
       Recruitment1788430000000,
+      PushTokens1788460000000,
       Meetings1788200000000,
       MeetingRecurrence1788210000000,
       Activity1788220000000,
