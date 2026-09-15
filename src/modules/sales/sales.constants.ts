@@ -1,6 +1,7 @@
 /** Shared enums for the Sales & Leads module (Phase 1). */
 
-export const LEAD_SOURCES = ['website', 'referral', 'campaign', 'cold_call', 'event', 'social', 'import', 'other'] as const;
+/** `client` = the lead came from an existing client (see `leads.sourceClientId`). */
+export const LEAD_SOURCES = ['website', 'referral', 'client', 'campaign', 'cold_call', 'event', 'social', 'import', 'other'] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
 export const LEAD_STATUSES = ['open', 'won', 'lost', 'on_hold'] as const;
@@ -15,6 +16,10 @@ export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export const FOLLOWUP_STATUSES = ['pending', 'done', 'snoozed'] as const;
 export type FollowupStatus = (typeof FOLLOWUP_STATUSES)[number];
+
+/** Whose court the ball is in for a follow-up (e.g. we sent a proposal → waiting on the client). */
+export const FOLLOWUP_WAITING_ON = ['client', 'us'] as const;
+export type FollowupWaitingOn = (typeof FOLLOWUP_WAITING_ON)[number];
 
 /** Conventional B2B funnel seeded per org on first use. Probability feeds the weighted forecast. */
 export const DEFAULT_STAGES: { name: string; order: number; isWon: boolean; isLost: boolean; probability: number; color: string; isDefault: boolean }[] = [

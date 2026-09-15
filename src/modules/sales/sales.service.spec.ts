@@ -1,17 +1,17 @@
 import { SalesService } from './sales.service';
 
 describe('SalesService', () => {
-  let stages: any, leads: any, accounts: any, contacts: any, activities: any, followups: any, requirements: any, quotes: any, leadDocuments: any, users: any, clientsService: any, notifier: any;
+  let stages: any, leads: any, accounts: any, contacts: any, activities: any, followups: any, requirements: any, quotes: any, leadDocuments: any, users: any, clientRecords: any, clientsService: any, notifier: any;
   let service: SalesService;
   const caller = { userId: 'u1', orgId: 'orgA', isAdmin: true };
 
   beforeEach(() => {
     const repo = () => ({ find: jest.fn(), findOne: jest.fn(), save: jest.fn((v) => Promise.resolve(Array.isArray(v) ? v : { id: 'new1', ...v })), create: jest.fn((v) => v), update: jest.fn(), count: jest.fn().mockResolvedValue(0) });
-    stages = repo(); leads = repo(); accounts = repo(); contacts = repo(); activities = repo(); followups = repo(); requirements = repo(); quotes = repo(); leadDocuments = repo(); users = repo();
+    stages = repo(); leads = repo(); accounts = repo(); contacts = repo(); activities = repo(); followups = repo(); requirements = repo(); quotes = repo(); leadDocuments = repo(); users = repo(); clientRecords = repo();
     notifier = { notify: jest.fn().mockResolvedValue(undefined) };
     clientsService = { create: jest.fn().mockResolvedValue({ id: 'client1' }) };
     users.findOne.mockResolvedValue({ firstName: 'A', lastName: 'B' });
-    service = new SalesService(stages, leads, accounts, contacts, activities, followups, requirements, quotes, leadDocuments, users, clientsService, notifier);
+    service = new SalesService(stages, leads, accounts, contacts, activities, followups, requirements, quotes, leadDocuments, users, clientRecords, clientsService, notifier);
   });
 
   const seededStages = [
@@ -207,6 +207,65 @@ describe('SalesService', () => {
       const saved = leads.save.mock.calls[0][0];
       expect(saved).toHaveLength(1);
       expect(saved[0]).toMatchObject({ name: 'Lead One', email: 'one@x.com', source: 'import', stageId: 's-new', tags: ['a', 'b'] });
+    });
+  });
+
+  describe('lead source = client', () => {
+    beforeEach(() => stages.find.mockResolvedValue(seededStages));
+
+    it('requires a client when the source is client', async () => {
+      await expect(service.createLead(caller, { name: 'Ref lead', source: 'client' } as any)).rejects.toThrow(/Choose the client/);
+      expect(leads.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a client that is not in the caller org', async () => {
+      clientRecords.findOne.mockResolvedValue(null);
+      await expect(service.createLead(caller, { name: 'Ref lead', source: 'client', sourceClientId: 'c-other' } as any)).rejects.toThrow(/Client not found/);
+      expect(clientRecords.findOne).toHaveBeenCalledWith({ where: { id: 'c-other', organizationId: 'orgA', isDeleted: false } });
+    });
+
+    it('stores the source client and ignores sourceClientId for other sources', async () => {
+      clientRecords.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA' });
+      const fromClient = await service.createLead(caller, { name: 'Ref lead', source: 'client', sourceClientId: 'c1', sourceDetail: 'x' } as any);
+      expect(fromClient.sourceClientId).toBe('c1');
+      expect(fromClient.sourceDetail).toBeNull();
+      const fromWeb = await service.createLead(caller, { name: 'Web lead', source: 'website', sourceClientId: 'c1' } as any);
+      expect(fromWeb.sourceClientId).toBeNull();
+    });
+
+    it('switching a client-sourced lead to another source clears the client', async () => {
+      leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false, source: 'client', sourceClientId: 'c1', stageId: 's-new' });
+      users.find.mockResolvedValue([]);
+      const out = await service.updateLead(caller, 'l1', { source: 'referral' } as any);
+      expect(out.source).toBe('referral');
+      expect(out.sourceClientId).toBeNull();
+    });
+
+    it('lists leads with the source client name', async () => {
+      leads.find.mockResolvedValue([{ id: 'l1', organizationId: 'orgA', source: 'client', sourceClientId: 'c1', assignedTo: null, value: null }]);
+      clientRecords.find.mockResolvedValue([{ id: 'c1', companyName: 'Acme Pvt Ltd', displayName: 'Acme' }]);
+      const { leads: rows } = await service.board('orgA', true);
+      expect(rows[0].sourceClientName).toBe('Acme');
+    });
+  });
+
+  describe('follow-ups', () => {
+    it('records what we are waiting on and sets the lead next follow-up to the soonest open one', async () => {
+      followups.findOne.mockResolvedValue({ dueAt: new Date('2026-09-20T00:00:00Z') }); // soonest open
+      const f = await service.addFollowup(caller, 'lead', 'l1', { dueAt: '2026-09-30T00:00:00Z', note: '  Sent proposal v2  ', waitingOn: 'client' } as any);
+      expect(f.note).toBe('Sent proposal v2');
+      expect(f.waitingOn).toBe('client');
+      expect(leads.update).toHaveBeenCalledWith({ id: 'l1', organizationId: 'orgA' }, { nextFollowUpAt: new Date('2026-09-20T00:00:00Z') });
+    });
+
+    it('completing the last open follow-up clears the lead next follow-up', async () => {
+      followups.findOne
+        .mockResolvedValueOnce({ id: 'f1', organizationId: 'orgA', entityType: 'lead', entityId: 'l1', status: 'pending', isDeleted: false })
+        .mockResolvedValueOnce(null); // no open follow-ups left
+      const out = await service.updateFollowup('orgA', 'f1', { status: 'done' } as any);
+      expect(out.status).toBe('done');
+      expect(out.completedAt).toBeTruthy();
+      expect(leads.update).toHaveBeenCalledWith({ id: 'l1', organizationId: 'orgA' }, { nextFollowUpAt: null });
     });
   });
 });

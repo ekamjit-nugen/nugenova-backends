@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { ClientsModule } from '../clients/clients.module';
 import { UserEntity } from '../auth/entities/user.entity';
+import { ClientEntity } from '../clients/entities/client.entity';
 
 import { PipelineStageEntity } from './entities/pipeline-stage.entity';
 import { LeadEntity } from './entities/lead.entity';
@@ -38,6 +39,7 @@ import { SalesController } from './sales.controller';
       QuoteEntity,
       LeadDocumentEntity,
       UserEntity,
+      ClientEntity,
     ]),
   ],
   controllers: [SalesController],
