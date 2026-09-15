@@ -15,7 +15,7 @@ import { UserEntity } from '../auth/entities/user.entity';
 import { ClientEntity } from '../clients/entities/client.entity';
 import { NotifierService } from '../notification/notifier.service';
 import { ClientsService } from '../clients/clients.service';
-import { DEFAULT_STAGES, SalesEntityType } from './sales.constants';
+import { DEFAULT_STAGES, LEAD_SOURCE_FIELDS, LeadSource, SalesEntityType } from './sales.constants';
 import {
   CreateAccountDto, CreateActivityDto, CreateContactDto, CreateFollowupDto, CreateLeadDto, CreateLeadDocumentDto,
   CreateQuoteDto, CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto,
@@ -132,6 +132,7 @@ export class SalesService {
       source: source as any,
       sourceDetail: source === 'other' ? (dto.sourceDetail?.trim() || null) : null,
       sourceClientId: client?.id ?? null,
+      sourceMeta: this.cleanSourceMeta(source, dto.sourceMeta),
       stageId, status: 'open',
       value: dto.value != null ? String(dto.value) : null, currency: dto.currency?.toUpperCase() ?? 'INR',
       requirement: dto.requirement ?? null,
@@ -145,6 +146,7 @@ export class SalesService {
   async updateLead(caller: SalesCaller, id: string, dto: UpdateLeadDto): Promise<LeadEntity> {
     const l = await this.requireLead(caller.orgId, id);
     const prevAssignee = l.assignedTo;
+    const prevSource = l.source;
     if (dto.name !== undefined) l.name = dto.name.trim();
     if (dto.company !== undefined) l.company = dto.company;
     if (dto.email !== undefined) l.email = dto.email?.toLowerCase() ?? null;
@@ -152,6 +154,11 @@ export class SalesService {
     if (dto.title !== undefined) l.title = dto.title;
     if (dto.sourceDetail !== undefined) l.sourceDetail = dto.sourceDetail?.trim() || null;
     if (dto.source !== undefined) { l.source = dto.source as any; if (dto.source !== 'other') l.sourceDetail = null; }
+    if (dto.source !== undefined || dto.sourceMeta !== undefined) {
+      // A new source starts with a clean slate unless its details come along in the same update.
+      const meta = dto.sourceMeta !== undefined ? dto.sourceMeta : dto.source !== undefined && dto.source !== prevSource ? null : l.sourceMeta;
+      l.sourceMeta = this.cleanSourceMeta(l.source, meta);
+    }
     if (dto.source !== undefined || dto.sourceClientId !== undefined) {
       l.sourceClientId = await this.resolveSourceClient(caller.orgId, l.source, dto.sourceClientId !== undefined ? dto.sourceClientId : l.sourceClientId);
     }
@@ -652,7 +659,8 @@ export class SalesService {
     const sourceLabel = (l: LeadEntity) =>
       l.source === 'other' && l.sourceDetail ? l.sourceDetail
         : l.source === 'client' && l.sourceClientId && clientName.has(l.sourceClientId) ? `Client: ${clientName.get(l.sourceClientId)}`
-          : l.source;
+          : l.sourceMeta?.[LEAD_SOURCE_FIELDS[l.source]?.[0] ?? ''] ? `${l.source}: ${l.sourceMeta[LEAD_SOURCE_FIELDS[l.source][0]]}`
+            : l.source;
     const header = ['Name', 'Company', 'Email', 'Phone', 'Title', 'Source', 'Stage', 'Status', 'Value', 'Currency', 'Tags', 'Created'];
     const lines = [header.join(',')];
     for (const l of rows) {
@@ -723,6 +731,18 @@ export class SalesService {
    * A lead sourced from a client must point at a live client in the same org;
    * any other source carries no client. Returns the id to store.
    */
+  /** Keep only the detail fields that belong to `source`, trimmed and capped; null when nothing is left. */
+  private cleanSourceMeta(source: string, meta: Record<string, unknown> | null | undefined): Record<string, string> | null {
+    const allowed = LEAD_SOURCE_FIELDS[source as LeadSource] ?? [];
+    if (!meta || typeof meta !== 'object' || !allowed.length) return null;
+    const out: Record<string, string> = {};
+    for (const key of allowed) {
+      const v = meta[key];
+      if (typeof v === 'string' && v.trim()) out[key] = v.trim().slice(0, 300);
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
   private async resolveSourceClient(orgId: string, source: string, sourceClientId: string | null | undefined): Promise<string | null> {
     return (await this.findSourceClient(orgId, source, sourceClientId))?.id ?? null;
   }

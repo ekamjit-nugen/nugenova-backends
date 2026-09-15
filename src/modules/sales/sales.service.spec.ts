@@ -268,6 +268,43 @@ describe('SalesService', () => {
     });
   });
 
+  describe('source details (sourceMeta)', () => {
+    beforeEach(() => stages.find.mockResolvedValue(seededStages));
+
+    it('keeps only the fields that belong to the chosen source, trimmed', async () => {
+      const lead = await service.createLead(caller, {
+        name: 'Summit lead', source: 'event',
+        sourceMeta: { eventName: '  Nasscom Summit ', eventDate: '2026-09-10', eventLocation: '', referrerName: 'nope', hack: 'x' },
+      } as any);
+      expect(lead.sourceMeta).toEqual({ eventName: 'Nasscom Summit', eventDate: '2026-09-10' });
+    });
+
+    it('stores nothing for sources without detail fields', async () => {
+      const lead = await service.createLead(caller, { name: 'Misc', source: 'other', sourceDetail: 'Trade body', sourceMeta: { eventName: 'x' } } as any);
+      expect(lead.sourceMeta).toBeNull();
+      expect(lead.sourceDetail).toBe('Trade body');
+    });
+
+    it('changing the source drops the old details unless new ones are sent', async () => {
+      users.find.mockResolvedValue([]);
+      leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false, source: 'event', sourceMeta: { eventName: 'Summit' }, stageId: 's-new' });
+      const cleared = await service.updateLead(caller, 'l1', { source: 'referral' } as any);
+      expect(cleared.sourceMeta).toBeNull();
+
+      leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false, source: 'event', sourceMeta: { eventName: 'Summit' }, stageId: 's-new' });
+      const moved = await service.updateLead(caller, 'l1', { source: 'referral', sourceMeta: { referrerName: 'Rahul' } } as any);
+      expect(moved.sourceMeta).toEqual({ referrerName: 'Rahul' });
+    });
+
+    it('updating details alone keeps the source and sanitizes against it', async () => {
+      users.find.mockResolvedValue([]);
+      leads.findOne.mockResolvedValue({ id: 'l1', organizationId: 'orgA', isDeleted: false, source: 'social', sourceMeta: { platform: 'LinkedIn' }, stageId: 's-new' });
+      const out = await service.updateLead(caller, 'l1', { sourceMeta: { platform: 'Instagram', profileUrl: 'https://instagram.com/acme', eventName: 'x' } } as any);
+      expect(out.source).toBe('social');
+      expect(out.sourceMeta).toEqual({ platform: 'Instagram', profileUrl: 'https://instagram.com/acme' });
+    });
+  });
+
   describe('follow-ups', () => {
     it('records what we are waiting on and sets the lead next follow-up to the soonest open one', async () => {
       followups.findOne.mockResolvedValue({ dueAt: new Date('2026-09-20T00:00:00Z') }); // soonest open

@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested,
+  IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 import { ACTIVITY_TYPES, FOLLOWUP_STATUSES, FOLLOWUP_WAITING_ON, LEAD_SOURCES, LEAD_STATUSES } from '../sales.constants';
 
@@ -14,6 +14,7 @@ export class CreateLeadDto {
   @IsOptional() @IsIn(LEAD_SOURCES as unknown as string[]) source?: string;
   @IsOptional() @IsString() @MaxLength(120) sourceDetail?: string;
   @IsOptional() @IsString() @MaxLength(24) sourceClientId?: string;
+  @IsOptional() @IsObject() sourceMeta?: Record<string, string>;
   @IsOptional() @IsString() @MaxLength(24) stageId?: string;
   @IsOptional() @IsNumber() value?: number;
   @IsOptional() @IsString() @MaxLength(8) currency?: string;
@@ -33,6 +34,7 @@ export class UpdateLeadDto {
   @IsOptional() @IsIn(LEAD_SOURCES as unknown as string[]) source?: string;
   @IsOptional() @IsString() @MaxLength(120) sourceDetail?: string;
   @IsOptional() @IsString() @MaxLength(24) sourceClientId?: string;
+  @IsOptional() @IsObject() sourceMeta?: Record<string, string>;
   @IsOptional() @IsString() @MaxLength(24) stageId?: string;
   @IsOptional() @IsIn(LEAD_STATUSES as unknown as string[]) status?: string;
   @IsOptional() @IsNumber() value?: number;

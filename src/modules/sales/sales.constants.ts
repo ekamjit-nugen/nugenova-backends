@@ -4,6 +4,23 @@
 export const LEAD_SOURCES = ['website', 'referral', 'client', 'campaign', 'cold_call', 'event', 'social', 'import', 'other'] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
+/**
+ * Per-source detail fields captured on a lead (`leads.sourceMeta`), e.g. who referred
+ * it or which event it came from. Unknown keys are dropped on save. `client` uses
+ * `sourceClientId`; `other` uses the free-text `sourceDetail`.
+ */
+export const LEAD_SOURCE_FIELDS: Record<LeadSource, readonly string[]> = {
+  website: ['page', 'utm'],
+  referral: ['referrerName', 'referrerContact'],
+  client: [],
+  campaign: ['campaignName', 'channel'],
+  cold_call: ['calledBy', 'callDate'],
+  event: ['eventName', 'eventDate', 'eventLocation'],
+  social: ['platform', 'profileUrl'],
+  import: [],
+  other: [],
+};
+
 export const LEAD_STATUSES = ['open', 'won', 'lost', 'on_hold'] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 

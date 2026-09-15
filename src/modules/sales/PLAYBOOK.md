@@ -169,6 +169,15 @@ acceptance, and `@RequireModule('sales')` once the vertical guard reaches main.
   optional and falls back to the client's primary contact name (then the client's
   display/company name); company/email/phone/title fill from the client too.
   Other sources still require `name` (`400 Contact name is required`).
+- **Source details** (`leads.sourceMeta` jsonb, keys per `LEAD_SOURCE_FIELDS`):
+  website → `page`, `utm`; referral → `referrerName`, `referrerContact`; campaign →
+  `campaignName`, `channel`; cold_call → `calledBy`, `callDate`; event → `eventName`,
+  `eventDate`, `eventLocation`; social → `platform`, `profileUrl`. Keys not belonging
+  to the lead's source are dropped, values trimmed (≤300 chars), empty → null.
+  Changing the source clears the old details unless new ones are sent in the same
+  PATCH. The headline field shows next to the source ("Event · Nasscom Summit") and
+  in CSV export. UI: `components/sales/source-fields.tsx` (new-lead page under the
+  source chips; lead detail saves each field on blur/change).
 - **Frontend** — the new-lead page asks for the **Source first** (chips; `import` is
   importer-only). **Client** → client picker and no Contact card; any other source →
   the Contact card (name required). Lead detail's Source dropdown also has **Client**;
