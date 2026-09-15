@@ -15,6 +15,7 @@ export type ActivityCategory =
   | 'ai'
   | 'onboarding'
   | 'settings'
+  | 'recruitment'
   | 'other';
 
 /**

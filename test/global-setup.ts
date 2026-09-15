@@ -84,6 +84,8 @@ import { SalesPhase3Quotes1788380000000 } from '../src/bootstrap/database/migrat
 import { SalesPhase4LeadCentric1788390000000 } from '../src/bootstrap/database/migrations/1788390000000-SalesPhase4LeadCentric';
 import { LeadSourceDetail1788400000000 } from '../src/bootstrap/database/migrations/1788400000000-LeadSourceDetail';
 import { ActivityRequirementOther1788410000000 } from '../src/bootstrap/database/migrations/1788410000000-ActivityRequirementOther';
+import { Recruitment1788430000000 } from '../src/bootstrap/database/migrations/1788430000000-Recruitment';
+import { RECRUITMENT_ENTITIES } from '../src/modules/recruitment/entities';
 import { RequirementPriorityOther1788420000000 } from '../src/bootstrap/database/migrations/1788420000000-RequirementPriorityOther';
 import { Activity1788220000000 } from '../src/bootstrap/database/migrations/1788220000000-Activity';
 import { Meetings1788200000000 } from '../src/bootstrap/database/migrations/1788200000000-Meetings';
@@ -259,6 +261,7 @@ module.exports = async function globalSetup(): Promise<void> {
       RequirementEntity,
       QuoteEntity,
       LeadDocumentEntity,
+      ...RECRUITMENT_ENTITIES,
       ActivityEventEntity,
       ActivityRetentionRunEntity,
       MeetingEntity,
@@ -331,6 +334,7 @@ module.exports = async function globalSetup(): Promise<void> {
       LeadSourceDetail1788400000000,
       ActivityRequirementOther1788410000000,
       RequirementPriorityOther1788420000000,
+      Recruitment1788430000000,
       Meetings1788200000000,
       MeetingRecurrence1788210000000,
       Activity1788220000000,
