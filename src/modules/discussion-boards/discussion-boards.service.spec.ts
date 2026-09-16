@@ -1,3 +1,4 @@
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { DiscussionBoardsService } from './discussion-boards.service';
 
 /** Chainable query-builder stub whose getRawMany resolves to `rows`. */
@@ -15,6 +16,7 @@ describe('DiscussionBoardsService', () => {
   let commentsRepo: { find: jest.Mock };
   let storage: { save: jest.Mock; getMeta: jest.Mock; getBytes: jest.Mock; listByIds: jest.Mock };
   let notifier: { notify: jest.Mock };
+  let drive: { assertCanReadFile: jest.Mock };
   let service: DiscussionBoardsService;
 
   beforeEach(() => {
@@ -25,7 +27,8 @@ describe('DiscussionBoardsService', () => {
     storage = { save: jest.fn(), getMeta: jest.fn(), getBytes: jest.fn(), listByIds: jest.fn() };
     const usersRepo = { findOne: jest.fn().mockResolvedValue({ firstName: 'A', lastName: 'B', email: 'a@x.com' }) };
     notifier = { notify: jest.fn().mockResolvedValue(undefined) };
-    service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any, usersRepo as any, storage as any, notifier as any);
+    drive = { assertCanReadFile: jest.fn() };
+    service = new DiscussionBoardsService(boardsRepo as any, notesRepo as any, nodesRepo as any, commentsRepo as any, usersRepo as any, storage as any, drive as any, notifier as any);
   });
 
   const admin = { userId: 'admin1', isAdmin: true };
@@ -171,6 +174,55 @@ describe('DiscussionBoardsService', () => {
       storage.getMeta.mockResolvedValue({ id: 'f2', category: 'board-asset', mimeType: 'image/png', originalName: 'x.png' });
       storage.getBytes.mockResolvedValue(Buffer.from('img'));
       await expect(service.getAssetBytes('f2')).resolves.toMatchObject({ mimeType: 'image/png' });
+    });
+  });
+
+  describe('copying a Cloud Drive file onto a board', () => {
+    const board = { id: 'b1', organizationId: 'org1', isDeleted: false, createdBy: 'u1', participants: [{ userId: 'u2' }] };
+    const driveFile = { id: 'df1', name: 'Q3 plan.pdf', storageFileId: 'doc9' };
+
+    beforeEach(() => {
+      boardsRepo.findOne.mockResolvedValue(board);
+      drive.assertCanReadFile.mockResolvedValue(driveFile);
+      storage.getMeta.mockResolvedValue({ id: 'doc9', mimeType: 'application/pdf', originalName: 'q3.pdf', organizationId: 'org1', category: 'drive' });
+      storage.getBytes.mockResolvedValue(Buffer.from('pdf-bytes'));
+      storage.save.mockImplementation(async (v: any) => ({ id: 'copy1', originalName: v.originalName, mimeType: v.mimeType, size: 9 }));
+    });
+
+    it('copies the bytes and gates a document behind the board route (not the public one)', async () => {
+      const out = await service.copyDriveFile('org1', member('u2'), 'b1', 'df1');
+      expect(drive.assertCanReadFile).toHaveBeenCalledWith('org1', 'df1', 'u2', false);
+      expect(storage.save).toHaveBeenCalledWith(expect.objectContaining({ category: 'board-file', originalName: 'Q3 plan.pdf' }));
+      expect(out).toMatchObject({ id: 'copy1', url: '/discussion-boards/b1/files/copy1/raw', isImage: false });
+    });
+
+    it('an image becomes an embeddable board asset', async () => {
+      storage.getMeta.mockResolvedValue({ id: 'doc9', mimeType: 'image/png', originalName: 'chart.png', organizationId: 'org1' });
+      const out = await service.copyDriveFile('org1', member('u2'), 'b1', 'df1');
+      expect(storage.save).toHaveBeenCalledWith(expect.objectContaining({ category: 'board-asset' }));
+      expect(out.url).toBe('/discussion-boards/assets/copy1');
+    });
+
+    it('refuses someone who is not on the board — before touching the drive file', async () => {
+      await expect(service.copyDriveFile('org1', member('stranger'), 'b1', 'df1')).rejects.toBeInstanceOf(ForbiddenException);
+      expect(drive.assertCanReadFile).not.toHaveBeenCalled();
+    });
+
+    it('passes the drive refusal through when the file is not theirs to read', async () => {
+      drive.assertCanReadFile.mockRejectedValue(new ForbiddenException('You do not have access to this file'));
+      await expect(service.copyDriveFile('org1', member('u2'), 'b1', 'df1')).rejects.toBeInstanceOf(ForbiddenException);
+      expect(storage.save).not.toHaveBeenCalled();
+    });
+
+    it('serves a copied document only to board members', async () => {
+      storage.getMeta.mockResolvedValue({ id: 'copy1', category: 'board-file', mimeType: 'application/pdf', originalName: 'q3.pdf', organizationId: 'org1' });
+      await expect(service.getBoardFileBytes('org1', member('u2'), 'b1', 'copy1')).resolves.toMatchObject({ mimeType: 'application/pdf' });
+      await expect(service.getBoardFileBytes('org1', member('stranger'), 'b1', 'copy1')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('never serves a non-board file through the board route', async () => {
+      storage.getMeta.mockResolvedValue({ id: 'x', category: 'drive', mimeType: 'application/pdf', originalName: 'secret.pdf', organizationId: 'org1' });
+      await expect(service.getBoardFileBytes('org1', member('u2'), 'b1', 'x')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });
