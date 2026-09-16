@@ -8,7 +8,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { ILike, In, IsNull, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { Readable } from 'stream';
 import * as bcrypt from 'bcrypt';
@@ -1054,6 +1054,17 @@ export class DriveService {
     return folderId;
   }
 
+  /**
+   * Files in a scope. By default this is ONE folder's contents (`folderId`,
+   * null being the root) — what the Drive browser shows.
+   *
+   * `opts.flat` drops the folder filter and returns every file in the scope,
+   * for callers that pick a file rather than browse to it (the board's Drive
+   * picker). Without it a picker sees only the root, which in practice is empty
+   * because people file things in folders. `opts.q` narrows by name, server
+   * side, so searching isn't limited to the first page. Neither option widens
+   * access: the owner/scope filter is unchanged.
+   */
   async listFiles(
     organizationId: string,
     scope: DriveScope,
@@ -1061,15 +1072,18 @@ export class DriveService {
     folderId: string | null,
     page = 1,
     limit = 50,
+    opts: { flat?: boolean; q?: string } = {},
   ): Promise<{ data: DriveFileEntity[]; total: number }> {
     const ownerId = this.ownerFor(scope, userId);
     const take = Math.min(Math.max(1, limit), 200);
+    const q = opts.q?.trim();
     const [data, total] = await this.files.findAndCount({
       where: {
         organizationId,
         scope,
         ownerId: ownerId === null ? IsNull() : ownerId,
-        folderId: folderId === null ? IsNull() : folderId,
+        ...(opts.flat ? {} : { folderId: folderId === null ? IsNull() : folderId }),
+        ...(q ? { name: ILike(`%${q}%`) } : {}),
         isDeleted: false,
         systemManaged: false,
       },
