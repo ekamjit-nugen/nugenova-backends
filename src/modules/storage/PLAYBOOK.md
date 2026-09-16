@@ -198,3 +198,22 @@ Public (no login — org from the token):
   scenarios (folder+upload+overview, no-grant denial, grant, personal isolation,
   raw byte round-trip, public share, password share, cascade delete). Typechecked;
   run with `npm run test:e2e` against a provisioned Postgres.
+
+## Per-file read access (fix)
+
+`GET /drive/files/:id/raw` and `/pdf` used to check only that the file belonged to the
+caller's org — any member with Cloud Drive access could read any personal file by id,
+and `drive_grants` were recorded but never enforced on read. Both now go through
+`DriveService.assertCanReadFile(orgId, fileId, userId, isAdmin)`:
+
+| Case | Allowed |
+|---|---|
+| Team-scope file | any member with drive access (that is the shared drive) |
+| Personal file, owner | yes |
+| Personal file, granted directly (`drive_grants`, targetType `file`) | yes |
+| Personal file inside a granted folder (any ancestor) | yes |
+| Org owner/admin/platform admin | yes — they administer the drive |
+| Anyone else | **403** |
+
+Public share links keep working: they authorize by token and call with `userId = null`.
+

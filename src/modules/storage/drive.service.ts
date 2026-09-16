@@ -1159,19 +1159,69 @@ export class DriveService {
   }
 
   /** Stream a file's bytes through the API (authenticated in-app viewer). */
+  /**
+   * May this user READ this file? Team-scope files are the org's shared drive and
+   * are open to anyone with Cloud Drive access; a personal file is private to its
+   * owner unless it (or a folder above it) was granted to them. Org owners/admins
+   * administer the drive and can read everything.
+   *
+   * Callers pass `userId: null` only for trusted server-side paths (public share
+   * tokens, which authorize separately).
+   */
+  async assertCanReadFile(
+    organizationId: string,
+    fileId: string,
+    userId: string | null,
+    isAdmin = false,
+  ): Promise<DriveFileEntity> {
+    const f = await this.files.findOne({
+      where: { id: fileId, organizationId, isDeleted: false },
+    });
+    if (!f) throw new NotFoundException('File not found');
+    if (userId === null || isAdmin) return f;
+    if (f.scope !== 'personal') return f; // team drive
+    if (f.ownerId === userId) return f;
+
+    // Granted directly on the file?
+    const direct = await this.grants.findOne({
+      where: { organizationId, granteeUserId: userId, targetType: 'file', targetId: f.id },
+    });
+    if (direct) return f;
+
+    // …or on any folder above it.
+    const folderGrants = await this.grants.find({
+      where: { organizationId, granteeUserId: userId, targetType: 'folder' },
+      select: { targetId: true },
+    });
+    if (folderGrants.length) {
+      const granted = new Set(folderGrants.map((g) => g.targetId));
+      let folderId = f.folderId;
+      const seen = new Set<string>(); // cycle guard
+      while (folderId && !seen.has(folderId)) {
+        if (granted.has(folderId)) return f;
+        seen.add(folderId);
+        const parent: { parentFolderId: string | null } | null = await this.folders.findOne({
+          where: { id: folderId, organizationId },
+          select: { parentFolderId: true },
+        });
+        folderId = parent?.parentFolderId ?? null;
+      }
+    }
+    throw new ForbiddenException('You do not have access to this file');
+  }
+
   async getFileStream(
     organizationId: string,
     fileId: string,
+    userId: string | null = null,
+    isAdmin = false,
   ): Promise<{
     stream: Readable;
     mimeType: string;
     filename: string;
     size: number | null;
   }> {
-    const f = await this.files.findOne({
-      where: { id: fileId, organizationId, isDeleted: false },
-    });
-    if (!f) throw new NotFoundException('File not found');
+    const f = await this.assertCanReadFile(organizationId, fileId, userId, isAdmin);
     const meta = await this.storage.getMeta(f.storageFileId);
     const opened = await this.storage.openStream(meta);
     // Prefer the drive's own display name over the stored original name.
@@ -1186,11 +1236,10 @@ export class DriveService {
   async getPreviewPdf(
     organizationId: string,
     fileId: string,
+    userId: string | null = null,
+    isAdmin = false,
   ): Promise<{ stream: Readable; name: string; size: number | null }> {
-    const f = await this.files.findOne({
-      where: { id: fileId, organizationId, isDeleted: false },
-    });
-    if (!f) throw new NotFoundException('File not found');
+    const f = await this.assertCanReadFile(organizationId, fileId, userId, isAdmin);
     const meta = await this.storage.getMeta(f.storageFileId);
 
     if ((f.mimeType || '').includes('pdf') || /\.pdf$/i.test(f.name)) {
