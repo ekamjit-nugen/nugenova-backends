@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationModule } from '../notification/notification.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
@@ -21,6 +22,7 @@ import { ActivityController } from './activity.controller';
  */
 @Module({
   imports: [
+    NotificationModule,
     AuthModule,
     VerticalModule,
     TypeOrmModule.forFeature([ActivityEventEntity, ActivityRetentionRunEntity, UserEntity, OrganizationEntity, OrgMembershipEntity]),

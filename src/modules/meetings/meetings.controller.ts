@@ -52,6 +52,13 @@ export class MeetingsController {
     return { success: true, data: await this.meetings.incoming(this.orgId(req), this.caller(req)) };
   }
 
+  /** Remember the join prompt was handled (joined / dismissed) for this user. */
+  @Post(':id/notice')
+  async notice(@Req() req: any, @Param('id') id: string, @Body() body: { action?: string }) {
+    const action = body?.action === 'joined' ? 'joined' : 'dismissed';
+    return { success: true, data: await this.meetings.markNotice(this.orgId(req), this.caller(req), id, action) };
+  }
+
   @Get(':id')
   async get(@Req() req: any, @Param('id') id: string) {
     return { success: true, data: await this.meetings.get(this.orgId(req), this.caller(req), id) };

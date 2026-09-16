@@ -117,6 +117,36 @@ Endpoints `GET/PUT /notifications/preferences`. e2e:
 `notification-preferences.feature` (defaults-on, category-off suppresses,
 DND suppresses non-urgent, DND allows urgent).
 
+## Real-time push (FCM Web Push)
+
+Every in-app notification the notifier creates is also pushed to the recipient's
+registered browsers over **FCM HTTP v1** (`push/fcm.client.ts` — signed service-account
+JWT → OAuth token, no firebase-admin) as a **data-only** message
+`{ kind:'notification', notificationId, type, title, body, actionUrl, meetingId?, priority }`.
+Only pushed when the in-app row is actually created (prefs/org policy/dedupe/self-action
+respected); fire-and-forget; tokens FCM reports UNREGISTERED/invalid are deleted.
+
+**Every notification the app raises goes through `notify()`**, so the inbox, the email
+channel and FCM stay in lockstep. Two paths used to email the org owner WITHOUT an inbox
+row and now also file one (`email: false` — the richer branded email is still sent
+alongside): org-onboarding document **requested / approved / rejected**
+(`OnboardingService`) and the **activity-log retention backup** (`ActivityRetentionService`).
+Deliberately email-only: the login **OTP** (no session/user context yet) and the
+**email-change alert to the OLD address** (must reach an address the user may be losing).
+
+- **Tokens** — `push_tokens` (migration `1788460000000-PushTokens`): one row per token,
+  re-registering moves it to the current user. `GET /push/config` (web config; `enabled`
+  only with a complete service account + `FCM_WEB_API_KEY`/`FCM_WEB_APP_ID`/
+  `FCM_MESSAGING_SENDER_ID` + `VAPID_PUBLIC_KEY`), `POST /push/tokens {token}`,
+  `DELETE /push/tokens {token}` (own tokens only; called on sign-out).
+- **Web** — `public/firebase-messaging-sw.js` (dependency-free) forwards each push to open
+  tabs and shows a desktop notification only when no tab is visible (click → `actionUrl`).
+  `lib/push.ts` re-dispatches it as the `nugenova:push` window event; the bell refreshes
+  instantly and the meeting join popup opens on `meeting_*` pushes (its polling relaxes to
+  60 s when push is on). `PushPrompt` asks once from a click ("Turn on"), re-offers after
+  14 days, silently refreshes the token when permission is already granted. Without
+  config/permission everything falls back to the existing polling.
+
 ## Deferred (Phase 2)
 
 - Live socket/websocket push (currently 30s poll + focus refresh).

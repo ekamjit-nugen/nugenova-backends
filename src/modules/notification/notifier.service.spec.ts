@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { NotifierService } from './notifier.service';
 import { NotificationService } from './notification.service';
+import { PushService } from './push/push.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { OrgNotificationSettingService } from './org-notification-setting.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
@@ -26,9 +27,11 @@ describe('NotifierService (email fan-out)', () => {
   let allowsForEmployee: jest.Mock;
   let membershipFindOne: jest.Mock;
   let userFindOne: jest.Mock;
+  let sendToUser: jest.Mock;
 
   const build = async () => {
-    create = jest.fn().mockResolvedValue(undefined);
+    create = jest.fn().mockResolvedValue({ id: 'n1' });
+    sendToUser = jest.fn().mockResolvedValue(1);
     // No recent duplicate by default, so the in-app row is created.
     hasRecentDuplicate = jest.fn().mockResolvedValue(false);
     send = jest.fn().mockResolvedValue(true);
@@ -50,6 +53,7 @@ describe('NotifierService (email fan-out)', () => {
         { provide: getRepositoryToken(OrgMembershipEntity), useValue: { findOne: membershipFindOne } },
         { provide: getRepositoryToken(RoleEntity), useValue: {} },
         { provide: getRepositoryToken(UserEntity), useValue: { findOne: userFindOne } },
+        { provide: PushService, useValue: { sendToUser } },
       ],
     }).compile();
     service = moduleRef.get(NotifierService);
@@ -146,6 +150,30 @@ describe('NotifierService (email fan-out)', () => {
       await service.notify({ ...base, type: 'terms_activated', title: 'Updated Terms', data: { actionUrl: '/consent' } });
       expect(create).toHaveBeenCalledTimes(1); // in-app delivered despite pref off
       expect(send).toHaveBeenCalledTimes(1); // email delivered despite pref off
+    });
+  });
+
+  describe('real-time push', () => {
+    it('pushes the new in-app notification to the recipient’s devices', async () => {
+      await service.notify({ ...base, type: 'meeting_invited', data: { actionUrl: '/meetings/m9', meetingId: 'm9' } });
+      expect(sendToUser).toHaveBeenCalledWith('u1', expect.objectContaining({
+        kind: 'notification', notificationId: 'n1', type: 'meeting_invited', title: 'Leave approved', actionUrl: '/meetings/m9', meetingId: 'm9',
+      }));
+    });
+
+    it('does not push when the in-app notification was not created (preferences off / duplicate / own action)', async () => {
+      allows.mockResolvedValue(false);
+      await service.notify({ ...base, type: 'leave_approved' });
+      hasRecentDuplicate.mockResolvedValue(true); allows.mockResolvedValue(true);
+      await service.notify({ ...base, type: 'leave_approved' });
+      await service.notify({ ...base, actorId: 'u1', type: 'leave_approved' });
+      expect(sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('a push failure never breaks notify', async () => {
+      sendToUser.mockRejectedValue(new Error('fcm down'));
+      await expect(service.notify({ ...base, type: 'leave_approved' })).resolves.toBeUndefined();
+      expect(create).toHaveBeenCalled();
     });
   });
 });

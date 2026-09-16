@@ -125,6 +125,10 @@ import { PolicyEntity } from '../src/modules/policy/entities/policy.entity';
 import { PolicyAcknowledgementEntity } from '../src/modules/policy/entities/policy-acknowledgement.entity';
 import { PolicyVersionEntity } from '../src/modules/policy/entities/policy-version.entity';
 import { NotificationEntity } from '../src/modules/notification/entities/notification.entity';
+import { PushTokenEntity } from '../src/modules/notification/entities/push-token.entity';
+import { MeetingNoticeEntity } from '../src/modules/meetings/entities/meeting-notice.entity';
+import { MeetingNotices1788470000000 } from '../src/bootstrap/database/migrations/1788470000000-MeetingNotices';
+import { PushTokens1788460000000 } from '../src/bootstrap/database/migrations/1788460000000-PushTokens';
 import { NotificationPreferenceEntity } from '../src/modules/notification/entities/notification-preference.entity';
 import { OrgNotificationSettingEntity } from '../src/modules/notification/entities/org-notification-setting.entity';
 import { SalaryStructureEntity } from '../src/modules/payroll/entities/salary-structure.entity';
@@ -208,6 +212,8 @@ module.exports = async function globalSetup(): Promise<void> {
       PolicyAcknowledgementEntity,
       PolicyVersionEntity,
       NotificationEntity,
+      PushTokenEntity,
+      MeetingNoticeEntity,
       NotificationPreferenceEntity,
       LeaveRequestEntity,
       LeaveBalanceEntity,
@@ -339,6 +345,8 @@ module.exports = async function globalSetup(): Promise<void> {
       Recruitment1788430000000,
       RecruitmentLeadSubmissions1788440000000,
       LeadClientSourceFollowups1788450000000,
+      PushTokens1788460000000,
+      MeetingNotices1788470000000,
       Meetings1788200000000,
       MeetingRecurrence1788210000000,
       Activity1788220000000,
