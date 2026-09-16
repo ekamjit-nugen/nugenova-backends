@@ -261,3 +261,38 @@ status-derivation thresholds. The frontend has vitest component tests
 (role-based rendering) and a Playwright visibility scenario. Live pass/fail +
 coverage from the latest CI run are merged into this playbook by the
 `admin-playbooks` API.
+
+## Legacy backfill (Mongo → Postgres, add-only)
+
+`src/bootstrap/database/etl/attendance-backfill.ts` copies clock-ins/outs the new
+system doesn't have yet, while people still clock in on the legacy app. **Add-only**:
+
+| legacy row | Postgres day | action |
+|---|---|---|
+| has times | no row | INSERT (keeps the legacy `_id`) |
+| has times | row with NO times | FILL times/segments/hours/flags |
+| has times | row WITH times | SKIP + report (real data is never overwritten) |
+| no times / deleted | — | SKIP (absence placeholders) |
+
+Dry-run by default; `--apply` writes. `--since <date>` limits the scan, `--legacy-org` /
+`--target-org` override the Nugen IT Services pair. Safe to re-run daily until cutover
+(rows already migrated are matched by id and left alone). Policy is unit-tested in
+`attendance-backfill.spec.ts`.
+
+```bash
+SRC_MONGODB_URI=... npx ts-node src/bootstrap/database/etl/attendance-backfill.ts          # dry run
+SRC_MONGODB_URI=... npx ts-node src/bootstrap/database/etl/attendance-backfill.ts --apply  # write
+```
+
+**Run log:** 2026-09-16 — filled 3 rows (14 Sep ×2, 15 Sep open shift); 5 legacy rows left
+alone because Postgres already had times for those days; 378 empty legacy rows ignored.
+
+**`nugen-migrate.ts` is now re-run safe too**: every table is upserted by id, nothing is
+deleted, and rows the live app created are left alone. Legacy rows whose exact
+(person, day) slot is already taken — the partial unique index — are skipped and
+reported instead of failing the load; rows landing on a day that already has another
+entry are loaded but flagged in the run output. `--fresh` restores the old
+DELETE-then-load behaviour for a genuine first load into an empty org (never on a live
+one). Verified on a disposable local Postgres: three consecutive runs leave the row
+count unchanged and app-created rows intact.
+

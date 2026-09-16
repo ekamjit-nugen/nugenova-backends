@@ -15,7 +15,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run build \
+    && chmod +x docker-entrypoint.sh
 
 # ── runtime: no build toolchain, just Node + the app ─────────────────────────
 FROM node:20-bookworm-slim AS runtime
@@ -31,10 +32,14 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
+# Applies pending migrations on every container start, then execs the CMD.
+COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
+
 # Drop privileges — run as the image's built-in unprivileged user.
 USER node
 
 # Documentation only; the real port comes from PORT in the .env (compose maps it).
 EXPOSE 4000
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "dist/main"]

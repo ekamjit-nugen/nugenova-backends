@@ -22,10 +22,12 @@ import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
       useFactory: (cfg: ConfigService) => {
         const url = cfg.get<string>('DATABASE_URL') || '';
         const isLocal = url.includes('localhost') || url.includes('127.0.0.1');
+        // Self-hosted/containerised Postgres speaks no TLS: `DB_SSL=false` or `?sslmode=disable`.
+        const sslOff = String(cfg.get<string>('DB_SSL') ?? '').toLowerCase() === 'false' || /[?&]sslmode=disable/i.test(url);
         return {
           type: 'postgres',
           url,
-          ssl: url && !isLocal ? { rejectUnauthorized: false } : false,
+          ssl: url && !isLocal && !sslOff ? { rejectUnauthorized: false } : false,
           autoLoadEntities: true,
           namingStrategy: new SnakeNamingStrategy(),
           synchronize: false,
