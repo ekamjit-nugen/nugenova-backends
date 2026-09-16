@@ -13,6 +13,10 @@ import { NotificationPreferenceService } from './notification-preference.service
 import { OrgNotificationSettingService } from './org-notification-setting.service';
 import { NotifierService } from './notifier.service';
 import { NotificationController } from './notification.controller';
+import { PushTokenEntity } from './entities/push-token.entity';
+import { FcmClient } from './push/fcm.client';
+import { PushService } from './push/push.service';
+import { PushController } from './push/push.controller';
 
 /**
  * Notification — the per-recipient in-app inbox (see PLAYBOOK.md). Persists every
@@ -31,19 +35,23 @@ import { NotificationController } from './notification.controller';
       NotificationEntity,
       NotificationPreferenceEntity,
       OrgNotificationSettingEntity,
+      PushTokenEntity,
       OrgMembershipEntity,
       RoleEntity,
       UserEntity,
     ]),
   ],
-  controllers: [NotificationController],
+  controllers: [NotificationController, PushController],
   providers: [
     NotificationService,
     NotificationPreferenceService,
     OrgNotificationSettingService,
     NotifierService,
+    FcmClient,
+    PushService,
   ],
   exports: [
+    PushService,
     NotifierService,
     NotificationService,
     NotificationPreferenceService,

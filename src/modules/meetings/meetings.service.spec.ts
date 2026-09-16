@@ -3,6 +3,8 @@ import { MeetingsService } from './meetings.service';
 
 describe('MeetingsService', () => {
   let meetingsRepo: any;
+  let noticesRepo: any;
+  const noticeStore = new Map<string, any>();
   let usersRepo: any;
   let notifier: { notify: jest.Mock };
   let config: { get: jest.Mock };
@@ -15,6 +17,7 @@ describe('MeetingsService', () => {
 
   beforeEach(() => {
     store.clear();
+    noticeStore.clear();
     meetingsRepo = {
       create: jest.fn((v) => ({ ...v })),
       save: jest.fn((v) => {
@@ -38,7 +41,13 @@ describe('MeetingsService', () => {
     notifier = { notify: jest.fn().mockResolvedValue(undefined) };
     config = { get: jest.fn(() => undefined) }; // meet.jit.si, no JWT
     const activity = { record: jest.fn().mockResolvedValue(undefined) };
-    service = new MeetingsService(meetingsRepo as any, usersRepo as any, config as any, notifier as any, activity as any);
+    noticesRepo = {
+      find: jest.fn(({ where }) => Promise.resolve([...noticeStore.values()].filter((n) => n.userId === where.userId && n.organizationId === where.organizationId))),
+      findOne: jest.fn(({ where }) => Promise.resolve(noticeStore.get(`${where.meetingId}|${where.userId}`) ?? null)),
+      create: jest.fn((v) => ({ ...v })),
+      save: jest.fn((v) => { noticeStore.set(`${v.meetingId}|${v.userId}`, v); return Promise.resolve(v); }),
+    };
+    service = new MeetingsService(meetingsRepo as any, noticesRepo as any, usersRepo as any, config as any, notifier as any, activity as any);
   });
 
   it('create: persists, notifies invitees (not the host), carries recurrence', async () => {
@@ -123,6 +132,37 @@ describe('MeetingsService', () => {
       seed({ id: 'live', status: 'live' });
       expect(await service.incoming('orgA', host, NOW)).toEqual([]);
       expect(await service.incoming('orgA', admin, NOW)).toEqual([]);
+    });
+  });
+
+  describe('join prompt is only shown once per person', () => {
+    const NOW = new Date('2026-09-15T10:00:00Z');
+    beforeEach(() => {
+      meetingsRepo.find = jest.fn(({ where }) => {
+        const statuses: string[] = where.status?._value ?? where.status?.value ?? [where.status];
+        return Promise.resolve([...store.values()].filter((m) => m.organizationId === where.organizationId && !m.isDeleted && statuses.includes(m.status)));
+      });
+    });
+
+    it('stops showing after the invitee dismisses it — and stays gone on another device / after re-login', async () => {
+      const { meeting } = await service.instant('orgA', host, { title: 'Standup', participantIds: ['u2'] });
+      expect((await service.incoming('orgA', member('u2'), NOW)).map((m) => m.id)).toEqual([meeting.id]);
+
+      await service.markNotice('orgA', member('u2'), meeting.id, 'dismissed');
+      expect(await service.incoming('orgA', member('u2'), NOW)).toEqual([]);
+      // A fresh session/device is the same call — the record lives server-side.
+      expect(await service.incoming('orgA', { userId: 'u2', isAdmin: false }, NOW)).toEqual([]);
+      // Someone else who was invited still gets prompted.
+      await service.addParticipants('orgA', host, meeting.id, ['u3']);
+      expect((await service.incoming('orgA', member('u3'), NOW)).map((m) => m.id)).toEqual([meeting.id]);
+    });
+
+    it('joining marks it handled too, and never downgrades to dismissed', async () => {
+      const { meeting } = await service.instant('orgA', host, { title: 'Sync', participantIds: ['u2'] });
+      await service.join('orgA', member('u2'), meeting.id);
+      expect(await service.incoming('orgA', member('u2'), NOW)).toEqual([]);
+      await service.markNotice('orgA', member('u2'), meeting.id, 'dismissed');
+      expect(noticeStore.get(`${meeting.id}|u2`).action).toBe('joined');
     });
   });
 });

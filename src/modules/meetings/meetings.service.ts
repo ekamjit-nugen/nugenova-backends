@@ -5,6 +5,7 @@ import { In, Repository } from 'typeorm';
 import { createHmac, randomBytes } from 'crypto';
 
 import { MeetingEntity, MeetingParticipant, MeetingStatus } from './entities/meeting.entity';
+import { MeetingNoticeEntity } from './entities/meeting-notice.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { NotifierService } from '../notification/notifier.service';
 import { ActivityService } from '../activity/activity.service';
@@ -45,6 +46,8 @@ export class MeetingsService {
   constructor(
     @InjectRepository(MeetingEntity)
     private readonly meetings: Repository<MeetingEntity>,
+    @InjectRepository(MeetingNoticeEntity)
+    private readonly notices: Repository<MeetingNoticeEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
     private readonly config: ConfigService,
@@ -226,6 +229,12 @@ export class MeetingsService {
       take: 200,
     });
     const t = now.getTime();
+    // Meetings whose prompt this person already dealt with (joined or dismissed)
+    // never come back — on any device, after re-login, after clearing storage.
+    const handled = new Set(
+      (await this.notices.find({ where: { userId: caller.userId, organizationId: orgId }, select: { meetingId: true } }))
+        .map((n) => n.meetingId),
+    );
     const joinable = (m: MeetingEntity) => {
       if (m.status === 'live') return true;
       if (m.scheduledStart) {
@@ -236,9 +245,28 @@ export class MeetingsService {
       return t - (m.createdAt?.getTime() ?? 0) <= INCOMING_DEFAULT_LENGTH_MS;
     };
     return rows
+      .filter((m) => !handled.has(m.id))
       .filter((m) => m.hostId !== caller.userId && (m.participants ?? []).some((p) => p.userId === caller.userId))
       .filter(joinable)
       .map((m) => this.map(m, caller));
+  }
+
+  /**
+   * Remember that this person joined or dismissed the meeting's join prompt, so it
+   * is not shown to them again. Idempotent (one row per meeting+user).
+   */
+  async markNotice(orgId: string, caller: MeetingCaller, meetingId: string, action: 'joined' | 'dismissed'): Promise<{ success: true }> {
+    const existing = await this.notices.findOne({ where: { meetingId, userId: caller.userId } });
+    if (existing) {
+      // Joining is the stronger signal — never downgrade it to "dismissed".
+      if (existing.action !== 'joined' && action === 'joined') {
+        existing.action = action;
+        await this.notices.save(existing);
+      }
+      return { success: true };
+    }
+    await this.notices.save(this.notices.create({ organizationId: orgId, meetingId, userId: caller.userId, action }));
+    return { success: true };
   }
 
   async get(orgId: string, caller: MeetingCaller, id: string) {
@@ -339,6 +367,7 @@ export class MeetingsService {
       await this.meetings.save(m);
       await this.notifyParticipants(m, caller.userId, 'meeting_started', `${name} started the meeting`, `"${m.title}" has started — join now.`);
     }
+    await this.markNotice(orgId, caller, m.id, 'joined').catch(() => undefined);
     await this.activity.record({ organizationId: orgId, actorId: caller.userId, actorName: name, action: 'meeting.joined', category: 'meetings', targetType: 'meeting', targetId: m.id, summary: `Joined meeting "${m.title}"` });
     return this.buildJoin(m, caller, name);
   }

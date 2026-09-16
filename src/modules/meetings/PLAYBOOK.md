@@ -155,3 +155,6 @@ top-centre card per meeting — "Live now" / "Starts in N min", title, host — 
 per browser for 24 h; no card inside the meeting you're already in; polling stops on
 401/403/404 (module disabled).
 
+| POST | `/meetings/:id/notice` | invitee | Records that this **user** joined or dismissed the join prompt (`meeting_notices`, migration `1788470000000`; unique per meeting+user). `incoming` filters these out, and `join` writes one automatically — so the prompt never returns for them on another device, after re-login, or after clearing browser storage. |
+
+**Join popup (frontend)**

@@ -20,6 +20,7 @@ import {
   documentRejectedEmail,
 } from '../../../bootstrap/mail/email-layout';
 import { RequestDocumentsDto, SubmitDocumentDto } from '../dto';
+import { NotifierService } from '../../notification/notifier.service';
 
 @Injectable()
 export class OnboardingService {
@@ -34,6 +35,7 @@ export class OnboardingService {
     private readonly users: Repository<UserEntity>,
     private readonly templates: DocumentTemplateService,
     private readonly mail: MailService,
+    private readonly notifier: NotifierService,
     private readonly config: ConfigService,
   ) {}
 
@@ -247,6 +249,24 @@ export class OnboardingService {
       category: 'onboarding.documents_requested',
       organizationId: org.id,
     });
+    // Same news in the in-app inbox (and pushed in real time); the email above is
+    // the richer branded one, so the notifier's generic email is suppressed.
+    await this.notifyOwner(org, 'onboarding_document_requested', 'Documents requested',
+      `${outstanding.length} document${outstanding.length === 1 ? '' : 's'} needed to finish setting up ${org.name}.`);
+  }
+
+  /** In-app (+ push) copy of an org-onboarding email, sent to the org owner. */
+  private async notifyOwner(org: OrganizationEntity, type: string, title: string, body: string): Promise<void> {
+    if (!org.ownerId) return;
+    await this.notifier.notify({
+      organizationId: org.id,
+      userId: org.ownerId,
+      type,
+      title,
+      body,
+      data: { actionUrl: '/onboarding' },
+      email: false, // the branded email is sent alongside
+    }).catch(() => undefined);
   }
 
   async adminList(orgId: string) {
@@ -394,6 +414,8 @@ export class OnboardingService {
         organizationId: org.id,
       });
     }
+    await this.notifyOwner(org, 'onboarding_document_verified', `Document approved: ${r.title}`,
+      summary.pending ? `${summary.pending} document${summary.pending === 1 ? '' : 's'} still pending.` : 'All requested documents are approved.');
 
     return { document: this.adminView(r), summary, orgStatus: org.status };
   }
@@ -426,6 +448,7 @@ export class OnboardingService {
         organizationId: org.id,
       });
     }
+    await this.notifyOwner(org, 'onboarding_document_rejected', `Document rejected: ${r.title}`, note);
     return { document: this.adminView(r) };
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -11,6 +11,7 @@ import { permMapAllows } from '../organization/guards/require-permission.decorat
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { notificationEmail } from '../../bootstrap/mail/email-layout';
 import { NotificationService } from './notification.service';
+import { PushService } from './push/push.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { OrgNotificationSettingService } from './org-notification-setting.service';
 import { emailMetaForType, isCriticalNotification } from './notification-catalog';
@@ -85,6 +86,7 @@ export class NotifierService {
     private readonly roles: Repository<RoleEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    @Optional() private readonly push?: PushService,
   ) {}
 
   /**
@@ -142,7 +144,7 @@ export class NotifierService {
         input.body ?? null,
       );
       if (prefOk && orgOk && !dup) {
-        await this.notifications.create({
+        const created = await this.notifications.create({
           organizationId: input.organizationId,
           userId: input.userId,
           actorId: input.actorId ?? null,
@@ -152,6 +154,18 @@ export class NotifierService {
           data: input.data ?? {},
           priority,
         });
+        // Real-time: tell the recipient's browsers/devices right away (badge, popups,
+        // desktop notification). Fire-and-forget — push must never delay or fail notify.
+        void this.push?.sendToUser(input.userId, {
+          kind: 'notification',
+          notificationId: created?.id,
+          type: input.type,
+          title: input.title,
+          body: input.body ?? '',
+          actionUrl: (input.data?.actionUrl as string) || '',
+          meetingId: input.data?.meetingId as string | undefined,
+          priority,
+        }).catch(() => undefined);
       }
     } catch (err) {
       this.logger.error(

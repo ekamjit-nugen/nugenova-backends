@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThan, Repository } from 'typeorm';
 import JSZip from 'jszip';
@@ -8,6 +8,7 @@ import { ActivityRetentionRunEntity } from './entities/activity-retention-run.en
 import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { NotifierService } from '../notification/notifier.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { newObjectId } from '../../bootstrap/database/object-id';
 
@@ -42,6 +43,7 @@ export class ActivityRetentionService {
     @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
     private readonly mail: MailService,
+    @Optional() private readonly notifier?: NotifierService,
   ) {}
 
   /** The org owner's user — via organizations.ownerId, falling back to the owner membership. */
@@ -171,6 +173,17 @@ export class ActivityRetentionService {
     }
     const stamp = new Date().toISOString().slice(0, 10);
     const filename = `activity-logs-${orgId}-${stamp}.zip`;
+    // In-app copy (and real-time push) so the owner sees it in Notifications too;
+    // the zip itself only goes by email.
+    await this.notifier?.notify({
+      organizationId: orgId,
+      userId: owner.id,
+      type: 'activity_backup_ready',
+      title: `Activity log backup — ${count} entries archived`,
+      body: `Entries older than ${RETENTION_DAYS} days were archived and emailed to you as a zip.`,
+      data: { actionUrl: '/activity' },
+      email: false, // the email with the attachment is sent below
+    }).catch(() => undefined);
     return this.mail.send({
       to: { email: owner.email, name: `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || undefined },
       subject: `Activity log backup — ${count} entries archived`,
