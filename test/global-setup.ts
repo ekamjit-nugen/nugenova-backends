@@ -87,6 +87,7 @@ import { ActivityRequirementOther1788410000000 } from '../src/bootstrap/database
 import { Recruitment1788430000000 } from '../src/bootstrap/database/migrations/1788430000000-Recruitment';
 import { RecruitmentLeadSubmissions1788440000000 } from '../src/bootstrap/database/migrations/1788440000000-RecruitmentLeadSubmissions';
 import { LeadClientSourceFollowups1788450000000 } from '../src/bootstrap/database/migrations/1788450000000-LeadClientSourceFollowups';
+import { MemberTitle1788480000000 } from '../src/bootstrap/database/migrations/1788480000000-MemberTitle';
 import { RECRUITMENT_ENTITIES } from '../src/modules/recruitment/entities';
 import { RequirementPriorityOther1788420000000 } from '../src/bootstrap/database/migrations/1788420000000-RequirementPriorityOther';
 import { Activity1788220000000 } from '../src/bootstrap/database/migrations/1788220000000-Activity';
@@ -347,6 +348,7 @@ module.exports = async function globalSetup(): Promise<void> {
       LeadClientSourceFollowups1788450000000,
       PushTokens1788460000000,
       MeetingNotices1788470000000,
+      MemberTitle1788480000000,
       Meetings1788200000000,
       MeetingRecurrence1788210000000,
       Activity1788220000000,
