@@ -126,6 +126,14 @@ JWT → OAuth token, no firebase-admin) as a **data-only** message
 Only pushed when the in-app row is actually created (prefs/org policy/dedupe/self-action
 respected); fire-and-forget; tokens FCM reports UNREGISTERED/invalid are deleted.
 
+**Every notification the app raises goes through `notify()`**, so the inbox, the email
+channel and FCM stay in lockstep. Two paths used to email the org owner WITHOUT an inbox
+row and now also file one (`email: false` — the richer branded email is still sent
+alongside): org-onboarding document **requested / approved / rejected**
+(`OnboardingService`) and the **activity-log retention backup** (`ActivityRetentionService`).
+Deliberately email-only: the login **OTP** (no session/user context yet) and the
+**email-change alert to the OLD address** (must reach an address the user may be losing).
+
 - **Tokens** — `push_tokens` (migration `1788460000000-PushTokens`): one row per token,
   re-registering moves it to the current user. `GET /push/config` (web config; `enabled`
   only with a complete service account + `FCM_WEB_API_KEY`/`FCM_WEB_APP_ID`/
