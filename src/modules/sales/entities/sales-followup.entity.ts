@@ -1,8 +1,11 @@
 import { Column, Entity, Index } from 'typeorm';
 import { PgBaseEntity } from '../../../bootstrap/database/pg-base.entity';
-import { FollowupStatus, SalesEntityType } from '../sales.constants';
+import { FollowupStatus, FollowupWaitingOn, SalesEntityType } from '../sales.constants';
 
-/** A scheduled follow-up / task on a lead/deal, with a due date + reminder. */
+/**
+ * A follow-up on a lead: what happened / what we sent (`note`), whose court the
+ * ball is in (`waitingOn`), and when we expect it done (`dueAt`), plus a reminder.
+ */
 @Entity('sales_followups')
 @Index('ix_sales_followups_entity', ['organizationId', 'entityType', 'entityId'])
 @Index('ix_sales_followups_due', ['organizationId', 'status', 'dueAt'])
@@ -21,6 +24,9 @@ export class SalesFollowupEntity extends PgBaseEntity {
 
   @Column({ type: 'text', nullable: true, default: null })
   note: string | null;
+
+  @Column({ type: 'varchar', nullable: true, default: null })
+  waitingOn: FollowupWaitingOn | null;
 
   @Column({ type: 'varchar', default: 'pending' })
   status: FollowupStatus;

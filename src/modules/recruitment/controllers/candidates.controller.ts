@@ -6,6 +6,7 @@ import { RecruitmentAccessGuard } from '../guards/recruitment-access.guard';
 import { CandidatesService, CandidateListQuery } from '../services/candidates.service';
 import { CvParseService } from '../services/cv-parse.service';
 import { ImportExportService } from '../services/import-export.service';
+import { MatchingService } from '../services/matching.service';
 import { callerFromRequest } from '../services/recruitment-caller';
 import {
   AddDocumentDto, BulkCandidateActionDto, CandidateFromCvDto, CreateCandidateActivityDto, CreateCandidateDto,
@@ -26,6 +27,7 @@ export class CandidatesController {
     private readonly candidates: CandidatesService,
     private readonly cv: CvParseService,
     private readonly io: ImportExportService,
+    private readonly matching: MatchingService,
   ) {}
 
   private ok<T>(data: T) { return { success: true, data }; }
@@ -40,6 +42,12 @@ export class CandidatesController {
   @RequirePermission(R, 'export')
   async export(@Req() req: any, @Query() q: CandidateListQuery) {
     return this.ok(await this.io.exportRows(callerFromRequest(req), q));
+  }
+
+  @Get('pool-counts')
+  @RequirePermission(R, 'view')
+  async poolCounts(@Req() req: any) {
+    return this.ok(await this.candidates.poolCounts(callerFromRequest(req)));
   }
 
   @Get('duplicates')
@@ -89,6 +97,12 @@ export class CandidatesController {
   @Get(':id')
   async get(@Req() req: any, @Param('id') id: string) {
     return this.ok(await this.candidates.get(callerFromRequest(req), id));
+  }
+
+  @Get(':id/suggestions')
+  @RequirePermission(R, 'view')
+  async suggestions(@Req() req: any, @Param('id') id: string) {
+    return this.ok(await this.matching.suggestionsFor(callerFromRequest(req), id));
   }
 
   @Patch(':id')

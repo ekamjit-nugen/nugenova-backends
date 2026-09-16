@@ -71,6 +71,13 @@ export class RecruitmentOpeningEntity extends PgBaseEntity {
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   scorecardTemplateId: string | null;
 
+  /** Raised from a Sales lead requirement (staffing demand). */
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  leadId: string | null;
+
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  requirementId: string | null;
+
   @Column({ type: 'timestamptz', nullable: true, default: null })
   openedAt: Date | null;
 

@@ -33,6 +33,8 @@ export const DOMAIN_EVENTS = {
   CANDIDATE_CREATED: 'candidate.created',
   APPLICATION_STAGE_CHANGED: 'application.stageChanged',
   CANDIDATE_HIRED: 'candidate.hired',
+  SUBMISSION_CREATED: 'submission.created',
+  SUBMISSION_STATUS_CHANGED: 'submission.statusChanged',
 } as const;
 
 /** The union of every wire name the platform emits. */
@@ -125,6 +127,18 @@ export interface CandidateHiredPayload extends DomainEventBase {
   openingId: string;
 }
 
+export interface SubmissionCreatedPayload extends DomainEventBase {
+  submissionId: string;
+  leadId: string;
+  requirementId: string | null;
+  candidateId: string;
+}
+
+export interface SubmissionStatusChangedPayload extends SubmissionCreatedPayload {
+  fromStatus: string;
+  toStatus: string;
+}
+
 /**
  * The compile-time map from an event NAME to its payload type. The
  * DomainEventsService `emit` is generic over this, so a mismatched payload is a
@@ -143,6 +157,8 @@ export interface DomainEventPayloads {
   [DOMAIN_EVENTS.CANDIDATE_CREATED]: CandidateCreatedPayload;
   [DOMAIN_EVENTS.APPLICATION_STAGE_CHANGED]: ApplicationStageChangedPayload;
   [DOMAIN_EVENTS.CANDIDATE_HIRED]: CandidateHiredPayload;
+  [DOMAIN_EVENTS.SUBMISSION_CREATED]: SubmissionCreatedPayload;
+  [DOMAIN_EVENTS.SUBMISSION_STATUS_CHANGED]: SubmissionStatusChangedPayload;
 }
 
 /** An emitted envelope as it reaches a listener (payload + resolved metadata). */

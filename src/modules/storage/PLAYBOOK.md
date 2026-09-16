@@ -198,3 +198,36 @@ Public (no login — org from the token):
   scenarios (folder+upload+overview, no-grant denial, grant, personal isolation,
   raw byte round-trip, public share, password share, cascade delete). Typechecked;
   run with `npm run test:e2e` against a provisioned Postgres.
+
+## Per-file read access (fix)
+
+`GET /drive/files/:id/raw` and `/pdf` used to check only that the file belonged to the
+caller's org — any member with Cloud Drive access could read any personal file by id,
+and `drive_grants` were recorded but never enforced on read. Both now go through
+`DriveService.assertCanReadFile(orgId, fileId, userId, isAdmin)`:
+
+| Case | Allowed |
+|---|---|
+| Team-scope file | any member with drive access (that is the shared drive) |
+| Personal file, owner | yes |
+| Personal file, granted directly (`drive_grants`, targetType `file`) | yes |
+| Personal file inside a granted folder (any ancestor) | yes |
+| Org owner/admin/platform admin | yes — they administer the drive |
+| Anyone else | **403** |
+
+Public share links keep working: they authorize by token and call with `userId = null`.
+
+## Cloud Drive ↔ discussion boards
+
+- **Copy FROM Drive onto a board** — `POST /discussion-boards/:boardId/assets/from-drive
+  { fileId }`. Checked **both ways**: the caller must be on the board *and* pass
+  `assertCanReadFile` for that drive file. The bytes are copied, so the drive original
+  and its grants are untouched and later edits there don't leak onto the board.
+- **Where the copy lives** — an image becomes a `board-asset` (publicly embeddable by
+  unguessable id, so `<img>` in a card works); anything else is tagged **`board-file`**
+  and is served only by `GET /discussion-boards/:boardId/files/:assetId/raw`
+  (JWT + participant check). A copied document is therefore readable by board members
+  only, never by URL alone.
+- **Copy link** — board files expose a copy-link button in both surfaces (Cloud Drive →
+  Board files, and the board's own Files panel) so a link can be pasted into a card.
+

@@ -163,6 +163,15 @@ git log -1 --oneline                    # what's currently deployed
 
 ## 4. Notes & gotchas
 
+- **Migrations also run on every container start.** The image's entrypoint
+  (`docker-entrypoint.sh`) applies pending migrations before the API process starts and
+  **refuses to start** if they fail (exit 1), so the schema can never lag the code — even
+  on a manual `docker compose up -d --build` that skips the deploy job. It retries a few
+  times (`MIGRATION_RETRIES`, default 5) for a database that is still waking up, and
+  `RUN_MIGRATIONS=false` skips it for a one-off container. With nothing pending it costs
+  a couple of seconds; the compose health check allows 90s at start for this.
+- **`DB_SSL=false`** (or `?sslmode=disable` in the URL) turns off TLS for a self-hosted /
+  containerised Postgres; Supabase and any other remote database keep SSL by default.
 - **Migrations run as a one-off container before the swap** — a failed migration
   fails the deploy and the currently-running container keeps serving.
 - **The image carries `ts-node` + `src/`** on purpose: the TypeORM CLI runs the

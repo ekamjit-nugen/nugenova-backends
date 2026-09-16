@@ -6,15 +6,17 @@ import { DomainEventsService } from '../../platform-events/domain-events.service
 import { DOMAIN_EVENTS } from '../../platform-events/domain-events';
 import {
   ApplicationStageEventEntity, CandidateActivityEntity, CandidateApplicationEntity, CandidateDocumentEntity, CandidateEntity,
-  CandidateOfferEntity, InterviewEntity, InterviewFeedbackEntity, RecruitmentOpeningEntity, RecruitmentStageEntity,
+  CandidateOfferEntity, InterviewEntity, InterviewFeedbackEntity, RecruitmentOpeningEntity, RecruitmentStageEntity, RecruitmentSubmissionEntity,
 } from '../entities';
-import { RECRUITMENT_NOTIFICATIONS } from '../recruitment.constants';
+import { CANDIDATE_POOLS, CandidatePool, RECRUITMENT_NOTIFICATIONS } from '../recruitment.constants';
 import { cleanList, normalizeEmail, normalizePhone, tidyName, toPrefixTsQuery } from '../recruitment.utils';
 import {
   AddDocumentDto, BulkCandidateActionDto, CandidateFieldsDto, CandidateFromCvDto, CreateCandidateActivityDto,
   CreateCandidateDto, MergeCandidatesDto, UpdateCandidateDto,
 } from '../dto';
 import { CvParseService } from './cv-parse.service';
+import { MatchingService } from './matching.service';
+import { SubmissionsService } from './submissions.service';
 import { PipelineService } from './pipeline.service';
 import { RecruitmentCaller, assertCan, can, toNum } from './recruitment-caller';
 
@@ -38,7 +40,20 @@ export interface CandidateListQuery {
   limit?: string | number;
   sort?: string;
   order?: string;
+  /** Talent-pool view: unassigned | pipeline | submitted | placed (default all). */
+  pool?: string;
 }
+
+/** SQL fragments for the candidate pools (alias `c`). */
+const ACTIVE_SUB_SQL = `'shortlisted','submitted','client_screening','client_interview','client_selected','on_hold'`;
+export const POOL_SQL: Record<Exclude<CandidatePool, 'all'>, string> = {
+  unassigned: `NOT EXISTS (SELECT 1 FROM candidate_applications pa WHERE pa.candidate_id = c.id AND pa.is_deleted = false AND pa.status IN ('active','hired'))
+    AND NOT EXISTS (SELECT 1 FROM recruitment_submissions ps WHERE ps.candidate_id = c.id AND ps.is_deleted = false AND ps.status IN (${ACTIVE_SUB_SQL},'onboarded'))`,
+  pipeline: `EXISTS (SELECT 1 FROM candidate_applications pa WHERE pa.candidate_id = c.id AND pa.is_deleted = false AND pa.status = 'active')`,
+  submitted: `EXISTS (SELECT 1 FROM recruitment_submissions ps WHERE ps.candidate_id = c.id AND ps.is_deleted = false AND ps.status IN (${ACTIVE_SUB_SQL}))`,
+  placed: `(EXISTS (SELECT 1 FROM candidate_applications pa WHERE pa.candidate_id = c.id AND pa.is_deleted = false AND pa.status = 'hired')
+    OR EXISTS (SELECT 1 FROM recruitment_submissions ps WHERE ps.candidate_id = c.id AND ps.is_deleted = false AND ps.status = 'onboarded'))`,
+};
 
 const PROFILE_FIELDS = [
   'fullName', 'currentLocation', 'preferredLocations', 'willingToRelocate', 'totalExpMonths', 'relevantExpMonths',
@@ -71,6 +86,8 @@ export class CandidatesService {
     @InjectRepository(CandidateOfferEntity) private readonly offers: Repository<CandidateOfferEntity>,
     private readonly pipeline: PipelineService,
     private readonly cv: CvParseService,
+    private readonly submissions: SubmissionsService,
+    private readonly matching: MatchingService,
     @Optional() private readonly domainEvents?: DomainEventsService,
   ) {}
 
@@ -102,6 +119,10 @@ export class CandidatesService {
     else qb.andWhere(`c.status <> 'archived'`);
     if (f.source) qb.andWhere('c.source IN (:...sources)', { sources: String(f.source).split(',') });
     if (f.ownerId) qb.andWhere('c.owner_id = :ownerId', { ownerId: f.ownerId });
+    if (f.pool && f.pool !== 'all') {
+      if (!(CANDIDATE_POOLS as readonly string[]).includes(f.pool)) throw new BadRequestException('Unknown pool');
+      qb.andWhere(POOL_SQL[f.pool as Exclude<CandidatePool, 'all'>]);
+    }
 
     const q = f.q?.trim();
     if (q) {
@@ -174,18 +195,35 @@ export class CandidatesService {
     qb.addOrderBy('c.id', 'ASC');
 
     const [rows, total] = await qb.skip((page - 1) * limit).take(limit).getManyAndCount();
-    const items = await this.decorate(caller, rows);
+    const items = await this.decorate(caller, rows, f.pool === 'unassigned');
     return { items, total, page, limit };
   }
 
+  /** Candidate counts per pool (tabs on the candidates page). */
+  async poolCounts(caller: RecruitmentCaller) {
+    assertCan(caller, 'view');
+    const base = () => this.candidates.createQueryBuilder('c')
+      .where(`c.organization_id = :orgId AND c.is_deleted = false AND c.status <> 'archived'`, { orgId: caller.orgId });
+    const [all, unassigned, pipeline, submitted, placed] = await Promise.all([
+      base().getCount(),
+      base().andWhere(POOL_SQL.unassigned).getCount(),
+      base().andWhere(POOL_SQL.pipeline).getCount(),
+      base().andWhere(POOL_SQL.submitted).getCount(),
+      base().andWhere(POOL_SQL.placed).getCount(),
+    ]);
+    return { all, unassigned, pipeline, submitted, placed };
+  }
+
   /** Attach application summaries, owner names and the primary CV to list rows. */
-  private async decorate(caller: RecruitmentCaller, rows: CandidateEntity[]) {
+  private async decorate(caller: RecruitmentCaller, rows: CandidateEntity[], withSuggestions = false) {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
-    const [apps, docs, stages] = await Promise.all([
+    const [apps, docs, stages, subs, suggestions] = await Promise.all([
       this.applications.find({ where: { organizationId: caller.orgId, candidateId: In(ids), isDeleted: false }, order: { stageChangedAt: 'DESC' } }),
       this.documents.find({ where: { organizationId: caller.orgId, candidateId: In(ids), kind: 'resume', isPrimary: true, isDeleted: false } }),
       this.pipeline.ensureStages(caller.orgId),
+      this.submissions.summariesForCandidates(caller.orgId, ids),
+      withSuggestions ? this.matching.topSuggestionFor(caller.orgId, rows) : Promise.resolve(new Map()),
     ]);
     const openingIds = [...new Set(apps.map((a) => a.openingId))];
     const openings = openingIds.length ? await this.openings.find({ where: { id: In(openingIds) } }) : [];
@@ -202,6 +240,8 @@ export class CandidatesService {
         stageId: a.stageId, stageName: stageById.get(a.stageId)?.name ?? '—', stageColor: stageById.get(a.stageId)?.color ?? null,
         stageKind: stageById.get(a.stageId)?.kind ?? 'active', status: a.status, stageChangedAt: a.stageChangedAt,
       })),
+      submissions: subs.filter((x) => x.candidateId === c.id),
+      topSuggestion: suggestions.get(c.id) ?? null,
     }));
   }
 
@@ -274,7 +314,7 @@ export class CandidatesService {
         const canSeeAll = full || !!mine;
         return {
           ...i,
-          openingTitle: openingById.get(i.openingId)?.title ?? 'Opening',
+          openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Opening'),
           interviewers: i.interviewerIds.map((uid) => ({ id: uid, name: names.get(uid) ?? 'Member', submitted: fb.some((f) => f.interviewerId === uid) })),
           feedback: (canSeeAll ? fb : []).map((f) => ({ ...f, overallRating: toNum(f.overallRating), interviewerName: names.get(f.interviewerId) ?? 'Member' })),
         };
@@ -282,6 +322,7 @@ export class CandidatesService {
       offers: offers.map((o) => ({ ...o, offeredCtc: showCtc ? toNum(o.offeredCtc) : null, openingTitle: openingById.get(o.openingId)?.title ?? 'Opening' })),
       activities,
       duplicates: full ? (await this.cv.findDuplicates(caller.orgId, { name: c.fullName, excludeId: c.id })) : [],
+      submissions: full ? await this.submissions.list(caller, { candidateId: c.id }) : [],
     };
   }
 
@@ -416,6 +457,7 @@ export class CandidatesService {
     await this.candidates.save(c);
     await this.applications.update({ organizationId: caller.orgId, candidateId: id, isDeleted: false }, { isDeleted: true });
     await this.interviews.update({ organizationId: caller.orgId, candidateId: id, isDeleted: false }, { isDeleted: true });
+    await this.submissions.removeForCandidate(caller.orgId, id);
     this.pipeline.audit(caller, 'recruitment.candidate_deleted', `Deleted candidate ${c.fullName}`, { type: 'candidate', id });
     return { success: true as const };
   }
@@ -451,6 +493,10 @@ export class CandidatesService {
     if (dto.openingId) {
       const exists = await this.applications.findOne({ where: { organizationId: caller.orgId, candidateId, openingId: dto.openingId, isDeleted: false } });
       if (!exists) await this.pipeline.createApplication(caller, { candidateId, openingId: dto.openingId, stageId: dto.stageId });
+    }
+    if (dto.submitTo) {
+      await this.submissions.create(caller, { leadId: dto.submitTo.leadId, requirementId: dto.submitTo.requirementId, candidateId, note: 'Added from CV upload' })
+        .catch((err) => { if (!(err instanceof ConflictException)) throw err; });
     }
     const c = await this.pipeline.requireCandidate(caller.orgId, candidateId);
     return { created, candidate: this.view(c, caller) };
@@ -496,6 +542,14 @@ export class CandidatesService {
       }
       await m.update(InterviewEntity, { organizationId: caller.orgId, candidateId: dup.id }, { candidateId: primary.id });
       await m.update(CandidateOfferEntity, { organizationId: caller.orgId, candidateId: dup.id }, { candidateId: primary.id });
+      // Client submissions: keep the primary's when both were put forward for the same lead requirement.
+      const dupSubs = await m.find(RecruitmentSubmissionEntity, { where: { organizationId: caller.orgId, candidateId: dup.id, isDeleted: false } });
+      const primarySubs = await m.find(RecruitmentSubmissionEntity, { where: { organizationId: caller.orgId, candidateId: primary.id, isDeleted: false } });
+      for (const sb of dupSubs) {
+        if (primarySubs.some((p) => p.leadId === sb.leadId && p.requirementId === sb.requirementId)) sb.isDeleted = true;
+        else sb.candidateId = primary.id;
+        await m.save(sb);
+      }
       await m.update(CandidateActivityEntity, { organizationId: caller.orgId, candidateId: dup.id }, { candidateId: primary.id });
       const primaryHasResume = await m.count(CandidateDocumentEntity, { where: { candidateId: primary.id, kind: 'resume', isPrimary: true, isDeleted: false } });
       if (primaryHasResume) {
@@ -656,6 +710,21 @@ export class CandidatesService {
     a.isDeleted = true;
     await this.activities.save(a);
     return { success: true as const };
+  }
+
+  /**
+   * Importer duplicate check. `merged` = the stored candidate this row IS (email /
+   * phone match, or a contact-less name match); `possible` = same name but
+   * different contact details — flagged for a human to review, never auto-merged.
+   */
+  async matchForImport(orgId: string, probe: { email: string | null; phone: string | null; name: string | null }) {
+    const matches = await this.cv.findDuplicates(orgId, probe);
+    const merged = matches.find((m) => m.matchedOn.includes('email'))
+      ?? matches.find((m) => m.matchedOn.includes('phone'))
+      ?? (!probe.email && !probe.phone ? matches.find((m) => m.matchedOn.includes('name') && !m.email && !m.phone) : undefined)
+      ?? null;
+    const possible = merged ? null : matches.find((m) => m.matchedOn.includes('name')) ?? null;
+    return { merged, possible };
   }
 
   /** Used by the importer: find the stored candidate a normalised probe refers to. */

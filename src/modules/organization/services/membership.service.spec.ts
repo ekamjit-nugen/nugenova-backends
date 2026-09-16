@@ -142,6 +142,20 @@ describe('MembershipService (unit, no DB)', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('updateMember: refuses to assign the owner role to another member', async () => {
+    membershipRepo.findOne.mockResolvedValue({ id: 'm1', organizationId: 'org-1', role: 'employee', roleId: 'emp', departmentId: null });
+    roleRepo.findOne.mockResolvedValue({ id: 'owner-role', name: 'owner', tier: 'owner', isSystem: true, departmentId: null, isDeleted: false });
+    await expect(service.updateMember('org-1', 'm1', { roleId: 'owner-role' })).rejects.toThrow(/owner role can’t be assigned/);
+    expect(membershipRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("updateMember: refuses to move the owner into another role", async () => {
+    membershipRepo.findOne.mockResolvedValue({ id: 'm-owner', organizationId: 'org-1', role: 'owner', roleId: 'owner-role', departmentId: null });
+    roleRepo.findOne.mockResolvedValue({ id: 'hr-role', name: 'hr', departmentId: null, isDeleted: false });
+    await expect(service.updateMember('org-1', 'm-owner', { roleId: 'hr-role' })).rejects.toThrow(/owner's role can't be changed/);
+    expect(membershipRepo.save).not.toHaveBeenCalled();
+  });
+
   it('refuses to remove the organization owner', async () => {
     membershipRepo.findOne.mockResolvedValue({ id: 'm-owner', role: 'owner', organizationId: 'org-1' });
     await expect(service.removeMember('org-1', 'm-owner')).rejects.toBeInstanceOf(

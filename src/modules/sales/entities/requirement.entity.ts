@@ -68,6 +68,10 @@ export class RequirementEntity extends PgBaseEntity {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   neededBy: Date | null;
 
+  /** Headcount for staffing requirements (effort stays in quantity × unit). */
+  @Column({ type: 'int', nullable: true, default: null })
+  positions: number | null;
+
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   assignedTo: string | null;
 

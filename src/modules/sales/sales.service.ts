@@ -12,9 +12,10 @@ import { RequirementEntity } from './entities/requirement.entity';
 import { QuoteEntity, QuoteItem } from './entities/quote.entity';
 import { LeadDocumentEntity } from './entities/lead-document.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { ClientEntity } from '../clients/entities/client.entity';
 import { NotifierService } from '../notification/notifier.service';
 import { ClientsService } from '../clients/clients.service';
-import { DEFAULT_STAGES, SalesEntityType } from './sales.constants';
+import { DEFAULT_STAGES, LEAD_SOURCE_FIELDS, LeadSource, SalesEntityType } from './sales.constants';
 import {
   CreateAccountDto, CreateActivityDto, CreateContactDto, CreateFollowupDto, CreateLeadDto, CreateLeadDocumentDto,
   CreateQuoteDto, CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto,
@@ -39,6 +40,7 @@ export class SalesService {
     @InjectRepository(QuoteEntity) private readonly quotes: Repository<QuoteEntity>,
     @InjectRepository(LeadDocumentEntity) private readonly leadDocuments: Repository<LeadDocumentEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
+    @InjectRepository(ClientEntity) private readonly clientRecords: Repository<ClientEntity>,
     private readonly clientsService: ClientsService,
     @Optional() private readonly notifier?: NotifierService,
   ) {}
@@ -112,13 +114,25 @@ export class SalesService {
   }
 
   async createLead(caller: SalesCaller, dto: CreateLeadDto): Promise<LeadEntity> {
+    const source = dto.source ?? 'other';
+    const client = await this.findSourceClient(caller.orgId, source, dto.sourceClientId);
+    // A client-sourced lead needs no separate contact: fall back to the client's record.
+    const contact = client?.primaryContact ?? null;
+    const name = dto.name?.trim() || contact?.name?.trim() || (client ? client.displayName || client.companyName : '');
+    if (!name) throw new BadRequestException('Contact name is required');
     const stages = await this.ensureStages(caller.orgId);
     const stageId = dto.stageId || stages.find((s) => s.isDefault)?.id || stages[0]?.id || null;
     const lead = await this.leads.save(this.leads.create({
       organizationId: caller.orgId,
-      name: dto.name.trim(), company: dto.company ?? null, email: dto.email?.toLowerCase() ?? null, phone: dto.phone ?? null,
-      title: dto.title ?? null, source: (dto.source ?? 'other') as any,
-      sourceDetail: (dto.source ?? 'other') === 'other' ? (dto.sourceDetail?.trim() || null) : null,
+      name,
+      company: dto.company ?? (client ? client.displayName || client.companyName : null),
+      email: (dto.email ?? contact?.email)?.toLowerCase() ?? null,
+      phone: dto.phone ?? contact?.phone ?? null,
+      title: dto.title ?? contact?.designation ?? null,
+      source: source as any,
+      sourceDetail: source === 'other' ? (dto.sourceDetail?.trim() || null) : null,
+      sourceClientId: client?.id ?? null,
+      sourceMeta: this.cleanSourceMeta(source, dto.sourceMeta),
       stageId, status: 'open',
       value: dto.value != null ? String(dto.value) : null, currency: dto.currency?.toUpperCase() ?? 'INR',
       requirement: dto.requirement ?? null,
@@ -132,6 +146,7 @@ export class SalesService {
   async updateLead(caller: SalesCaller, id: string, dto: UpdateLeadDto): Promise<LeadEntity> {
     const l = await this.requireLead(caller.orgId, id);
     const prevAssignee = l.assignedTo;
+    const prevSource = l.source;
     if (dto.name !== undefined) l.name = dto.name.trim();
     if (dto.company !== undefined) l.company = dto.company;
     if (dto.email !== undefined) l.email = dto.email?.toLowerCase() ?? null;
@@ -139,6 +154,14 @@ export class SalesService {
     if (dto.title !== undefined) l.title = dto.title;
     if (dto.sourceDetail !== undefined) l.sourceDetail = dto.sourceDetail?.trim() || null;
     if (dto.source !== undefined) { l.source = dto.source as any; if (dto.source !== 'other') l.sourceDetail = null; }
+    if (dto.source !== undefined || dto.sourceMeta !== undefined) {
+      // A new source starts with a clean slate unless its details come along in the same update.
+      const meta = dto.sourceMeta !== undefined ? dto.sourceMeta : dto.source !== undefined && dto.source !== prevSource ? null : l.sourceMeta;
+      l.sourceMeta = this.cleanSourceMeta(l.source, meta);
+    }
+    if (dto.source !== undefined || dto.sourceClientId !== undefined) {
+      l.sourceClientId = await this.resolveSourceClient(caller.orgId, l.source, dto.sourceClientId !== undefined ? dto.sourceClientId : l.sourceClientId);
+    }
     if (dto.status !== undefined) l.status = dto.status as any;
     if (dto.value !== undefined) l.value = dto.value != null ? String(dto.value) : null;
     if (dto.currency !== undefined) l.currency = dto.currency.toUpperCase();
@@ -242,7 +265,7 @@ export class SalesService {
     return {
       id: r.id, entityType: r.entityType, entityId: r.entityId, title: r.title, details: r.details, category: r.category,
       role: r.role, skills: r.skills ?? [], priority: r.priority, priorityDetail: r.priorityDetail, status: r.status, unit: r.unit, unitDetail: r.unitDetail,
-      quantity, rate, amount: quantity * rate, neededBy: r.neededBy, assignedTo: r.assignedTo, createdAt: r.createdAt,
+      quantity, rate, amount: quantity * rate, neededBy: r.neededBy, assignedTo: r.assignedTo, positions: r.positions ?? null, createdAt: r.createdAt,
     };
   }
 
@@ -273,7 +296,8 @@ export class SalesService {
       status: dto.status ?? 'open', unit: dto.unit ?? 'hours',
       unitDetail: (dto.unit ?? 'hours') === 'other' ? (dto.unitDetail?.trim() || null) : null,
       quantity: String(dto.quantity ?? 0), rate: String(dto.rate ?? 0),
-      neededBy: dto.neededBy ? new Date(dto.neededBy) : null, assignedTo: dto.assignedTo ?? null, createdBy: caller.userId, isDeleted: false,
+      neededBy: dto.neededBy ? new Date(dto.neededBy) : null, assignedTo: dto.assignedTo ?? null, positions: dto.positions ?? null,
+      createdBy: caller.userId, isDeleted: false,
     }));
     return this.requirementView(r);
   }
@@ -295,6 +319,7 @@ export class SalesService {
     if (dto.rate !== undefined) r.rate = String(dto.rate);
     if (dto.neededBy !== undefined) r.neededBy = dto.neededBy ? new Date(dto.neededBy) : null;
     if (dto.assignedTo !== undefined) r.assignedTo = dto.assignedTo || null;
+    if (dto.positions !== undefined) r.positions = dto.positions ?? null;
     return this.requirementView(await this.requirements.save(r));
   }
 
@@ -305,20 +330,33 @@ export class SalesService {
 
   async addFollowup(caller: SalesCaller, entityType: SalesEntityType, entityId: string, dto: CreateFollowupDto) {
     const f = await this.followups.save(this.followups.create({
-      organizationId: caller.orgId, entityType, entityId, dueAt: new Date(dto.dueAt), note: dto.note ?? null,
+      organizationId: caller.orgId, entityType, entityId, dueAt: new Date(dto.dueAt), note: dto.note?.trim() || null,
+      waitingOn: (dto.waitingOn as any) ?? null,
       status: 'pending', assignedTo: dto.assignedTo ?? caller.userId, createdBy: caller.userId, isDeleted: false,
     }));
-    if (entityType === 'lead') await this.leads.update({ id: entityId, organizationId: caller.orgId }, { nextFollowUpAt: f.dueAt });
+    if (entityType === 'lead') await this.syncNextFollowUp(caller.orgId, entityId);
     return f;
   }
 
   async updateFollowup(orgId: string, id: string, dto: UpdateFollowupDto) {
     const f = await this.followups.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
     if (!f) throw new NotFoundException('Follow-up not found');
-    if (dto.status !== undefined) { f.status = dto.status as any; if (dto.status === 'done') f.completedAt = new Date(); }
+    if (dto.status !== undefined) { f.status = dto.status as any; f.completedAt = dto.status === 'done' ? (f.completedAt ?? new Date()) : null; }
     if (dto.dueAt !== undefined) f.dueAt = new Date(dto.dueAt);
-    if (dto.note !== undefined) f.note = dto.note;
-    return this.followups.save(f);
+    if (dto.note !== undefined) f.note = dto.note?.trim() || null;
+    if (dto.waitingOn !== undefined) f.waitingOn = (dto.waitingOn as any) || null;
+    const saved = await this.followups.save(f);
+    if (f.entityType === 'lead') await this.syncNextFollowUp(orgId, f.entityId);
+    return saved;
+  }
+
+  /** A lead's `nextFollowUpAt` = its soonest still-open follow-up (null when none). */
+  private async syncNextFollowUp(orgId: string, leadId: string) {
+    const next = await this.followups.findOne({
+      where: { organizationId: orgId, entityType: 'lead', entityId: leadId, isDeleted: false, status: In(['pending', 'snoozed']) },
+      order: { dueAt: 'ASC' },
+    });
+    await this.leads.update({ id: leadId, organizationId: orgId }, { nextFollowUpAt: next?.dueAt ?? null });
   }
 
   /** Open follow-ups for the org (optionally only the caller's), soonest first. */
@@ -619,11 +657,17 @@ export class SalesService {
     const rows = await this.leads.find({ where: { organizationId: orgId, isDeleted: false }, order: { createdAt: 'DESC' } });
     const stages = await this.ensureStages(orgId);
     const stageName = new Map(stages.map((s) => [s.id, s.name]));
+    const clientName = await this.clientNames(orgId, rows.map((l) => l.sourceClientId));
+    const sourceLabel = (l: LeadEntity) =>
+      l.source === 'other' && l.sourceDetail ? l.sourceDetail
+        : l.source === 'client' && l.sourceClientId && clientName.has(l.sourceClientId) ? `Client: ${clientName.get(l.sourceClientId)}`
+          : l.sourceMeta?.[LEAD_SOURCE_FIELDS[l.source]?.[0] ?? ''] ? `${l.source}: ${l.sourceMeta[LEAD_SOURCE_FIELDS[l.source][0]]}`
+            : l.source;
     const header = ['Name', 'Company', 'Email', 'Phone', 'Title', 'Source', 'Stage', 'Status', 'Value', 'Currency', 'Tags', 'Created'];
     const lines = [header.join(',')];
     for (const l of rows) {
       lines.push([
-        l.name, l.company, l.email, l.phone, l.title, l.source === 'other' && l.sourceDetail ? l.sourceDetail : l.source, l.stageId ? stageName.get(l.stageId) ?? '' : '',
+        l.name, l.company, l.email, l.phone, l.title, sourceLabel(l), l.stageId ? stageName.get(l.stageId) ?? '' : '',
         l.status, l.value ?? '', l.currency, (l.tags ?? []).join('; '), new Date(l.createdAt).toISOString().slice(0, 10),
       ].map((c) => this.csvCell(c)).join(','));
     }
@@ -665,9 +709,52 @@ export class SalesService {
 
   private async withNames(rows: LeadEntity[]) {
     const ids = [...new Set(rows.map((l) => l.assignedTo).filter(Boolean) as string[])];
-    const users = ids.length ? await this.users.find({ where: { id: In(ids) } }) : [];
+    const [users, clientName] = await Promise.all([
+      ids.length ? this.users.find({ where: { id: In(ids) } }) : Promise.resolve([] as UserEntity[]),
+      this.clientNames(rows[0]?.organizationId, rows.map((l) => l.sourceClientId)),
+    ]);
     const byId = new Map(users.map((u) => [u.id, nameOf(u)]));
-    return rows.map((l) => ({ ...l, value: l.value != null ? Number(l.value) : null, assignedToName: l.assignedTo ? byId.get(l.assignedTo) ?? null : null }));
+    return rows.map((l) => ({
+      ...l, value: l.value != null ? Number(l.value) : null,
+      assignedToName: l.assignedTo ? byId.get(l.assignedTo) ?? null : null,
+      sourceClientName: l.sourceClientId ? clientName.get(l.sourceClientId) ?? null : null,
+    }));
+  }
+
+  /** Display names for the given client ids within the org (archived/deleted clients keep their name). */
+  private async clientNames(orgId: string | undefined, ids: Array<string | null>): Promise<Map<string, string>> {
+    const unique = [...new Set(ids.filter(Boolean) as string[])];
+    if (!orgId || !unique.length) return new Map();
+    const rows = await this.clientRecords.find({ where: { id: In(unique), organizationId: orgId }, select: { id: true, companyName: true, displayName: true } });
+    return new Map(rows.map((c) => [c.id, c.displayName || c.companyName]));
+  }
+
+  /**
+   * A lead sourced from a client must point at a live client in the same org;
+   * any other source carries no client. Returns the id to store.
+   */
+  /** Keep only the detail fields that belong to `source`, trimmed and capped; null when nothing is left. */
+  private cleanSourceMeta(source: string, meta: Record<string, unknown> | null | undefined): Record<string, string> | null {
+    const allowed = LEAD_SOURCE_FIELDS[source as LeadSource] ?? [];
+    if (!meta || typeof meta !== 'object' || !allowed.length) return null;
+    const out: Record<string, string> = {};
+    for (const key of allowed) {
+      const v = meta[key];
+      if (typeof v === 'string' && v.trim()) out[key] = v.trim().slice(0, 300);
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  private async resolveSourceClient(orgId: string, source: string, sourceClientId: string | null | undefined): Promise<string | null> {
+    return (await this.findSourceClient(orgId, source, sourceClientId))?.id ?? null;
+  }
+
+  private async findSourceClient(orgId: string, source: string, sourceClientId: string | null | undefined): Promise<ClientEntity | null> {
+    if (source !== 'client') return null;
+    if (!sourceClientId) throw new BadRequestException('Choose the client this lead came from');
+    const client = await this.clientRecords.findOne({ where: { id: sourceClientId, organizationId: orgId, isDeleted: false } });
+    if (!client) throw new BadRequestException('Client not found');
+    return client;
   }
 
   private notifyAssignment(orgId: string, userId: string, lead: LeadEntity, actorId: string) {

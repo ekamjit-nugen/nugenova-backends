@@ -10,6 +10,8 @@ export { ScorecardTemplateEntity } from './scorecard-template.entity';
 export { CandidateOfferEntity } from './candidate-offer.entity';
 export { CandidateActivityEntity } from './candidate-activity.entity';
 export { RecruitmentSettingsEntity } from './recruitment-settings.entity';
+export { RecruitmentSubmissionEntity } from './recruitment-submission.entity';
+export { SubmissionEventEntity } from './submission-event.entity';
 
 import { RecruitmentOpeningEntity } from './recruitment-opening.entity';
 import { RecruitmentStageEntity } from './recruitment-stage.entity';
@@ -23,6 +25,8 @@ import { ScorecardTemplateEntity } from './scorecard-template.entity';
 import { CandidateOfferEntity } from './candidate-offer.entity';
 import { CandidateActivityEntity } from './candidate-activity.entity';
 import { RecruitmentSettingsEntity } from './recruitment-settings.entity';
+import { RecruitmentSubmissionEntity } from './recruitment-submission.entity';
+import { SubmissionEventEntity } from './submission-event.entity';
 
 /** Every entity the module owns (for TypeOrmModule.forFeature + test setup). */
 export const RECRUITMENT_ENTITIES = [
@@ -38,4 +42,6 @@ export const RECRUITMENT_ENTITIES = [
   CandidateOfferEntity,
   CandidateActivityEntity,
   RecruitmentSettingsEntity,
+  RecruitmentSubmissionEntity,
+  SubmissionEventEntity,
 ];

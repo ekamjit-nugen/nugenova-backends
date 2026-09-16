@@ -4,12 +4,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
 
 import { MeetingsService } from '../../meetings/meetings.service';
+import { LeadEntity } from '../../sales/entities/lead.entity';
 import {
-  CandidateDocumentEntity, CandidateEntity, InterviewEntity, InterviewFeedbackEntity, RecruitmentOpeningEntity,
+  CandidateDocumentEntity, CandidateEntity, InterviewEntity, InterviewFeedbackEntity, RecruitmentOpeningEntity, RecruitmentSubmissionEntity,
 } from '../entities';
 import { RECRUITMENT_NOTIFICATIONS } from '../recruitment.constants';
 import { CreateInterviewDto, SubmitFeedbackDto, UpdateInterviewDto } from '../dto';
 import { PipelineService } from './pipeline.service';
+import { SubmissionsService } from './submissions.service';
 import { RecruitmentCaller, assertCan, can, toNum } from './recruitment-caller';
 
 const RECOMMENDATION_LABEL: Record<string, string> = { strong_yes: 'Strong yes', yes: 'Yes', no: 'No', strong_no: 'Strong no' };
@@ -31,7 +33,10 @@ export class InterviewsService {
     @InjectRepository(CandidateEntity) private readonly candidates: Repository<CandidateEntity>,
     @InjectRepository(RecruitmentOpeningEntity) private readonly openings: Repository<RecruitmentOpeningEntity>,
     @InjectRepository(CandidateDocumentEntity) private readonly documents: Repository<CandidateDocumentEntity>,
+    @InjectRepository(RecruitmentSubmissionEntity) private readonly submissionRepo: Repository<RecruitmentSubmissionEntity>,
+    @InjectRepository(LeadEntity) private readonly leads: Repository<LeadEntity>,
     private readonly pipeline: PipelineService,
+    private readonly submissionsService: SubmissionsService,
     @Optional() private readonly meetings?: MeetingsService,
   ) {}
 
@@ -73,16 +78,52 @@ export class InterviewsService {
     return this.decorate(caller, rows);
   }
 
+  /** What the round is for: the opening title, or the client for a lead submission. */
+  private async targetLabels(rows: InterviewEntity[]): Promise<Map<string, { title: string; leadId: string | null }>> {
+    const openingIds = [...new Set(rows.map((r) => r.openingId).filter((x): x is string => !!x))];
+    const subIds = [...new Set(rows.map((r) => r.submissionId).filter((x): x is string => !!x))];
+    const [openings, subs] = await Promise.all([
+      openingIds.length ? this.openings.find({ where: { id: In(openingIds) } }) : Promise.resolve([] as RecruitmentOpeningEntity[]),
+      subIds.length ? this.submissionRepo.find({ where: { id: In(subIds) } }) : Promise.resolve([] as RecruitmentSubmissionEntity[]),
+    ]);
+    const leads = subs.length ? await this.leads.find({ where: { id: In([...new Set(subs.map((x) => x.leadId))]) } }) : [];
+    const oById = new Map(openings.map((o) => [o.id, o]));
+    const sById = new Map(subs.map((x) => [x.id, x]));
+    const lById = new Map(leads.map((l) => [l.id, l]));
+    const out = new Map<string, { title: string; leadId: string | null }>();
+    for (const r of rows) {
+      if (r.submissionId) {
+        const lead = lById.get(sById.get(r.submissionId)?.leadId ?? '');
+        out.set(r.id, { title: `Client: ${lead ? lead.company || lead.name : 'lead'}`, leadId: lead?.id ?? null });
+      } else {
+        out.set(r.id, { title: (r.openingId && oById.get(r.openingId)?.title) || 'Opening', leadId: null });
+      }
+    }
+    return out;
+  }
+
+  /** Client rounds for a set of submissions (lead workspace). */
+  async listForSubmissions(caller: RecruitmentCaller, submissionIds: string[]) {
+    if (!submissionIds.length) return [];
+    const rows = await this.interviews.find({ where: { organizationId: caller.orgId, submissionId: In(submissionIds), isDeleted: false }, order: { scheduledAt: 'DESC' } });
+    const decorated = await this.decorate(caller, rows);
+    const fb = rows.length ? await this.feedback.find({ where: { organizationId: caller.orgId, interviewId: In(rows.map((r) => r.id)) } }) : [];
+    const names = await this.pipeline.userNames(fb.map((f) => f.interviewerId));
+    return decorated.map((i) => ({
+      ...i,
+      feedback: fb.filter((f) => f.interviewId === i.id).map((f) => ({ ...f, overallRating: toNum(f.overallRating), interviewerName: names.get(f.interviewerId) ?? 'Member' })),
+    }));
+  }
+
   private async decorate(caller: RecruitmentCaller, rows: InterviewEntity[]) {
     if (!rows.length) return [];
-    const [cands, openings, fb] = await Promise.all([
+    const [cands, labels, fb] = await Promise.all([
       this.candidates.find({ where: { id: In([...new Set(rows.map((r) => r.candidateId))]) } }),
-      this.openings.find({ where: { id: In([...new Set(rows.map((r) => r.openingId))]) } }),
+      this.targetLabels(rows),
       this.feedback.find({ where: { organizationId: caller.orgId, interviewId: In(rows.map((r) => r.id)) } }),
     ]);
     const names = await this.pipeline.userNames(rows.flatMap((r) => r.interviewerIds));
     const candById = new Map(cands.map((c) => [c.id, c]));
-    const openingById = new Map(openings.map((o) => [o.id, o]));
     return rows.map((i) => {
       const mine = fb.filter((f) => f.interviewId === i.id);
       const c = candById.get(i.candidateId);
@@ -90,7 +131,8 @@ export class InterviewsService {
         ...i,
         endsAt: this.endOf(i),
         candidate: c ? { id: c.id, fullName: c.fullName, currentDesignation: c.currentDesignation, currentCompany: c.currentCompany, totalExpMonths: c.totalExpMonths } : null,
-        openingTitle: openingById.get(i.openingId)?.title ?? 'Opening',
+        openingTitle: labels.get(i.id)?.title ?? 'Opening',
+        leadId: labels.get(i.id)?.leadId ?? null,
         interviewers: i.interviewerIds.map((uid) => ({ id: uid, name: names.get(uid) ?? 'Member', submitted: mine.some((f) => f.interviewerId === uid) })),
         feedbackCount: mine.length,
         myFeedbackSubmitted: mine.some((f) => f.interviewerId === caller.userId),
@@ -127,21 +169,27 @@ export class InterviewsService {
   // ── write ──────────────────────────────────────────────────────────────────────
 
   async create(caller: RecruitmentCaller, dto: CreateInterviewDto) {
-    const app = await this.pipeline.requireApplication(caller.orgId, dto.applicationId);
-    const [candidate, opening] = await Promise.all([
-      this.pipeline.requireCandidate(caller.orgId, app.candidateId),
-      this.pipeline.requireOpening(caller.orgId, app.openingId),
-    ]);
+    if (!dto.applicationId === !dto.submissionId) throw new BadRequestException('Choose either an opening application or a client submission');
+    const app = dto.applicationId ? await this.pipeline.requireApplication(caller.orgId, dto.applicationId) : null;
+    const sub = dto.submissionId ? await this.submissionsService.requireSubmission(caller.orgId, dto.submissionId) : null;
+    if (sub && ['onboarded', 'client_rejected', 'withdrawn'].includes(sub.status)) {
+      throw new BadRequestException('This submission is closed — reopen it before scheduling a client round');
+    }
+    const candidate = await this.pipeline.requireCandidate(caller.orgId, (app?.candidateId ?? sub?.candidateId)!);
+    const opening = app ? await this.pipeline.requireOpening(caller.orgId, app.openingId) : null;
+    const lead = sub ? await this.submissionsService.requireLead(caller.orgId, sub.leadId) : null;
+    const targetTitle = opening ? opening.title : `Client: ${lead!.company || lead!.name}`;
     const interviewerIds = [...new Set(dto.interviewerIds)];
     if (!interviewerIds.length) throw new BadRequestException('Add at least one interviewer');
     await this.pipeline.assertMembers(caller.orgId, interviewerIds);
     const scheduledAt = new Date(dto.scheduledAt);
     const criteria = dto.criteria?.length
       ? [...new Set(dto.criteria.map((c) => c.trim()).filter(Boolean))]
-      : await this.pipeline.scorecardCriteria(caller.orgId, dto.scorecardTemplateId ?? opening.scorecardTemplateId);
+      : await this.pipeline.scorecardCriteria(caller.orgId, dto.scorecardTemplateId ?? opening?.scorecardTemplateId);
 
     const i = this.interviews.create({
-      organizationId: caller.orgId, applicationId: app.id, candidateId: candidate.id, openingId: opening.id,
+      organizationId: caller.orgId, applicationId: app?.id ?? null, submissionId: sub?.id ?? null, kind: sub ? 'client' : 'internal',
+      candidateId: candidate.id, openingId: opening?.id ?? null,
       roundName: dto.roundName.trim(), type: dto.type ?? 'video', scheduledAt, durationMin: dto.durationMin ?? 60,
       interviewerIds, location: dto.location?.trim() || null, meetingLink: dto.meetingLink ?? null, meetingId: null,
       criteria, notes: dto.notes?.trim() || null, status: 'scheduled', createdBy: caller.userId, isDeleted: false,
@@ -151,7 +199,7 @@ export class InterviewsService {
       try {
         const m = await this.meetings.create(caller.orgId, { userId: caller.userId, isAdmin: caller.isAdmin }, {
           title: `Interview: ${candidate.fullName} — ${i.roundName}`.slice(0, 200),
-          description: `${opening.title} · ${i.roundName}`,
+          description: `${targetTitle} · ${i.roundName}`,
           scheduledStart: scheduledAt.toISOString(),
           scheduledEnd: this.endOf(i).toISOString(),
           participantIds: interviewerIds.filter((id) => id !== caller.userId),
@@ -164,13 +212,14 @@ export class InterviewsService {
     const saved = await this.interviews.save(i);
 
     const when = scheduledAt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
-    await this.pipeline.logActivity(caller.orgId, candidate.id, 'interview', `Scheduled ${saved.roundName} (${saved.type}) for ${when} IST`, {
-      applicationId: app.id, actorId: caller.userId, meta: { interviewId: saved.id },
+    await this.pipeline.logActivity(caller.orgId, candidate.id, 'interview', `Scheduled ${sub ? 'client ' : ''}${saved.roundName} (${saved.type}) for ${when} IST${sub ? ` — ${targetTitle.replace(/^Client: /, '')}` : ''}`, {
+      applicationId: app?.id ?? null, actorId: caller.userId, meta: { interviewId: saved.id, submissionId: sub?.id ?? null },
     });
+    if (sub) await this.submissionsService.advanceTo(caller, sub.id, 'client_interview', `${saved.roundName} scheduled for ${when} IST`);
     for (const uid of interviewerIds) {
       this.pipeline.notify({
         organizationId: caller.orgId, userId: uid, actorId: caller.userId, type: RECRUITMENT_NOTIFICATIONS.INTERVIEW_SCHEDULED,
-        title: `Interview: ${candidate.fullName} — ${saved.roundName}`, body: `${opening.title} · ${when} IST`,
+        title: `Interview: ${candidate.fullName} — ${saved.roundName}`, body: `${targetTitle} · ${when} IST`,
         data: { actionUrl: `/recruitment/interviews/${saved.id}`, interviewId: saved.id },
       });
     }
@@ -281,17 +330,18 @@ export class InterviewsService {
 
     if (i.status === 'scheduled') { i.status = 'completed'; await this.interviews.save(i); }
 
-    const [candidate, app, opening] = await Promise.all([
+    const [candidate, app, opening, sub] = await Promise.all([
       this.candidates.findOne({ where: { id: i.candidateId } }),
-      this.pipeline.requireApplication(caller.orgId, i.applicationId).catch(() => null),
-      this.openings.findOne({ where: { id: i.openingId } }),
+      i.applicationId ? this.pipeline.requireApplication(caller.orgId, i.applicationId).catch(() => null) : Promise.resolve(null),
+      i.openingId ? this.openings.findOne({ where: { id: i.openingId } }) : Promise.resolve(null),
+      i.submissionId ? this.submissionRepo.findOne({ where: { id: i.submissionId } }) : Promise.resolve(null),
     ]);
     const label = RECOMMENDATION_LABEL[saved.recommendation] ?? saved.recommendation;
     if (candidate) {
       await this.pipeline.logActivity(caller.orgId, candidate.id, 'feedback',
         `${existing ? 'Updated' : 'Submitted'} ${i.roundName} feedback: ${label}${overall != null ? ` (${overall}/5)` : ''}`,
         { applicationId: i.applicationId, actorId: caller.userId, meta: { interviewId: i.id, recommendation: saved.recommendation, overall } });
-      const recipients = new Set([app?.ownerId, candidate.ownerId, opening?.hiringManagerId, i.createdBy].filter((x): x is string => !!x && x !== caller.userId));
+      const recipients = new Set([app?.ownerId, sub?.ownerId, candidate.ownerId, opening?.hiringManagerId, i.createdBy].filter((x): x is string => !!x && x !== caller.userId));
       for (const uid of recipients) {
         this.pipeline.notify({
           organizationId: caller.orgId, userId: uid, actorId: caller.userId, type: RECRUITMENT_NOTIFICATIONS.FEEDBACK_SUBMITTED,
