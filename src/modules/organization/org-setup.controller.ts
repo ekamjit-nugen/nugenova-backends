@@ -180,6 +180,17 @@ export class OrgSetupController {
     return { success: true, data };
   }
 
+  /**
+   * Titles already used in this org — the Directory's title autocomplete.
+   * MUST stay above `members/:id`, or that route swallows "titles" as an id.
+   */
+  @Get('members/titles')
+  @RequirePermission('employees', 'view')
+  async memberTitles(@Req() req: any) {
+    const data = await this.members.titlesInUse(this.orgId(req));
+    return { success: true, data };
+  }
+
   @Get('members/:id')
   @RequirePermission('employees', 'view')
   async getMember(@Param('id') id: string, @Req() req: any) {

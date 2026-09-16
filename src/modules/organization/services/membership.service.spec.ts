@@ -162,4 +162,64 @@ describe('MembershipService (unit, no DB)', () => {
       ConflictException,
     );
   });
+
+  describe('member titles', () => {
+    const membership = (over: any = {}) => ({
+      id: 'mem-1', organizationId: 'org-1', userId: 'user-1',
+      role: 'employee', roleId: 'role-1', departmentId: null, status: 'active',
+      title: null, ...over,
+    });
+
+    it('sets the org title, trimming what was typed', async () => {
+      membershipRepo.findOne.mockResolvedValue(membership());
+      userRepo.findOne.mockResolvedValue({ id: 'user-1', jobTitle: null });
+      const view = await service.updateMember('org-1', 'mem-1', { title: '  Senior Engineer  ' });
+      expect(membershipRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Senior Engineer' }),
+      );
+      expect(view.title).toBe('Senior Engineer');
+    });
+
+    it('clears the org title when blank, leaving the profile job title alone', async () => {
+      membershipRepo.findOne.mockResolvedValue(membership({ title: 'Director' }));
+      userRepo.findOne.mockResolvedValue({ id: 'user-1', jobTitle: 'Product Designer' });
+      const view = await service.updateMember('org-1', 'mem-1', { title: '   ' });
+      expect(membershipRepo.save).toHaveBeenCalledWith(expect.objectContaining({ title: null }));
+      // The org title is gone; the person's own title is untouched and reported
+      // separately, so the Directory can show it as a placeholder.
+      expect(view.title).toBeNull();
+      expect(view.jobTitle).toBe('Product Designer');
+    });
+
+    it('leaves the title alone when the patch does not mention it', async () => {
+      membershipRepo.findOne.mockResolvedValue(membership({ title: 'Director' }));
+      userRepo.findOne.mockResolvedValue({ id: 'user-1', jobTitle: null });
+      const view = await service.updateMember('org-1', 'mem-1', { status: 'active' });
+      expect(view.title).toBe('Director');
+    });
+
+    it('suggests titles in use — org titles plus profile fallbacks, de-duplicated', async () => {
+      membershipRepo.find.mockResolvedValue([
+        membership({ id: 'm1', title: 'Senior Engineer' }),
+        membership({ id: 'm2', title: 'senior engineer' }), // same title, different case
+        membership({ id: 'm3', title: '  ', userId: 'user-3' }), // falls back
+        membership({ id: 'm4', title: null, userId: 'user-4' }), // falls back
+      ]);
+      userRepo.find.mockResolvedValue([
+        { id: 'user-3', jobTitle: 'Product Designer' },
+        { id: 'user-4', jobTitle: null },
+      ]);
+      const titles = await service.titlesInUse('org-1');
+      expect(titles).toEqual(['Product Designer', 'Senior Engineer']);
+      expect(userRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: expect.anything() } }),
+      );
+    });
+
+    it('returns nothing when no one has a title', async () => {
+      membershipRepo.find.mockResolvedValue([membership({ userId: null })]);
+      await expect(service.titlesInUse('org-1')).resolves.toEqual([]);
+      expect(userRepo.find).not.toHaveBeenCalled();
+    });
+  });
 });

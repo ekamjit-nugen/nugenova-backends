@@ -34,6 +34,13 @@ export interface MemberView {
   // Profile + HR attributes (for the member detail view).
   avatar: string | null;
   phoneNumber: string | null;
+  /**
+   * Job title in THIS org, or null when none is set. Deliberately NOT merged
+   * with `jobTitle`: a caller has to be able to tell an org title from the
+   * person's own profile title (the Directory shows the latter as placeholder
+   * text, so editing the field can't silently promote it into an org title).
+   */
+  title: string | null;
   jobTitle: string | null;
   location: string | null;
   timezone: string | null;
@@ -316,6 +323,35 @@ export class MembershipService {
     await this.onboardingRepo.save(onboarding);
   }
 
+  /**
+   * Titles already in use in this org, for the Directory's title autocomplete.
+   * Suggestions keep spellings consistent ("Senior Engineer" vs "Sr. Engineer")
+   * without forcing a managed list — a genuinely new title can still be typed.
+   * Same staff scope as {@link list}, so students/guardians never contribute.
+   */
+  async titlesInUse(orgId: string): Promise<string[]> {
+    const memberships = await this.membershipRepo.find({
+      where: staffScope({ organizationId: orgId }),
+    });
+    const titles = memberships.map((m) => m.title);
+    // Members with no org title fall back to their own profile job title, so
+    // those count as "in use" too.
+    const needFallback = memberships
+      .filter((m) => !m.title?.trim() && m.userId)
+      .map((m) => m.userId as string);
+    if (needFallback.length) {
+      const users = await this.userRepo.find({ where: { id: In(needFallback) } });
+      titles.push(...users.map((u) => u.jobTitle));
+    }
+    // De-duplicate case-insensitively, keeping the first spelling seen.
+    const seen = new Map<string, string>();
+    for (const raw of titles) {
+      const t = (raw ?? '').trim();
+      if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  }
+
   async updateMember(
     orgId: string,
     membershipId: string,
@@ -325,6 +361,7 @@ export class MembershipService {
       departmentId?: string | null;
       status?: 'active' | 'deactivated';
       probationMonths?: number | null;
+      title?: string | null;
     },
     actorUserId?: string,
   ): Promise<MemberView> {
@@ -348,6 +385,10 @@ export class MembershipService {
         m.deactivatedBy = null;
       }
     }
+
+    // Blank (or whitespace) clears the org title, which drops the member back to
+    // whatever they set as their own job title in their profile.
+    if (patch.title !== undefined) m.title = patch.title?.trim() || null;
 
     // Apply the department first so role↔department validation sees the new dept.
     if (patch.departmentId !== undefined) m.departmentId = patch.departmentId || null;
@@ -502,6 +543,7 @@ export class MembershipService {
       joinedAt: m.joinedAt,
       avatar: user?.avatar ?? null,
       phoneNumber: user?.phoneNumber ?? null,
+      title: m.title ?? null,
       jobTitle: user?.jobTitle ?? null,
       location: user?.location ?? null,
       timezone: user?.timezone ?? null,
