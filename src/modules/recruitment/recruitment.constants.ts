@@ -44,7 +44,7 @@ export const OFFER_STATUSES = ['draft', 'sent', 'accepted', 'declined', 'revoked
 export type OfferStatus = (typeof OFFER_STATUSES)[number];
 
 export const CANDIDATE_ACTIVITY_TYPES = [
-  'note', 'call', 'email', 'whatsapp', 'stage_change', 'interview', 'feedback', 'offer', 'document', 'system',
+  'note', 'call', 'email', 'whatsapp', 'stage_change', 'interview', 'feedback', 'offer', 'document', 'submission', 'system',
 ] as const;
 export type CandidateActivityType = (typeof CANDIDATE_ACTIVITY_TYPES)[number];
 /** Activity types a person may log by hand (the rest are written by the system). */
@@ -94,4 +94,10 @@ export const RECRUITMENT_NOTIFICATIONS = {
   FEEDBACK_DUE: 'recruitment_feedback_due',
   FEEDBACK_SUBMITTED: 'recruitment_feedback_submitted',
   OFFER_ACCEPTED: 'recruitment_offer_accepted',
+  SUBMISSION_CREATED: 'recruitment_submission_created',
+  SUBMISSION_DECISION: 'recruitment_submission_decision',
 } as const;
+
+/** Candidate pools for the talent-pool views. */
+export const CANDIDATE_POOLS = ['all', 'unassigned', 'pipeline', 'submitted', 'placed'] as const;
+export type CandidatePool = (typeof CANDIDATE_POOLS)[number];

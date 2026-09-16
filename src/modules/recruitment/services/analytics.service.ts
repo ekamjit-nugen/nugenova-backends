@@ -4,9 +4,12 @@ import { In, MoreThan, Repository } from 'typeorm';
 
 import {
   ApplicationStageEventEntity, CandidateApplicationEntity, CandidateEntity, CandidateOfferEntity, InterviewEntity,
-  RecruitmentOpeningEntity,
+  RecruitmentOpeningEntity, RecruitmentSubmissionEntity,
 } from '../entities';
 import { InterviewsService } from './interviews.service';
+import { MatchingService } from './matching.service';
+import { POOL_SQL } from './candidates.service';
+import { ACTIVE_SUBMISSION_STATUSES } from '../submission-rules';
 import { PipelineService } from './pipeline.service';
 import { RecruitmentCaller } from './recruitment-caller';
 
@@ -29,6 +32,8 @@ export class RecruitmentAnalyticsService {
     @InjectRepository(CandidateOfferEntity) private readonly offers: Repository<CandidateOfferEntity>,
     private readonly pipeline: PipelineService,
     private readonly interviewsService: InterviewsService,
+    private readonly matching: MatchingService,
+    @InjectRepository(RecruitmentSubmissionEntity) private readonly submissions: Repository<RecruitmentSubmissionEntity>,
   ) {}
 
   async overview(caller: RecruitmentCaller, f: { openingId?: string; days?: string }) {
@@ -51,6 +56,13 @@ export class RecruitmentAnalyticsService {
       this.interviewsService.upcoming(orgId, 7),
       this.interviewsService.pendingFeedbackCount(orgId),
       this.offers.find({ where: { organizationId: orgId, isDeleted: false } }),
+    ]);
+    const [talentPool, poolMatches, subRows] = await Promise.all([
+      this.candidates.createQueryBuilder('c')
+        .where(`c.organization_id = :orgId AND c.is_deleted = false AND c.status <> 'archived'`, { orgId })
+        .andWhere(POOL_SQL.unassigned).getCount(),
+      this.matching.poolMatchCount(orgId),
+      this.submissions.find({ where: { organizationId: orgId, isDeleted: false }, select: { id: true, status: true, decidedAt: true, leadId: true } }),
     ]);
     const appIds = apps.map((a) => a.id);
     const events = appIds.length ? await this.events.find({ where: { organizationId: orgId, applicationId: In(appIds) }, order: { at: 'ASC' } }) : [];
@@ -207,7 +219,13 @@ export class RecruitmentAnalyticsService {
         })(),
         hires: recentHires.length,
         timeToHireDays,
+        talentPool,
+        poolMatches,
+        activeSubmissions: subRows.filter((x) => ACTIVE_SUBMISSION_STATUSES.includes(x.status)).length,
+        placements: subRows.filter((x) => x.status === 'onboarded' && x.decidedAt && new Date(x.decidedAt).getTime() >= since.getTime()).length,
+        clientSelections: subRows.filter((x) => (x.status === 'client_selected' || x.status === 'onboarded') && x.decidedAt && new Date(x.decidedAt).getTime() >= since.getTime()).length,
       },
+      submissionsByStatus: subRows.reduce<Record<string, number>>((acc, x) => { acc[x.status] = (acc[x.status] ?? 0) + 1; return acc; }, {}),
       funnel,
       timeInStage,
       bySource,
@@ -218,7 +236,7 @@ export class RecruitmentAnalyticsService {
       stale,
       upcomingInterviews: upcoming.slice(0, 10).map((i) => ({
         id: i.id, roundName: i.roundName, scheduledAt: i.scheduledAt, candidateId: i.candidateId,
-        candidateName: upcomingNames.get(i.candidateId) ?? 'Candidate', openingTitle: openingById.get(i.openingId)?.title ?? 'Opening',
+        candidateName: upcomingNames.get(i.candidateId) ?? 'Candidate', openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Opening'),
       })),
     };
   }

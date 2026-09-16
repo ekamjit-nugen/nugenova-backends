@@ -62,6 +62,20 @@ Cutshort file names (`Cutshort-<Name>-…`) set `source = cutshort`.
 The frontend maps columns (auto-detected for the legacy sheet) and sends rows; all clean-up is server-side (`recruitment.utils.ts`, unit-tested):
 "—"/N/A → blank · "5+ years" → 60 months · "Immediate Joiner" → 0 days/immediate · `[Role] Source: X; Notice period not mentioned` → opening + source detail (boilerplate dropped, real notes become a timeline note) · company date ranges stripped · sheet name → opening (created if missing) · people merged across sheets by email → phone → contact-less exact name (blanks filled, larger experience kept) · `dryRun: true` previews without writing.
 
+Optional `Lead` / `Requirement` columns shortlist the row against a Sales lead (matched by company/name and requirement role/title); rows with no opening and no lead land in the **talent pool**. The preview flags duplicates per row (`duplicate: { kind: existing|file, action: merged|flagged, matchedOn }`): email/phone matches merge, a name-only match is **flagged** (created separately — review and merge), repeats inside the file merge into the earlier row. Summary adds `submissions`, `talentPool`, `duplicatesMerged`, `duplicatesFlagged`. The downloadable template (`buildImportTemplate` in the frontend) has Candidates / Instructions / Reference sheets.
+
+## Client leads & submissions (migration `1788440000000-RecruitmentLeadSubmissions`)
+
+A **Sales lead** is client demand; its `sales_requirements` (now with `positions`) are the roles. Recruiters work leads from Recruitment without touching the Sales timeline (commit 977cac7 keeps system rows out of `sales_activities`).
+
+- `recruitment_submissions` — one row per candidate × lead × requirement (partial unique index; 409 `DUPLICATE_SUBMISSION`). A candidate can run in **many leads at once, each with its own status**. Status machine (`submission-rules.ts`, unit-tested): `shortlisted → submitted → client_screening → client_interview → client_selected → onboarded`, side exits `on_hold`, `client_rejected`/`withdrawn` (reason required). Every change writes `recruitment_submission_events`, a candidate timeline entry and an org audit row; lead owner is notified.
+- First submission moves the requirement `open → in_progress`; onboarded count ≥ `positions` marks it `fulfilled`.
+- Client interviews: `POST /interviews { submissionId }` creates a `kind: 'client'` round and advances the submission to `client_interview`.
+- Money: lead value, requirement rate/amount, submission cost and margin are hidden without `recruitment:edit`.
+- An opening can be raised from a requirement (`openings.lead_id/requirement_id`, 409 `OPENING_EXISTS`).
+- **Talent pool** (`POOL_SQL`): `unassigned` (no active application or submission), `pipeline`, `submitted`, `placed`.
+- **Matching** (`matching.ts`, deterministic): skills 60 (aliases), experience 20, notice vs needed-by 10, location 10; blacklisted/archived excluded; each result carries `reasons[]`. Suggestions ≥ 40, dashboard "pool matches" ≥ 60.
+
 ## Pipeline behaviour
 
 - Moving to a `rejected` stage **requires a reason**; hired/rejected set status + timestamps; every move writes a stage event + timeline entry and notifies the application owner, candidate owner and hiring manager.
@@ -78,20 +92,25 @@ The frontend maps columns (auto-detected for the legacy sheet) and sends rows; a
 - Interviews: `GET/POST /interviews`, `GET/PATCH/DELETE /interviews/:id`, `POST /interviews/:id/feedback`.
 - Offers: `GET/POST /offers`, `PATCH/DELETE /offers/:id`, `POST /offers/:id/status`, `POST /offers/:id/handoff`.
 - Settings: `GET /stages`, `POST /stages`, `PUT /stages/order`, `PATCH/DELETE /stages/:id`, `GET/PATCH /settings`, `GET/POST /scorecards`, `PUT/DELETE /scorecards/:id`, `GET /people`.
+- Talent pool & matching: `GET /candidates?pool=`, `GET /candidates/pool-counts`, `GET /candidates/:id/suggestions`, `GET /matches?openingId=|requirementId=`.
+- Client leads: `GET /leads`, `GET/PATCH /leads/:id`, `POST /leads/:id/move`, `POST/PATCH/DELETE /leads/:id/requirements[/:reqId]`, `POST /leads/:id/requirements/:reqId/opening`, `POST /leads/:id/followups`, `PATCH /leads/:id/followups/:followupId`, `POST /leads/:id/notes`, `POST/DELETE /leads/:id/documents[/:docId]`.
+- Submissions: `GET/POST /submissions`, `POST /submissions/bulk`, `GET/PATCH/DELETE /submissions/:id`, `PATCH /submissions/:id/move`.
 - Dashboard: `GET /analytics?days=&openingId=` — totals, funnel (reached per stage), time in stage, sources, rejection reasons, 6-month trend, openings health, recruiter activity, stale candidates, upcoming interviews.
 
 ## Notifications & events
 
-`recruitment_candidate_assigned`, `recruitment_stage_changed`, `recruitment_interview_scheduled`, `recruitment_interview_cancelled`, `recruitment_feedback_due`, `recruitment_feedback_submitted`, `recruitment_offer_accepted` (catalogued, per-user controllable). Domain events: `candidate.created`, `application.stageChanged`, `candidate.hired`.
+`recruitment_candidate_assigned`, `recruitment_stage_changed`, `recruitment_interview_scheduled`, `recruitment_interview_cancelled`, `recruitment_feedback_due`, `recruitment_feedback_submitted`, `recruitment_offer_accepted`, `recruitment_submission_created`, `recruitment_submission_decision` (catalogued, per-user controllable). Domain events: `candidate.created`, `application.stageChanged`, `candidate.hired`, `submission.created`, `submission.statusChanged`.
 
 ## Frontend
 
-`/recruitment` dashboard · `/recruitment/candidates` (search incl. CV text, filters, bulk actions, Excel export) · `/recruitment/candidates/[id]` (profile, pipeline stepper, interviews + scorecards, offers + handoff, documents, timeline, AI auto-fill, merge duplicates) · `/recruitment/candidates/upload` (bulk AI CV review queue) · `/recruitment/candidates/import` (Excel wizard with preview) · `/recruitment/openings` + `/[id]` (drag-and-drop board, list, JD) · `/recruitment/interviews` + `/[id]` (panel view, scorecard) · `/recruitment/offers` · `/recruitment/settings`.
+`/recruitment` dashboard · `/recruitment/candidates` (search incl. CV text, filters, bulk actions, Excel export) · `/recruitment/candidates/[id]` (profile, pipeline stepper, interviews + scorecards, offers + handoff, documents, timeline, AI auto-fill, merge duplicates) · `/recruitment/candidates/upload` (bulk AI CV review queue) · `/recruitment/candidates/import` (Excel wizard with preview) · `/recruitment/openings` + `/[id]` (drag-and-drop board, list, JD) · `/recruitment/interviews` + `/[id]` (panel view, scorecard) · `/recruitment/offers` · `/recruitment/settings` · `/recruitment/leads` (client leads list) + `/[id]` (workspace: stage, owner, requirements with a submission mini-board, find matches / submit / create opening, candidates, client interviews, follow-ups, notes, documents, timeline).
+Candidates list has pool tabs and per-lead statuses; profiles have a **Client leads** tab and "Where they fit" suggestions; Upload CVs lets you choose Talent pool / Opening / Client lead and flags duplicates (existing by name/email/phone, and within the batch) before saving. Sample CVs live in `public/samples/` (regenerate with `node scripts/generate-recruitment-samples.mjs`). The Sales lead page shows a read-only Candidates panel.
 
 ## Tests
 
-- Unit: `recruitment.utils.spec.ts` (normalisers), `services/cv-parse.service.spec.ts` (AI path, fallback, org isolation).
+- Unit: `recruitment.utils.spec.ts` (normalisers), `services/cv-parse.service.spec.ts` (AI path, fallback, org isolation), `matching.spec.ts` (scorer).
 - e2e: `features/recruitment.feature` — search, duplicate guard, permission + cross-org isolation, CTC masking, rejection reason + stage trail, interviewer-only access + scorecards, Excel import dry-run/commit/merge, CV upload → parse → create → full-text search, offer → hired → opening filled + analytics, merge.
+- e2e: `features/recruitment-leads.feature` — sample CVs parse, submit + duplicate 409, full client path fills the requirement, client interview advances, 403/404/masking, talent pool, suggestions & matches, opening from requirement, import with Lead column, lead workspace edits, one candidate in 4 leads at different stages, import preview duplicate flags.
 
 ## Operations
 

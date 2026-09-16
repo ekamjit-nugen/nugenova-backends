@@ -111,8 +111,13 @@ export async function extractText(
     try {
       // Lazy require so the pdf-parse module is only loaded when actually needed.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const pdfParse = require('pdf-parse') as (b: Buffer) => Promise<{ text: string }>;
-      const parsed = await pdfParse(buffer);
+      const pdfParse = require('pdf-parse') as (b: Buffer | Uint8Array) => Promise<{ text: string }>;
+      // Hand pdf.js a Uint8Array created in the current JS realm: its `instanceof
+      // Uint8Array` check fails for a Buffer from another realm (e.g. under Jest's
+      // VM sandbox) and it then misreads the xref table ("bad XRef entry").
+      const bytes = new Uint8Array(buffer.length);
+      bytes.set(buffer);
+      const parsed = await pdfParse(bytes);
       const text = (parsed?.text || '').trim();
       if (!text) return { status: 'empty', text: '', reason: 'pdf had no extractable text' };
       return { status: 'ok', text };

@@ -8,6 +8,7 @@ import {
   MANUAL_ACTIVITY_TYPES, NOTICE_STATUSES, OFFER_STATUSES, OPENING_STATUSES, PRIORITIES, RECOMMENDATIONS, STAGE_KINDS,
   WORK_MODES,
 } from '../recruitment.constants';
+import { BILL_UNITS, SUBMISSION_STATUSES } from '../submission-rules';
 
 const list = (arr: readonly string[]) => arr as unknown as string[];
 
@@ -80,6 +81,11 @@ export class CreateCandidateDto extends CandidateFieldsDto {
 
 export class UpdateCandidateDto extends CandidateFieldsDto {}
 
+export class SubmitTargetDto {
+  @IsString() @MaxLength(24) leadId: string;
+  @IsOptional() @IsString() @MaxLength(24) requirementId?: string;
+}
+
 /** Create from a parsed CV — or attach the CV to an existing candidate. */
 export class CandidateFromCvDto {
   @IsString() @MaxLength(24) fileId: string;
@@ -91,6 +97,8 @@ export class CandidateFromCvDto {
   @IsOptional() @IsString() @MaxLength(24) openingId?: string;
   @IsOptional() @IsString() @MaxLength(24) stageId?: string;
   @IsOptional() @IsObject() parsedJson?: Record<string, unknown>;
+  /** Shortlist straight against a client lead (optionally a requirement). */
+  @IsOptional() @ValidateNested() @Type(() => SubmitTargetDto) submitTo?: SubmitTargetDto;
 }
 
 export class ParseCvDto {
@@ -216,7 +224,10 @@ export class ScorecardTemplateDto {
 // ── interviews ─────────────────────────────────────────────────────────────────
 
 export class CreateInterviewDto {
-  @IsString() @MaxLength(24) applicationId: string;
+  /** Internal round: the opening application. */
+  @IsOptional() @IsString() @MaxLength(24) applicationId?: string;
+  /** Client round: the lead submission. Exactly one of applicationId / submissionId. */
+  @IsOptional() @IsString() @MaxLength(24) submissionId?: string;
   @IsString() @MaxLength(120) roundName: string;
   @IsOptional() @IsIn(list(INTERVIEW_TYPES)) type?: string;
   @IsDateString() scheduledAt: string;
@@ -308,6 +319,10 @@ export class ImportRowDto {
   @IsOptional() @IsString() @MaxLength(100) expectedCtc?: string;
   @IsOptional() @IsString() @MaxLength(100) stage?: string;
   @IsOptional() @IsString() @MaxLength(300) linkedinUrl?: string;
+  /** Client lead name or company — the candidate is shortlisted against it. */
+  @IsOptional() @IsString() @MaxLength(200) lead?: string;
+  /** Requirement title / role within that lead. */
+  @IsOptional() @IsString() @MaxLength(300) requirement?: string;
   /** 1-based row number in the source sheet, echoed back in results. */
   @IsOptional() @IsInt() rowNumber?: number;
   @IsOptional() @IsString() @MaxLength(200) sheet?: string;
@@ -321,3 +336,106 @@ export class ImportCandidatesDto {
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
 }
 
+
+// ── client-lead submissions ────────────────────────────────────────────────────
+
+const submissionStatuses = list(SUBMISSION_STATUSES);
+
+export class CreateSubmissionDto {
+  @IsString() @MaxLength(24) leadId: string;
+  @IsOptional() @IsString() @MaxLength(24) requirementId?: string;
+  @IsString() @MaxLength(24) candidateId: string;
+  @IsOptional() @IsString() @MaxLength(24) applicationId?: string;
+  @IsOptional() @IsIn(['shortlisted', 'submitted']) status?: string;
+  @IsOptional() @IsNumber() @Min(0) billRate?: number;
+  @IsOptional() @IsIn(list(BILL_UNITS)) billUnit?: string;
+  @IsOptional() @IsNumber() @Min(0) costRate?: number;
+  @IsOptional() @IsString() @MaxLength(8) currency?: string;
+  @IsOptional() @IsDateString() availableFrom?: string;
+  @IsOptional() @IsDateString() proposedStart?: string;
+  @IsOptional() @IsString() @MaxLength(24) sharedDocumentId?: string;
+  @IsOptional() @IsString() @MaxLength(24) ownerId?: string;
+  @IsOptional() @IsString() @MaxLength(4000) note?: string;
+}
+
+export class BulkSubmissionDto {
+  @IsString() @MaxLength(24) leadId: string;
+  @IsOptional() @IsString() @MaxLength(24) requirementId?: string;
+  @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) @MaxLength(24, { each: true }) candidateIds: string[];
+  @IsOptional() @IsString() @MaxLength(4000) note?: string;
+}
+
+export class UpdateSubmissionDto {
+  @IsOptional() @IsNumber() @Min(0) billRate?: number | null;
+  @IsOptional() @IsIn(list(BILL_UNITS)) billUnit?: string;
+  @IsOptional() @IsNumber() @Min(0) costRate?: number | null;
+  @IsOptional() @IsString() @MaxLength(8) currency?: string;
+  @IsOptional() @IsDateString() availableFrom?: string | null;
+  @IsOptional() @IsDateString() proposedStart?: string | null;
+  @IsOptional() @IsString() @MaxLength(24) sharedDocumentId?: string | null;
+  @IsOptional() @IsString() @MaxLength(8000) clientFeedback?: string | null;
+  @IsOptional() @IsString() @MaxLength(24) ownerId?: string | null;
+}
+
+export class MoveSubmissionDto {
+  @IsIn(submissionStatuses) status: string;
+  @IsOptional() @IsString() @MaxLength(2000) note?: string;
+  @IsOptional() @IsString() @MaxLength(300) reason?: string;
+  @IsOptional() @IsString() @MaxLength(8000) clientFeedback?: string;
+}
+
+// ── lead workspace (wraps Sales) ───────────────────────────────────────────────
+
+export class UpdateLeadWorkspaceDto {
+  @IsOptional() @IsString() @MaxLength(200) name?: string;
+  @IsOptional() @IsString() @MaxLength(200) company?: string | null;
+  @IsOptional() @IsString() @MaxLength(254) email?: string | null;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string | null;
+  @IsOptional() @IsString() @MaxLength(120) title?: string | null;
+  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string | null;
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
+  @IsOptional() @IsString() @MaxLength(8000) notes?: string | null;
+  @IsOptional() @IsString() @MaxLength(100000) requirement?: string | null;
+  @IsOptional() @IsNumber() @Min(0) value?: number | null;
+  @IsOptional() @IsIn(['open', 'won', 'lost', 'on_hold']) status?: string;
+}
+
+export class LeadRequirementDto {
+  @IsOptional() @IsString() @MaxLength(300) title?: string;
+  @IsOptional() @IsString() @MaxLength(8000) details?: string | null;
+  @IsOptional() @IsString() @MaxLength(120) role?: string | null;
+  @IsOptional() @IsArray() @ArrayMaxSize(60) @IsString({ each: true }) @MaxLength(60, { each: true }) skills?: string[];
+  @IsOptional() @IsIn(['must_have', 'should_have', 'could_have', 'wont_have', 'other']) priority?: string;
+  @IsOptional() @IsIn(['open', 'in_progress', 'fulfilled', 'dropped']) status?: string;
+  @IsOptional() @IsIn(['hours', 'days', 'fixed', 'other']) unit?: string;
+  @IsOptional() @IsNumber() @Min(0) quantity?: number;
+  @IsOptional() @IsNumber() @Min(0) rate?: number;
+  @IsOptional() @IsDateString() neededBy?: string | null;
+  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string | null;
+  @IsOptional() @IsInt() @Min(1) @Max(1000) positions?: number | null;
+}
+
+export class LeadFollowupDto {
+  @IsDateString() dueAt: string;
+  @IsOptional() @IsString() @MaxLength(2000) note?: string;
+  @IsOptional() @IsString() @MaxLength(24) assignedTo?: string;
+}
+
+export class UpdateLeadFollowupDto {
+  @IsOptional() @IsIn(['pending', 'done', 'snoozed']) status?: string;
+  @IsOptional() @IsDateString() dueAt?: string;
+  @IsOptional() @IsString() @MaxLength(2000) note?: string;
+}
+
+export class LeadNoteDto {
+  @IsIn(['note', 'call', 'email', 'meeting', 'whatsapp']) type: string;
+  @IsString() @MaxLength(8000) body: string;
+}
+
+export class LeadDocumentDto {
+  @IsString() @MaxLength(24) fileId: string;
+  @IsString() @MaxLength(500) fileName: string;
+  @IsOptional() @IsString() @MaxLength(200) mimeType?: string;
+  @IsOptional() @IsNumber() size?: number;
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
+}

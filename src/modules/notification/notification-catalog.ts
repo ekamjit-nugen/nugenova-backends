@@ -54,6 +54,8 @@ export const NOTIFICATION_EMAIL: Record<string, NotificationEmailMeta> = {
   recruitment_interview_cancelled: { eyebrow: 'Interview cancelled', cta: 'View interview' },
   recruitment_feedback_due: { eyebrow: 'Interview feedback due', cta: 'Submit feedback' },
   recruitment_offer_accepted: { eyebrow: 'Offer accepted', cta: 'View candidate' },
+  recruitment_submission_created: { eyebrow: 'Candidate submitted to your lead', cta: 'Open lead' },
+  recruitment_submission_decision: { eyebrow: 'Client decision', cta: 'Open lead' },
 
   // ── Chat ──
   chat_mention: { eyebrow: 'You were mentioned', cta: 'Open conversation' },
@@ -145,6 +147,8 @@ export const NOTIFICATION_TYPE_CATALOG: NotificationTypeMeta[] = [
   { type: 'recruitment_feedback_due', label: 'Interview feedback reminder', category: 'recruitment', audience: 'employee' },
   { type: 'recruitment_feedback_submitted', label: 'Interview feedback submitted', category: 'recruitment', audience: 'manager' },
   { type: 'recruitment_offer_accepted', label: 'Offer accepted', category: 'recruitment', audience: 'manager' },
+  { type: 'recruitment_submission_created', label: 'Candidate submitted to a client lead', category: 'recruitment', audience: 'manager' },
+  { type: 'recruitment_submission_decision', label: 'Client decision on a submitted candidate', category: 'recruitment', audience: 'manager' },
   // Chat
   { type: 'chat_mention', label: 'You were @mentioned', category: 'chat', audience: 'employee' },
 ];
