@@ -14,6 +14,9 @@ services:
       - .env
     environment:
       NODE_ENV: production
+      # The entrypoint applies pending migrations before the API starts; set to
+      # "false" only for a one-off container that must not touch the schema.
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
       # Bind all interfaces INSIDE the container so the port mapping works; the
       # mapping below still only exposes it on the host's loopback.
       HOST: 0.0.0.0
@@ -30,4 +33,4 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 90s # room for migrations to run before the first health check

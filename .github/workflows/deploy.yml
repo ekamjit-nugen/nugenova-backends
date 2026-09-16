@@ -67,8 +67,11 @@ jobs:
 
             # Migrations run as an explicit one-off container BEFORE the swap, so a
             # failed migration fails the deploy (the old container keeps serving).
+            # RUN_MIGRATIONS=false stops the entrypoint running them a second time —
+            # the API container's entrypoint applies them on every start as a backstop
+            # (e.g. a manual `docker compose up -d` that skips this job).
             echo "→ Running migrations"
-            docker compose run --rm api npm run migration:run
+            docker compose run --rm -e RUN_MIGRATIONS=false api npm run migration:run
 
             echo "→ Starting/replacing the API container"
             docker compose up -d
