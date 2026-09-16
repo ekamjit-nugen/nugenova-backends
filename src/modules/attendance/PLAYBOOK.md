@@ -287,7 +287,12 @@ SRC_MONGODB_URI=... npx ts-node src/bootstrap/database/etl/attendance-backfill.t
 **Run log:** 2026-09-16 — filled 3 rows (14 Sep ×2, 15 Sep open shift); 5 legacy rows left
 alone because Postgres already had times for those days; 378 empty legacy rows ignored.
 
-> ⚠ `nugen-migrate.ts` still DELETEs the org's attendance before loading — it would drop
-> rows the new app created. Use this backfill for ongoing syncing; only run the full
-> migrate for a genuine first load.
+**`nugen-migrate.ts` is now re-run safe too**: every table is upserted by id, nothing is
+deleted, and rows the live app created are left alone. Legacy rows whose exact
+(person, day) slot is already taken — the partial unique index — are skipped and
+reported instead of failing the load; rows landing on a day that already has another
+entry are loaded but flagged in the run output. `--fresh` restores the old
+DELETE-then-load behaviour for a genuine first load into an empty org (never on a live
+one). Verified on a disposable local Postgres: three consecutive runs leave the row
+count unchanged and app-created rows intact.
 

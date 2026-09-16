@@ -25,12 +25,25 @@ import { LeaveBalanceEntity } from '../../../modules/leave/entities/leave-balanc
  * off the legacy EMPLOYEE `_id` are remapped to the auth `userId` (Postgres
  * attendance/leave key off the user id, not an HR id).
  *
- * Run:  SRC_MONGODB_URI=... npx ts-node src/bootstrap/database/etl/nugen-migrate.ts
+ * RE-RUN SAFE by default: every table is upserted by id, nothing is deleted, and rows
+ * the live app created since the first load are left alone. Legacy rows that would
+ * collide with an existing row on a unique key (one system attendance row per
+ * person+day, one holiday per org+day) are skipped and reported.
+ *
+ * `--fresh` restores the old destructive behaviour — DELETE the org's time-log rows
+ * first — for a genuine first load into an empty org. Never use it on a live org.
+ *
+ * Run:  SRC_MONGODB_URI=... npx ts-node src/bootstrap/database/etl/nugen-migrate.ts [--fresh]
  */
+
+/** `--fresh`: wipe the org's time-log tables before loading (first load into an empty org only). */
+const FRESH = process.argv.includes('--fresh');
 
 const LEGACY_ORG = '6600000000000000000000a0';
 const TARGET_ORG = '6a9fbcc377bf257f21e4b402';
 const MONGO_DB = 'nugenova';
+/** Timezone the org's attendance days are counted in (report only). */
+const ORG_TZ = process.env.ORG_TIMEZONE || 'Asia/Kolkata';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const sid = (v: unknown): string | null => (v == null ? null : String(v));
@@ -44,6 +57,10 @@ const num = (v: unknown, def = 0): number => {
   return Number.isFinite(n) ? n : def;
 };
 const bool = (v: unknown): boolean => v === true;
+/** Exact instant — what the unique person+day / org+day indexes actually compare. */
+const slotKey = (d: Date): string => d.toISOString();
+/** Calendar day in the org's timezone — used only to REPORT overlapping days. */
+const localDay = (d: Date): string => d.toLocaleDateString('en-CA', { timeZone: ORG_TZ });
 
 const ROLE_TIERS = new Set(['owner', 'admin', 'manager', 'employee', 'member', 'viewer']);
 const roleTier = (r: unknown): string => {
@@ -56,6 +73,10 @@ async function main() {
   if (!uri) throw new Error('SRC_MONGODB_URI not set');
   const dbUrl = process.env.DIRECT_URL || process.env.DATABASE_URL || '';
   const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1');
+
+  console.log(FRESH
+    ? '\n⚠  --fresh: the target org\'s attendance/timesheets/leaves/balances/holidays will be DELETED before loading.'
+    : '\n   re-run safe mode: upsert by id, nothing deleted (pass --fresh for a first load into an empty org).');
 
   const mc = new MongoClient(uri, { serverSelectionTimeoutMS: 20000 });
   await mc.connect();
@@ -287,17 +308,40 @@ async function main() {
   {
     const docs = await col('attendances').find(orgFilter).toArray();
     const repo = ds.getRepository(AttendanceEntity);
-    await ds.query(`DELETE FROM attendance WHERE organization_id = $1`, [TARGET_ORG]);
+    if (FRESH) await ds.query(`DELETE FROM attendance WHERE organization_id = $1`, [TARGET_ORG]);
     let skipped = 0;
-    const seenSystemDay = new Set<string>(); // `${userId}|${dayISO}` for system entries
+    let keptExisting = 0;
+    let sameLocalDay = 0;
+    const seenSystemDay = new Set<string>(); // `${userId}|${instant}` for system entries
+    // Rows already in Postgres (legacy-loaded AND app-created) own their slot: the
+    // partial unique index is on the exact (org, employee, date) instant, so that is
+    // what we must not collide with. A row on the same *calendar* day but a different
+    // instant is legal — we only count those, for the report.
+    const occupied = new Map<string, string>();
+    const occupiedDays = new Set<string>();
+    if (!FRESH) {
+      const rowsInDb: { id: string; employee_id: string; date: Date }[] = await ds.query(
+        `SELECT id, employee_id, date FROM attendance WHERE organization_id = $1 AND entry_type = 'system' AND is_deleted = false`,
+        [TARGET_ORG],
+      );
+      for (const r of rowsInDb) {
+        occupied.set(`${r.employee_id}|${slotKey(new Date(r.date))}`, r.id);
+        occupiedDays.add(`${r.employee_id}|${localDay(new Date(r.date))}`);
+      }
+    }
     const mapped = docs.map((a) => {
       const uid = resolveUser(a.employeeId);
       if (!uid) { skipped++; return null; }
       const dd = dt(a.date);
       const entryType = String(a.entryType ?? 'system');
       if (entryType === 'system' && dd) {
-        const key = `${uid}|${dd.toISOString()}`;
+        const key = `${uid}|${slotKey(dd)}`;
         if (seenSystemDay.has(key)) { skipped++; return null; }
+        // Another row already holds that exact slot (an app clock-in, or a legacy row
+        // loaded earlier) — leave it alone rather than break the insert.
+        const holder = occupied.get(key);
+        if (holder && holder !== sid(a._id)) { keptExisting++; return null; }
+        if (!occupied.has(key) && occupiedDays.has(`${uid}|${localDay(dd)}`)) sameLocalDay++;
         seenSystemDay.add(key);
       }
       return {
@@ -344,13 +388,15 @@ async function main() {
         .execute();
     }
     log('attendance', docs.length, rows.length, skipped);
+    if (keptExisting) console.log(`    ↳ ${keptExisting} legacy row(s) skipped — Postgres already has that person+day`);
+    if (sameLocalDay) console.log(`    ↳ ${sameLocalDay} legacy row(s) land on a day (${ORG_TZ}) that already has another row — loaded as a second entry, review if that double-counts`);
   }
 
   // ── 7. timesheets (userId direct) ────────────────────────────────────────────
   {
     const docs = await col('timesheets').find(orgFilter).toArray();
     const repo = ds.getRepository(TimesheetEntity);
-    await ds.query(`DELETE FROM timesheets WHERE organization_id = $1`, [TARGET_ORG]);
+    if (FRESH) await ds.query(`DELETE FROM timesheets WHERE organization_id = $1`, [TARGET_ORG]);
     const rows = docs.map((t) => ({
       id: sid(t._id)!,
       organizationId: TARGET_ORG,
@@ -381,7 +427,7 @@ async function main() {
   {
     const docs = await col('leaves').find(orgFilter).toArray();
     const repo = ds.getRepository(LeaveRequestEntity);
-    await ds.query(`DELETE FROM leave_requests WHERE organization_id = $1`, [TARGET_ORG]);
+    if (FRESH) await ds.query(`DELETE FROM leave_requests WHERE organization_id = $1`, [TARGET_ORG]);
     let skipped = 0;
     const rows = docs.map((l) => {
       const uid = resolveUser(l.employeeId);
@@ -419,7 +465,7 @@ async function main() {
   {
     const docs = await col('leavebalances').find(orgFilter).toArray();
     const repo = ds.getRepository(LeaveBalanceEntity);
-    await ds.query(`DELETE FROM leave_balances WHERE organization_id = $1`, [TARGET_ORG]);
+    if (FRESH) await ds.query(`DELETE FROM leave_balances WHERE organization_id = $1`, [TARGET_ORG]);
     let skipped = 0;
     const byUserYear = new Map<string, any>();
     for (const b of docs) {
@@ -451,12 +497,22 @@ async function main() {
   {
     const docs = await col('holidays').find(orgFilter).toArray();
     const repo = ds.getRepository(HolidayEntity);
-    await ds.query(`DELETE FROM holidays WHERE organization_id = $1`, [TARGET_ORG]);
+    if (FRESH) await ds.query(`DELETE FROM holidays WHERE organization_id = $1`, [TARGET_ORG]);
+    const takenDay = new Map<string, string>(); // day → id already in Postgres (unique (org, date))
+    if (!FRESH) {
+      const rowsInDb: { id: string; date: Date }[] = await ds.query(
+        `SELECT id, date FROM holidays WHERE organization_id = $1 AND is_deleted = false`, [TARGET_ORG],
+      );
+      for (const r of rowsInDb) takenDay.set(slotKey(new Date(r.date)), r.id);
+    }
+    let holidaysKept = 0;
     const seenDate = new Set<string>(); // dedupe by day (unique (org, date))
     const rows = docs.map((h) => {
       const dd = dt(h.date);
-      if (!dd || seenDate.has(dd.toISOString())) return null;
-      seenDate.add(dd.toISOString());
+      if (!dd || seenDate.has(slotKey(dd))) return null;
+      const holder = takenDay.get(slotKey(dd));
+      if (holder && holder !== sid(h._id)) { holidaysKept++; return null; }
+      seenDate.add(slotKey(dd));
       return {
         id: sid(h._id)!,
         organizationId: TARGET_ORG,
@@ -477,6 +533,7 @@ async function main() {
         .execute();
     }
     log('holidays', docs.length, rows.length);
+    if (holidaysKept) console.log(`    ↳ ${holidaysKept} legacy holiday(s) skipped — Postgres already has that day`);
   }
 
   console.log('\n=== migration complete ===');
