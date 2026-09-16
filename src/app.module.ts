@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PostgresModule } from './bootstrap/database/postgres.module';
 import { MailModule } from './bootstrap/mail/mail.module';
+import { ErrorsModule } from './bootstrap/errors/errors.module';
 import { StorageModule } from './bootstrap/storage/storage.module';
 import { TermsModule } from './modules/terms/terms.module';
 import { HealthModule } from './modules/health/health.module';
@@ -54,6 +55,10 @@ import { RecruitmentModule } from './modules/recruitment/recruitment.module';
     // this same EventEmitter2, avoiding a service↔gateway circular dependency.
     PlatformEventsModule,
     MailModule,
+    // Global exception filter: every failed request becomes an activity row,
+    // and a 5xx also emails the complete reason. Early in the list so it is in
+    // place before the feature modules it covers.
+    ErrorsModule,
     StorageModule,
     TermsModule,
     HealthModule,
