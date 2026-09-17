@@ -105,3 +105,24 @@ Feature: Clients — client companies, portal access, delivery teams and shared 
     And the portal user has signed it
     When the portal user tries to sign it again
     Then the sign is rejected as a bad request
+
+  @security
+  Scenario: a role granted clients view, create and edit can manage clients but not delete them
+    Given an organization with a client "Acme Corp" and a member whose role grants clients view, create and edit
+    When that member lists clients and opens "Acme Corp"
+    Then they see the client
+    And they can create a client "Globex" and rename it "Globex Ltd"
+    And they can add a contact to "Globex Ltd"
+    But deleting "Globex Ltd" is forbidden
+
+  @security
+  Scenario: a member with no clients permission cannot read clients
+    Given an organization with a client "Acme Corp" and an employee member
+    When the employee lists clients or opens "Acme Corp"
+    Then both requests are forbidden
+
+  Scenario: a sales role can list clients to link a lead, but not open or change them
+    Given an organization with a client "Acme Corp" and a member whose role grants only sales view
+    When that member lists active clients
+    Then "Acme Corp" is listed
+    But opening or editing "Acme Corp" is forbidden

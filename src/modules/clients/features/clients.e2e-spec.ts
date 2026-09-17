@@ -7,6 +7,7 @@ import {
   bootOrgTestApp,
   CreatedOrg,
   OrgTestHarness,
+  randomEmail,
 } from '../../organization/features/support/org-harness';
 import { ClientEntity } from '../entities/client.entity';
 import { ClientContactEntity } from '../entities/client-contact.entity';
@@ -492,6 +493,114 @@ defineFeature(feature, (test) => {
     });
     then('the sign is rejected as a bad request', () => {
       expect(res.status).toBe(400);
+    });
+  });
+  // ── permissions from custom roles (e.g. a SALES role granting clients) ──
+
+  /** A member holding a custom role with exactly these grants; returns their token. */
+  const memberWithRole = async (o: CreatedOrg, permissions: { resource: string; actions: string[] }[]) => {
+    const role = await request(h.app.getHttpServer())
+      .post(`${API}/org/roles`).set(auth(o.ownerToken))
+      .send({ name: `role-${Date.now()}-${Math.round(Math.random() * 1e6)}`, displayName: 'Sales', permissions })
+      .expect(201);
+    const email = randomEmail('rolemember');
+    const added = await request(h.app.getHttpServer())
+      .post(`${API}/org/members`).set(auth(o.ownerToken))
+      .send({ email, roleId: role.body.data.id, firstName: 'Sakshi', lastName: 'M' })
+      .expect(201);
+    h.trackUser(added.body.data.userId);
+    return h.mintToken(email); // carries the role's grants
+  };
+  const as = (token: string) => ({
+    get: (path: string) => request(h.app.getHttpServer()).get(`${API}${path}`).set(auth(token)),
+    post: (path: string, body: object = {}) => request(h.app.getHttpServer()).post(`${API}${path}`).set(auth(token)).send(body),
+    patch: (path: string, body: object = {}) => request(h.app.getHttpServer()).patch(`${API}${path}`).set(auth(token)).send(body),
+    del: (path: string) => request(h.app.getHttpServer()).delete(`${API}${path}`).set(auth(token)),
+  });
+
+  test('a role granted clients view, create and edit can manage clients but not delete them', ({ given, when, then, and, but }) => {
+    let o: CreatedOrg;
+    let acmeId: string;
+    let token: string;
+    let list: request.Response;
+    let one: request.Response;
+    let globexId: string;
+
+    given('an organization with a client "Acme Corp" and a member whose role grants clients view, create and edit', async () => {
+      o = await newOrg();
+      acmeId = (await createClient(o, 'Acme Corp').expect(201)).body.data.id;
+      token = await memberWithRole(o, [
+        { resource: 'sales', actions: ['view', 'create', 'edit', 'export', 'assign'] },
+        { resource: 'clients', actions: ['view', 'create', 'edit'] },
+      ]);
+    });
+    when('that member lists clients and opens "Acme Corp"', async () => {
+      list = await as(token).get('/clients');
+      one = await as(token).get(`/clients/${acmeId}`);
+    });
+    then('they see the client', () => {
+      expect(list.status).toBe(200);
+      expect(list.body.data.map((c: any) => c.companyName)).toContain('Acme Corp');
+      expect(one.status).toBe(200);
+    });
+    and('they can create a client "Globex" and rename it "Globex Ltd"', async () => {
+      const created = await as(token).post('/clients', { companyName: 'Globex' });
+      expect(created.status).toBe(201);
+      globexId = created.body.data.id;
+      expect((await as(token).patch(`/clients/${globexId}`, { companyName: 'Globex Ltd' })).status).toBe(200);
+    });
+    and('they can add a contact to "Globex Ltd"', async () => {
+      expect((await as(token).post(`/clients/${globexId}/contacts`, { name: 'Hank Scorpio' })).status).toBe(201);
+    });
+    but('deleting "Globex Ltd" is forbidden', async () => {
+      expect((await as(token).del(`/clients/${globexId}`)).status).toBe(403);
+      expect((await clients.findOne({ where: { id: globexId } }))?.isDeleted).toBe(false);
+    });
+  });
+
+  test('a member with no clients permission cannot read clients', ({ given, when, then }) => {
+    let o: CreatedOrg;
+    let acmeId: string;
+    let emp: { token: string };
+    let list: request.Response;
+    let one: request.Response;
+
+    given('an organization with a client "Acme Corp" and an employee member', async () => {
+      o = await newOrg();
+      acmeId = (await createClient(o, 'Acme Corp').expect(201)).body.data.id;
+      emp = await h.createEmployeeMember(o);
+    });
+    when('the employee lists clients or opens "Acme Corp"', async () => {
+      list = await as(emp.token).get('/clients');
+      one = await as(emp.token).get(`/clients/${acmeId}`);
+    });
+    then('both requests are forbidden', () => {
+      expect(list.status).toBe(403);
+      expect(one.status).toBe(403);
+    });
+  });
+
+  test('a sales role can list clients to link a lead, but not open or change them', ({ given, when, then, but }) => {
+    let o: CreatedOrg;
+    let acmeId: string;
+    let token: string;
+    let list: request.Response;
+
+    given('an organization with a client "Acme Corp" and a member whose role grants only sales view', async () => {
+      o = await newOrg();
+      acmeId = (await createClient(o, 'Acme Corp').expect(201)).body.data.id;
+      token = await memberWithRole(o, [{ resource: 'sales', actions: ['view'] }]);
+    });
+    when('that member lists active clients', async () => {
+      list = await as(token).get('/clients?status=active');
+    });
+    then('"Acme Corp" is listed', () => {
+      expect(list.status).toBe(200);
+      expect(list.body.data.map((c: any) => c.companyName)).toContain('Acme Corp');
+    });
+    but('opening or editing "Acme Corp" is forbidden', async () => {
+      expect((await as(token).get(`/clients/${acmeId}`)).status).toBe(403);
+      expect((await as(token).patch(`/clients/${acmeId}`, { companyName: 'Nope' })).status).toBe(403);
     });
   });
 });

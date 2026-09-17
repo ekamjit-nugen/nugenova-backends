@@ -1,20 +1,24 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { permMapAllows } from '../organization/guards/require-permission.decorator';
 import { ClientsCaller, ClientsService } from './clients.service';
 import {
   AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateTicketDto,
 } from './dto';
 
 /**
- * Clients — `/api/v1/clients`. JWT-guarded, org-scoped. Management actions are
- * owner/admin only; `mine` and `portal/*` serve assigned employees and client
- * portal users respectively.
+ * Clients — `/api/v1/clients`. JWT-guarded, org-scoped. Management routes need
+ * the matching `clients` permission (view / create / edit / delete) — owners and
+ * admins have all of them, custom roles get what the Roles page grants. `mine`
+ * and `portal/*` serve assigned employees and client portal users respectively.
  *
  * NOTE: the `clients` module key is registered in vertical-packs; the
  * `@RequireModule('clients')` gate will be added once the ModuleEnabledGuard
  * infra (currently on the meetings/activity branches) merges to main.
  */
+type ClientsAction = 'view' | 'create' | 'edit' | 'delete';
+
 @Controller('clients')
 @UseGuards(JwtAuthGuard)
 export class ClientsController {
@@ -25,9 +29,19 @@ export class ClientsController {
     if (!orgId) throw new ForbiddenException('No organization context');
     return { userId: req.user?.userId, orgId, isAdmin: req.user?.orgRole === 'owner' || req.user?.orgRole === 'admin' };
   }
-  private requireAdmin(c: ClientsCaller): ClientsCaller {
-    if (!c.isAdmin) throw new ForbiddenException('Only an owner or admin can manage clients');
-    return c;
+
+  /**
+   * The caller, if they may `action` clients: owner/admin, or a role granted
+   * clients:<action>. `alsoAllow` lets another permission through (listing
+   * clients for the Sales lead picker).
+   */
+  private allowed(req: any, action: ClientsAction, alsoAllow?: [string, string]): ClientsCaller {
+    const c = this.caller(req);
+    if (c.isAdmin) return c;
+    const perms = req.user?.perms;
+    if (permMapAllows(perms, 'clients', action)) return c;
+    if (alsoAllow && permMapAllows(perms, alsoAllow[0], alsoAllow[1])) return c;
+    throw new ForbiddenException(`You don't have permission to ${action} clients`);
   }
 
   // ── static routes first (before :id) ──
@@ -41,49 +55,49 @@ export class ClientsController {
   /** Admin dashboard summary — client counts + agreement activity. */
   @Get('overview')
   async overview(@Req() req: any) {
-    return { success: true, data: await this.clients.dashboardSummary(this.requireAdmin(this.caller(req)).orgId) };
+    return { success: true, data: await this.clients.dashboardSummary(this.allowed(req, 'view').orgId) };
   }
 
   // ── agreement templates (admin, org-level) ──
   @Get('agreement-templates')
   async listTemplates(@Req() req: any) {
-    return { success: true, data: await this.clients.listTemplates(this.requireAdmin(this.caller(req)).orgId) };
+    return { success: true, data: await this.clients.listTemplates(this.allowed(req, 'view').orgId) };
   }
 
   @Post('agreement-templates')
   async createTemplate(@Req() req: any, @Body() dto: CreateAgreementTemplateDto) {
-    return { success: true, data: await this.clients.createTemplate(this.requireAdmin(this.caller(req)), dto) };
+    return { success: true, data: await this.clients.createTemplate(this.allowed(req, 'create'), dto) };
   }
 
   @Patch('agreement-templates/:tid')
   async updateTemplate(@Req() req: any, @Param('tid') tid: string, @Body() dto: UpdateAgreementTemplateDto) {
-    return { success: true, data: await this.clients.updateTemplate(this.requireAdmin(this.caller(req)).orgId, tid, dto) };
+    return { success: true, data: await this.clients.updateTemplate(this.allowed(req, 'edit').orgId, tid, dto) };
   }
 
   @Delete('agreement-templates/:tid')
   async deleteTemplate(@Req() req: any, @Param('tid') tid: string) {
-    return { success: true, data: await this.clients.deleteTemplate(this.requireAdmin(this.caller(req)).orgId, tid) };
+    return { success: true, data: await this.clients.deleteTemplate(this.allowed(req, 'delete').orgId, tid) };
   }
 
   // ── tickets (admin, org-wide) ──
   @Get('tickets')
   async listTickets(@Req() req: any, @Query('status') status?: string) {
-    return { success: true, data: await this.clients.listTickets(this.requireAdmin(this.caller(req)).orgId, { status }) };
+    return { success: true, data: await this.clients.listTickets(this.allowed(req, 'view').orgId, { status }) };
   }
 
   @Get('tickets/:ticketId')
   async getTicket(@Req() req: any, @Param('ticketId') ticketId: string) {
-    return { success: true, data: await this.clients.getTicketAdmin(this.requireAdmin(this.caller(req)).orgId, ticketId) };
+    return { success: true, data: await this.clients.getTicketAdmin(this.allowed(req, 'view').orgId, ticketId) };
   }
 
   @Patch('tickets/:ticketId')
   async updateTicket(@Req() req: any, @Param('ticketId') ticketId: string, @Body() dto: UpdateTicketDto) {
-    return { success: true, data: await this.clients.updateTicket(this.requireAdmin(this.caller(req)).orgId, ticketId, dto) };
+    return { success: true, data: await this.clients.updateTicket(this.allowed(req, 'edit').orgId, ticketId, dto) };
   }
 
   @Post('tickets/:ticketId/messages')
   async staffTicketReply(@Req() req: any, @Param('ticketId') ticketId: string, @Body() dto: TicketMessageDto) {
-    return { success: true, data: await this.clients.staffReply(this.requireAdmin(this.caller(req)), ticketId, dto) };
+    return { success: true, data: await this.clients.staffReply(this.allowed(req, 'edit'), ticketId, dto) };
   }
 
   /** Portal home for a client-role user. */
@@ -165,147 +179,148 @@ export class ClientsController {
   // ── clients CRUD ──
   @Post()
   async create(@Req() req: any, @Body() dto: CreateClientDto) {
-    return { success: true, data: await this.clients.create(this.requireAdmin(this.caller(req)), dto) };
+    return { success: true, data: await this.clients.create(this.allowed(req, 'create'), dto) };
   }
 
   @Get()
   async list(@Req() req: any, @Query('status') status?: string, @Query('q') q?: string, @Query('tag') tag?: string) {
-    return { success: true, data: await this.clients.list(this.caller(req).orgId, { status, q, tag }) };
+    // Sales users pick a client when creating a lead, so sales:view may list too.
+    return { success: true, data: await this.clients.list(this.allowed(req, 'view', ['sales', 'view']).orgId, { status, q, tag }) };
   }
 
   @Get(':id')
   async get(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.clients.get(this.caller(req).orgId, id) };
+    return { success: true, data: await this.clients.get(this.allowed(req, 'view').orgId, id) };
   }
 
   @Patch(':id')
   async update(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateClientDto) {
-    return { success: true, data: await this.clients.update(this.requireAdmin(this.caller(req)), id, dto) };
+    return { success: true, data: await this.clients.update(this.allowed(req, 'edit'), id, dto) };
   }
 
   @Post(':id/archive')
   async archive(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.clients.archive(this.requireAdmin(this.caller(req)).orgId, id) };
+    return { success: true, data: await this.clients.archive(this.allowed(req, 'edit').orgId, id) };
   }
 
   @Post(':id/restore')
   async restore(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.clients.restore(this.requireAdmin(this.caller(req)).orgId, id) };
+    return { success: true, data: await this.clients.restore(this.allowed(req, 'edit').orgId, id) };
   }
 
   @Delete(':id')
   async remove(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.clients.remove(this.requireAdmin(this.caller(req)).orgId, id) };
+    return { success: true, data: await this.clients.remove(this.allowed(req, 'delete').orgId, id) };
   }
 
   // ── contacts + portal invite ──
   @Post(':id/contacts')
   async addContact(@Req() req: any, @Param('id') id: string, @Body() dto: CreateContactDto) {
-    return { success: true, data: await this.clients.addContact(this.requireAdmin(this.caller(req)).orgId, id, dto) };
+    return { success: true, data: await this.clients.addContact(this.allowed(req, 'create').orgId, id, dto) };
   }
 
   @Patch(':id/contacts/:contactId')
   async updateContact(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string, @Body() dto: UpdateContactDto) {
-    return { success: true, data: await this.clients.updateContact(this.requireAdmin(this.caller(req)).orgId, id, contactId, dto) };
+    return { success: true, data: await this.clients.updateContact(this.allowed(req, 'edit').orgId, id, contactId, dto) };
   }
 
   @Delete(':id/contacts/:contactId')
   async removeContact(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string) {
-    return { success: true, data: await this.clients.removeContact(this.requireAdmin(this.caller(req)).orgId, id, contactId) };
+    return { success: true, data: await this.clients.removeContact(this.allowed(req, 'delete').orgId, id, contactId) };
   }
 
   @Post(':id/contacts/:contactId/invite')
   async invite(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string, @Body() dto: InviteContactDto) {
-    return { success: true, data: await this.clients.inviteContact(this.requireAdmin(this.caller(req)), id, contactId, dto) };
+    return { success: true, data: await this.clients.inviteContact(this.allowed(req, 'edit'), id, contactId, dto) };
   }
 
   @Post(':id/portal-users/:userId/deactivate')
   async deactivatePortalUser(@Req() req: any, @Param('id') id: string, @Param('userId') userId: string) {
-    return { success: true, data: await this.clients.deactivatePortalUser(this.requireAdmin(this.caller(req)).orgId, id, userId) };
+    return { success: true, data: await this.clients.deactivatePortalUser(this.allowed(req, 'edit').orgId, id, userId) };
   }
 
   // ── assignments ──
   @Post(':id/assignments')
   async assign(@Req() req: any, @Param('id') id: string, @Body() dto: AssignEmployeeDto) {
-    return { success: true, data: await this.clients.assignEmployee(this.requireAdmin(this.caller(req)), id, dto) };
+    return { success: true, data: await this.clients.assignEmployee(this.allowed(req, 'edit'), id, dto) };
   }
 
   @Delete(':id/assignments/:userId')
   async unassign(@Req() req: any, @Param('id') id: string, @Param('userId') userId: string) {
-    return { success: true, data: await this.clients.unassignEmployee(this.requireAdmin(this.caller(req)).orgId, id, userId) };
+    return { success: true, data: await this.clients.unassignEmployee(this.allowed(req, 'edit').orgId, id, userId) };
   }
 
   // ── board sharing ──
   @Post(':id/boards')
   async shareBoard(@Req() req: any, @Param('id') id: string, @Body() dto: ShareBoardDto) {
-    return { success: true, data: await this.clients.shareBoard(this.requireAdmin(this.caller(req)), id, dto) };
+    return { success: true, data: await this.clients.shareBoard(this.allowed(req, 'edit'), id, dto) };
   }
 
   @Delete(':id/boards/:boardId')
   async unshareBoard(@Req() req: any, @Param('id') id: string, @Param('boardId') boardId: string) {
-    return { success: true, data: await this.clients.unshareBoard(this.requireAdmin(this.caller(req)).orgId, id, boardId) };
+    return { success: true, data: await this.clients.unshareBoard(this.allowed(req, 'edit').orgId, id, boardId) };
   }
 
   // ── agreements (admin) ──
   @Get(':id/agreements')
   async listAgreements(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.clients.listAgreements(this.requireAdmin(this.caller(req)).orgId, id) };
+    return { success: true, data: await this.clients.listAgreements(this.allowed(req, 'view').orgId, id) };
   }
 
   @Post(':id/agreements')
   async createAgreement(@Req() req: any, @Param('id') id: string, @Body() dto: CreateAgreementDto) {
-    return { success: true, data: await this.clients.createAgreement(this.requireAdmin(this.caller(req)), id, dto) };
+    return { success: true, data: await this.clients.createAgreement(this.allowed(req, 'create'), id, dto) };
   }
 
   @Patch(':id/agreements/:agreementId')
   async updateAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string, @Body() dto: UpdateAgreementDto) {
-    return { success: true, data: await this.clients.updateAgreement(this.requireAdmin(this.caller(req)).orgId, id, agreementId, dto) };
+    return { success: true, data: await this.clients.updateAgreement(this.allowed(req, 'edit').orgId, id, agreementId, dto) };
   }
 
   @Post(':id/agreements/:agreementId/send')
   async sendAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
-    return { success: true, data: await this.clients.sendAgreement(this.requireAdmin(this.caller(req)).orgId, id, agreementId) };
+    return { success: true, data: await this.clients.sendAgreement(this.allowed(req, 'edit').orgId, id, agreementId) };
   }
 
   @Post(':id/agreements/:agreementId/void')
   async voidAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
-    return { success: true, data: await this.clients.voidAgreement(this.requireAdmin(this.caller(req)).orgId, id, agreementId) };
+    return { success: true, data: await this.clients.voidAgreement(this.allowed(req, 'edit').orgId, id, agreementId) };
   }
 
   @Post(':id/agreements/:agreementId/remind')
   async remindAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
-    return { success: true, data: await this.clients.remindAgreement(this.requireAdmin(this.caller(req)).orgId, id, agreementId) };
+    return { success: true, data: await this.clients.remindAgreement(this.allowed(req, 'edit').orgId, id, agreementId) };
   }
 
   @Delete(':id/agreements/:agreementId')
   async deleteAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
-    return { success: true, data: await this.clients.deleteAgreement(this.requireAdmin(this.caller(req)).orgId, id, agreementId) };
+    return { success: true, data: await this.clients.deleteAgreement(this.allowed(req, 'delete').orgId, id, agreementId) };
   }
 
   // ── document vault (admin) ──
   @Get(':id/documents')
   async listDocuments(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.clients.listDocuments(this.requireAdmin(this.caller(req)).orgId, id) };
+    return { success: true, data: await this.clients.listDocuments(this.allowed(req, 'view').orgId, id) };
   }
 
   @Post(':id/documents')
   async addDocument(@Req() req: any, @Param('id') id: string, @Body() dto: CreateDocumentDto) {
-    return { success: true, data: await this.clients.addDocument(this.requireAdmin(this.caller(req)), id, dto) };
+    return { success: true, data: await this.clients.addDocument(this.allowed(req, 'create'), id, dto) };
   }
 
   @Delete(':id/documents/:docId')
   async removeDocument(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string) {
-    return { success: true, data: await this.clients.removeDocument(this.requireAdmin(this.caller(req)).orgId, id, docId) };
+    return { success: true, data: await this.clients.removeDocument(this.allowed(req, 'delete').orgId, id, docId) };
   }
 
   // ── tickets (admin, per client) ──
   @Get(':id/tickets')
   async listClientTickets(@Req() req: any, @Param('id') id: string) {
-    return { success: true, data: await this.clients.listTicketsForClient(this.requireAdmin(this.caller(req)).orgId, id) };
+    return { success: true, data: await this.clients.listTicketsForClient(this.allowed(req, 'view').orgId, id) };
   }
 
   @Post(':id/tickets')
   async createClientTicket(@Req() req: any, @Param('id') id: string, @Body() dto: CreateTicketDto) {
-    return { success: true, data: await this.clients.createTicketAsStaff(this.requireAdmin(this.caller(req)), id, dto) };
+    return { success: true, data: await this.clients.createTicketAsStaff(this.allowed(req, 'create'), id, dto) };
   }
 }
