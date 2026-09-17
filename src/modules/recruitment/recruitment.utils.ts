@@ -108,6 +108,23 @@ export function tidyName(v: unknown): string | null {
   return s;
 }
 
+/**
+ * A "name" cell that is really a sheet note, not a person: footers such as
+ * "Total candidates in this sheet: 10", banners such as
+ * "Generated: Summary.xlsx | Auto-extracted …", or totals rows.
+ */
+export function looksLikeSheetNote(v: unknown): boolean {
+  const s = cleanCell(v);
+  if (!s) return false;
+  if (s.length > 80) return true;
+  if (/\.(xlsx?|xlsm|csv)\b/i.test(s)) return true;
+  if (/\s\|\s/.test(s)) return true;
+  if (/^(total|grand total|sub-?total|generated|prepared|exported|summary|note|notes|count|source|report|sheet|legend)\b/i.test(s)) return true;
+  if (/:\s*\d+\s*$/.test(s)) return true;
+  if (/^[\d\s.,:/-]+$/.test(s)) return true;
+  return false;
+}
+
 /** De-duplicated, trimmed list of short strings (skills/tags). */
 export function cleanList(v: unknown, maxItems = 60, maxLen = 60): string[] {
   const raw = Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[,;|\n•]/) : [];

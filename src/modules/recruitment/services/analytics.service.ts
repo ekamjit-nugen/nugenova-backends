@@ -208,6 +208,8 @@ export class RecruitmentAnalyticsService {
         openPositions: openings.filter((o) => o.status === 'open').reduce((s, o) => s + (o.positions || 1), 0),
         totalCandidates: candidateRows.filter((c) => c.status !== 'archived').length,
         activeApplications: apps.filter((a) => a.status === 'active').length,
+        // People, not entries: one candidate can sit in several openings (matches the Candidates → In pipeline tab).
+        candidatesInPipeline: new Set(apps.filter((a) => a.status === 'active' && candById.has(a.candidateId)).map((a) => a.candidateId)).size,
         newCandidates: candidateRows.filter((c) => new Date(c.createdAt).getTime() >= since.getTime()).length,
         interviewsThisWeek: upcoming.filter((i) => new Date(i.scheduledAt).getTime() <= weekEnd).length,
         pendingFeedback,
