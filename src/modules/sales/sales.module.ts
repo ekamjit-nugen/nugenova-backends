@@ -4,6 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { ClientsModule } from '../clients/clients.module';
+import { VerticalModule } from '../vertical/vertical.module';
+import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { ClientEntity } from '../clients/entities/client.entity';
 
@@ -28,6 +30,8 @@ import { SalesController } from './sales.controller';
     AuthModule,
     NotificationModule,
     ClientsModule,
+    // ModuleEnabledGuard (the `sales` module gate) is provided by VerticalModule.
+    VerticalModule,
     TypeOrmModule.forFeature([
       PipelineStageEntity,
       LeadEntity,
@@ -40,6 +44,8 @@ import { SalesController } from './sales.controller';
       LeadDocumentEntity,
       UserEntity,
       ClientEntity,
+      // OrgAdminGuard reads the org to refuse suspended / terms-pending tenants.
+      OrganizationEntity,
     ]),
   ],
   controllers: [SalesController],
