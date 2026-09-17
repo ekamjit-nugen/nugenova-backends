@@ -1,20 +1,13 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
-import {
-  AUDIENCE_ADMIN,
-  AUDIENCE_NO_ROLE,
-  AUDIENCE_OWNER,
-  EmailRoutingService,
-  OrgEmailRouting,
-  audiencesOf,
-  roleAudience,
-} from './email-routing.service';
+import { EmailRoutingService, OrgEmailRouting, audiencesOf, roleAudience } from './email-routing.service';
 
 /** Members shaped like Nugen IT Services, where the bug was reported. */
 const member = (over: Record<string, unknown>) =>
   ({ status: 'active', personType: 'staff', roleId: null, secondaryRoleId: null, ...over }) as any;
 
 const OWNER = member({ userId: 'u-owner', role: 'owner' });
+// An admin who also holds a custom role called "ADMIN" — as in Nugen IT Services.
 const ADMIN = member({ userId: 'u-admin', role: 'admin', roleId: 'r-admin-custom' });
 const HR = member({ userId: 'u-hr', role: 'manager', roleId: 'r-hr' });
 // Sakshi: an employee whose SALES role grants attendance:view — which used to put
@@ -26,12 +19,10 @@ const MEMBERS = [OWNER, ADMIN, HR, SALES, PLAIN, CLIENT];
 
 describe('email routing', () => {
   describe('audiencesOf', () => {
-    it('puts an owner/admin in their tier column, plus any custom role they hold', () => {
-      expect(audiencesOf(OWNER)).toEqual([AUDIENCE_OWNER]);
-      expect(audiencesOf(ADMIN)).toEqual([AUDIENCE_ADMIN, roleAudience('r-admin-custom')]);
-    });
-    it('puts a member with no custom role in the "No custom role" column', () => {
-      expect(audiencesOf(PLAIN)).toEqual([AUDIENCE_NO_ROLE]);
+    it('is the role columns a member holds — owners and admins are not a column', () => {
+      expect(audiencesOf(OWNER)).toEqual([]);
+      expect(audiencesOf(ADMIN)).toEqual([roleAudience('r-admin-custom')]);
+      expect(audiencesOf(PLAIN)).toEqual([]);
     });
     it('counts a secondary role too', () => {
       expect(audiencesOf(member({ role: 'employee', roleId: 'a', secondaryRoleId: 'b' }))).toEqual(['role:a', 'role:b']);
@@ -50,20 +41,23 @@ describe('email routing', () => {
       expect(routing.teamRecipients('attendance.daily_digest').sort()).toEqual(['u-admin', 'u-hr', 'u-owner']);
     });
 
-    it('drops admins when Admin is unticked — unless another ticked column covers them', () => {
-      const off = new OrgEmailRouting({ 'attendance.daily_digest': { [AUDIENCE_ADMIN]: false } }, MEMBERS);
-      expect(off.teamRecipients('attendance.daily_digest')).toEqual(['u-owner']);
-
-      const viaRole = new OrgEmailRouting(
-        { 'attendance.daily_digest': { [AUDIENCE_ADMIN]: false, 'role:r-admin-custom': true } },
-        MEMBERS,
-      );
-      expect(viaRole.teamRecipients('attendance.daily_digest').sort()).toEqual(['u-admin', 'u-owner']);
+    it('always includes owners and admins, whatever their roles are set to', () => {
+      const routing = new OrgEmailRouting({ 'attendance.daily_digest': { 'role:r-admin-custom': false } }, MEMBERS);
+      expect(routing.teamRecipients('attendance.daily_digest').sort()).toEqual(['u-admin', 'u-owner']);
     });
 
-    it('never sends a team email to client portal users', () => {
-      const routing = new OrgEmailRouting({ 'leave_requested': { [AUDIENCE_NO_ROLE]: true } }, MEMBERS);
-      expect(routing.teamRecipients('leave_requested')).not.toContain('u-client');
+    it('never sends a team email to members with no role, or to client portal users', () => {
+      const recipients = new OrgEmailRouting({}, MEMBERS).teamRecipients('leave_requested');
+      expect(recipients).not.toContain('u-plain');
+      expect(recipients).not.toContain('u-client');
+    });
+
+    it('ignores choices stored for the old Owner / Admin / No custom role columns', () => {
+      const routing = new OrgEmailRouting(
+        { 'attendance.daily_digest': { 'tier:admin': false, norole: true } },
+        MEMBERS,
+      );
+      expect(routing.teamRecipients('attendance.daily_digest').sort()).toEqual(['u-admin', 'u-owner']);
     });
   });
 
@@ -80,16 +74,22 @@ describe('email routing', () => {
       expect(routing.allowsUser('attendance.absent', 'u-hr')).toBe(true);
     });
 
+    it('still reaches an admin whose role is unticked', () => {
+      const routing = new OrgEmailRouting({ 'attendance.absent': { 'role:r-admin-custom': false } }, MEMBERS);
+      expect(routing.allowsUser('attendance.absent', 'u-admin')).toBe(true);
+    });
+
     it('does not apply role choices to client portal users', () => {
-      const routing = new OrgEmailRouting({ 'client_ticket_reply': { [AUDIENCE_NO_ROLE]: false } }, MEMBERS);
-      expect(routing.allowsUser('client_ticket_reply', 'u-client')).toBe(true);
+      const client = member({ userId: 'u-c2', role: 'client', personType: 'client', roleId: 'r-sales' });
+      const routing = new OrgEmailRouting({ 'client_ticket_reply': { 'role:r-sales': false } }, [client]);
+      expect(routing.allowsUser('client_ticket_reply', 'u-c2')).toBe(true);
     });
   });
 
   describe('always-on and unknown emails', () => {
     it('sends a fixed email regardless of any stored choice', () => {
-      const routing = new OrgEmailRouting({ otp: { [AUDIENCE_NO_ROLE]: false } }, MEMBERS);
-      expect(routing.allowsUser('otp', 'u-plain')).toBe(true);
+      const routing = new OrgEmailRouting({ otp: { 'role:r-sales': false } }, MEMBERS);
+      expect(routing.allowsUser('otp', 'u-sakshi')).toBe(true);
     });
 
     it('lets an email the catalog does not know about through — routing never silently drops mail', () => {
@@ -132,17 +132,19 @@ describe('EmailRoutingService', () => {
     );
   });
 
-  it('lists Owner, Admin, every role and No custom role as columns', async () => {
+  it('uses exactly the roles as columns, in the permission matrix order', async () => {
     const view = await service.matrix('org1');
-    expect(view.audiences.map((a) => a.label)).toEqual(['Owner', 'Admin', 'HR', 'SALES', 'No custom role']);
+    expect(view.audiences).toEqual([
+      { key: 'role:r-hr', roleId: 'r-hr', label: 'HR' },
+      { key: 'role:r-sales', roleId: 'r-sales', label: 'SALES' },
+    ]);
+    expect(roles.find).toHaveBeenCalledWith({ where: { organizationId: 'org1', isDeleted: false }, order: { createdAt: 'ASC' } });
   });
 
   it('shows the defaults in the matrix', async () => {
     const view = await service.matrix('org1');
     const digest = view.emails.find((e) => e.key === 'attendance.daily_digest')!;
-    expect(digest.routing).toEqual({
-      [AUDIENCE_OWNER]: true, [AUDIENCE_ADMIN]: true, 'role:r-hr': false, 'role:r-sales': false, [AUDIENCE_NO_ROLE]: false,
-    });
+    expect(digest.routing).toEqual({ 'role:r-hr': false, 'role:r-sales': false });
   });
 
   it('stores a tick and reflects it', async () => {
@@ -158,11 +160,12 @@ describe('EmailRoutingService', () => {
   });
 
   it('refuses to change an always-sent email', async () => {
-    await expect(service.set('org1', 'otp', AUDIENCE_NO_ROLE, false)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.set('org1', 'otp', 'role:r-hr', false)).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('refuses an unknown email, a made-up audience, or another org’s role', async () => {
-    await expect(service.set('org1', 'nope', AUDIENCE_OWNER, false)).rejects.toBeInstanceOf(NotFoundException);
+  it('refuses an unknown email, a made-up audience, the old Owner column, or another org’s role', async () => {
+    await expect(service.set('org1', 'nope', 'role:r-hr', false)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.set('org1', 'attendance.daily_digest', 'tier:owner', false)).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.set('org1', 'attendance.absent', 'everyone', false)).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.set('org2', 'attendance.absent', 'role:r-hr', false)).rejects.toBeInstanceOf(BadRequestException);
   });

@@ -9,33 +9,40 @@ import { OrganizationEntity } from '../organization/entities/organization.entity
 import { OrgNotificationSettingEntity } from './entities/org-notification-setting.entity';
 import { EMAIL_CATALOG, EmailKind, emailCatalogEntry, emailKind } from './email-catalog';
 
-/** Audience keys — the columns of the Roles page email matrix. */
-export const AUDIENCE_OWNER = 'tier:owner';
-export const AUDIENCE_ADMIN = 'tier:admin';
-/** Members with no custom role (and not an owner/admin). */
-export const AUDIENCE_NO_ROLE = 'norole';
+/**
+ * Audience keys — the columns of the email matrix. They are exactly the columns of
+ * the permission matrix: the org's roles. Owners and admins are not columns there
+ * (they have every permission) and are not columns here (they receive every email).
+ */
 export const roleAudience = (roleId: string) => `role:${roleId}`;
 
-/** What a column means before anyone changes it. */
-export function defaultEnabled(kind: EmailKind, audience: string): boolean {
-  if (kind === 'team') return audience === AUDIENCE_OWNER || audience === AUDIENCE_ADMIN;
-  return true; // personal: everyone gets their own; fixed: always sent
+/** What a role column means before anyone changes it. */
+export function defaultEnabled(kind: EmailKind): boolean {
+  // team: only owners and admins until a role is ticked; personal: everyone gets
+  // their own; fixed: always sent.
+  return kind !== 'team';
 }
 
-/** The audiences a membership belongs to — a member receives if ANY is enabled. */
-export function audiencesOf(m: Pick<OrgMembershipEntity, 'role' | 'roleId' | 'secondaryRoleId'>): string[] {
-  const out: string[] = [];
-  if (m.role === 'owner') out.push(AUDIENCE_OWNER);
-  if (m.role === 'admin') out.push(AUDIENCE_ADMIN);
-  const roleIds = [m.roleId, m.secondaryRoleId].filter(Boolean) as string[];
-  for (const id of roleIds) out.push(roleAudience(id));
-  if (!roleIds.length && m.role !== 'owner' && m.role !== 'admin') out.push(AUDIENCE_NO_ROLE);
-  return out;
+type RoutedMember = Pick<OrgMembershipEntity, 'role' | 'roleId' | 'secondaryRoleId' | 'personType'>;
+
+/** The role columns a membership belongs to — a member receives if ANY is ticked. */
+export function audiencesOf(m: Pick<OrgMembershipEntity, 'roleId' | 'secondaryRoleId'>): string[] {
+  return ([m.roleId, m.secondaryRoleId].filter(Boolean) as string[]).map(roleAudience);
 }
+
+/** Owners and admins receive every email, just as they hold every permission. */
+const isOwnerOrAdmin = (m: Pick<OrgMembershipEntity, 'role'>) => m.role === 'owner' || m.role === 'admin';
+
+/** Client portal users, students and guardians hold no staff role; role choices don't apply to them. */
+const isStaff = (m: Pick<OrgMembershipEntity, 'role' | 'personType'>) =>
+  m.role !== 'client' && (!m.personType || m.personType === 'staff');
 
 /**
  * One org's email routing, loaded once. Crons that email many people build one of
  * these per org instead of querying per recipient.
+ *
+ * Stored choices for keys that are no longer columns (the earlier `tier:owner`,
+ * `tier:admin` and `norole`) are ignored.
  */
 export class OrgEmailRouting {
   constructor(
@@ -43,25 +50,30 @@ export class OrgEmailRouting {
     private readonly members: OrgMembershipEntity[],
   ) {}
 
-  /** Is `audience` ticked for `key`? */
+  /** Is the role column `audience` ticked for `key`? */
   enabled(key: string, audience: string): boolean {
     const kind = emailKind(key);
     if (!kind || kind === 'fixed') return true;
     const set = this.overrides[key]?.[audience];
-    return set !== undefined ? set : defaultEnabled(kind, audience);
+    return set !== undefined ? set : defaultEnabled(kind);
   }
 
   /**
-   * May this member receive email `key`? Only STAFF are routed by role: client
-   * portal users, students and guardians hold no staff role, so role choices
-   * don't apply to them. Unknown keys and fixed emails always pass — routing must
-   * never silently drop an email nobody configured.
+   * May this member receive email `key`? Unknown keys and fixed emails always
+   * pass — routing must never silently drop an email nobody configured.
+   *
+   * - owners and admins: always;
+   * - non-staff (client portal, students, guardians): always — not routed by role;
+   * - staff with roles: if any of their roles is ticked;
+   * - staff with no role: personal emails yes, team emails no.
    */
-  allowsMember(key: string, m: OrgMembershipEntity): boolean {
+  allowsMember(key: string, m: RoutedMember): boolean {
     const kind = emailKind(key);
     if (!kind || kind === 'fixed') return true;
-    if (m.role === 'client' || (m.personType && m.personType !== 'staff')) return true;
-    return audiencesOf(m).some((a) => this.enabled(key, a));
+    if (isOwnerOrAdmin(m) || !isStaff(m)) return true;
+    const audiences = audiencesOf(m);
+    if (!audiences.length) return kind === 'personal';
+    return audiences.some((a) => this.enabled(key, a));
   }
 
   /** May this user receive `key`? Someone with no active membership here isn't routed. */
@@ -70,17 +82,18 @@ export class OrgEmailRouting {
     return m ? this.allowsMember(key, m) : true;
   }
 
-  /** Everyone who should receive a TEAM email: active staff in a ticked audience. */
+  /** Everyone who should receive a TEAM email: owners, admins, and staff in a ticked role. */
   teamRecipients(key: string): string[] {
     return this.members
-      .filter((m) => m.userId && m.role !== 'client' && (!m.personType || m.personType === 'staff'))
-      .filter((m) => audiencesOf(m).some((a) => this.enabled(key, a)))
+      .filter((m) => m.userId && isStaff(m))
+      .filter((m) => this.allowsMember(key, m))
       .map((m) => m.userId as string);
   }
 }
 
 export interface EmailMatrixView {
-  audiences: Array<{ key: string; label: string; kind: 'tier' | 'role' | 'norole' }>;
+  /** The org's roles, in the same order as the permission matrix. */
+  audiences: Array<{ key: string; roleId: string; label: string }>;
   emails: Array<{
     key: string;
     label: string;
@@ -135,19 +148,19 @@ export class EmailRoutingService {
     }
   }
 
-  /** The Roles page matrix: every email × every audience, with effective ticks. */
+  /** The email matrix: every email × every role, with effective ticks. */
   async matrix(orgId: string): Promise<EmailMatrixView> {
     const [row, roles] = await Promise.all([
       this.settings.findOne({ where: { organizationId: orgId } }),
-      this.roles.find({ where: { organizationId: orgId, isDeleted: false }, order: { displayName: 'ASC' } }),
+      this.roles.find({ where: { organizationId: orgId, isDeleted: false }, order: { createdAt: 'ASC' } }),
     ]);
     const routing = new OrgEmailRouting(row?.emailRouting ?? {}, []);
-    const audiences: EmailMatrixView['audiences'] = [
-      { key: AUDIENCE_OWNER, label: 'Owner', kind: 'tier' },
-      { key: AUDIENCE_ADMIN, label: 'Admin', kind: 'tier' },
-      ...roles.map((r) => ({ key: roleAudience(r.id), label: r.displayName || r.name, kind: 'role' as const })),
-      { key: AUDIENCE_NO_ROLE, label: 'No custom role', kind: 'norole' },
-    ];
+    // Same roles, same order as GET /org/roles (the permission matrix).
+    const audiences: EmailMatrixView['audiences'] = roles.map((r) => ({
+      key: roleAudience(r.id),
+      roleId: r.id,
+      label: r.displayName || r.name,
+    }));
     return {
       audiences,
       emails: EMAIL_CATALOG.map((e) => ({
@@ -161,7 +174,7 @@ export class EmailRoutingService {
     };
   }
 
-  /** Tick or untick one audience for one email. */
+  /** Tick or untick one role for one email. */
   async set(orgId: string, key: string, audience: string, enabled: boolean): Promise<EmailMatrixView> {
     const entry = emailCatalogEntry(key);
     if (!entry) throw new NotFoundException(`Unknown email "${key}"`);
@@ -176,7 +189,7 @@ export class EmailRoutingService {
     const forKey = { ...(next[key] || {}) };
     // Store only real choices: a tick that matches the default is removed, so a
     // later change of default still reaches orgs that never touched it.
-    if (enabled === defaultEnabled(entry.kind, audience)) delete forKey[audience];
+    if (enabled === defaultEnabled(entry.kind)) delete forKey[audience];
     else forKey[audience] = enabled;
     if (Object.keys(forKey).length) next[key] = forKey;
     else delete next[key];
@@ -201,12 +214,11 @@ export class EmailRoutingService {
   }
 
   private async assertAudience(orgId: string, audience: string): Promise<void> {
-    if (audience === AUDIENCE_OWNER || audience === AUDIENCE_ADMIN || audience === AUDIENCE_NO_ROLE) return;
     const match = /^role:(.+)$/.exec(audience);
     if (match) {
       const role = await this.roles.findOne({ where: { id: match[1], organizationId: orgId, isDeleted: false } });
       if (role) return;
     }
-    throw new BadRequestException(`Unknown audience "${audience}"`);
+    throw new BadRequestException(`Unknown role "${audience}"`);
   }
 }
