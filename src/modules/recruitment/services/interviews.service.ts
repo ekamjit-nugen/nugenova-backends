@@ -157,7 +157,7 @@ export class InterviewsService {
         id: candidate.id, fullName: candidate.fullName, email: candidate.email, phone: candidate.phone, currentLocation: candidate.currentLocation,
         currentCompany: candidate.currentCompany, currentDesignation: candidate.currentDesignation, totalExpMonths: candidate.totalExpMonths,
         noticePeriodDays: candidate.noticePeriodDays, noticeStatus: candidate.noticeStatus, skills: candidate.skills, highestQualification: candidate.highestQualification,
-        linkedinUrl: candidate.linkedinUrl, githubUrl: candidate.githubUrl, aiSummary: candidate.aiSummary,
+        linkedinUrl: candidate.linkedinUrl, githubUrl: candidate.githubUrl,
       } : null,
       resume: resume ? { id: resume.id, fileId: resume.fileId, fileName: resume.fileName, mimeType: resume.mimeType } : null,
       myFeedback: mine ? { ...mine, overallRating: toNum(mine.overallRating) } : null,

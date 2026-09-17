@@ -1,6 +1,6 @@
 ---
 module: recruitment
-title: Recruitment (ATS) — candidates, CV parsing, pipeline, interviews & offers
+title: Recruitment (ATS) — candidates, CVs, pipeline, interviews & offers
 owner: people
 status: live
 phase: 1
@@ -13,7 +13,7 @@ source: new module (replaces the team's "Candidates List.xlsx" + Google Drive CV
 The hiring workspace. The team sources candidates on **Cutshort** (plus Naukri,
 LinkedIn, referrals) and used to track them in an Excel sheet per role with CVs
 pasted as Drive links. This module keeps one rich profile per person, stores CVs
-in the platform (S3), fills profiles from the CV with AI, and runs every opening
+in the platform (S3) and shows them in the portal, and runs every opening
 on a stage pipeline with interviews, scorecards, offers and an onboarding handoff.
 
 ## Entities (migration `1788430000000-Recruitment`)
@@ -22,8 +22,8 @@ on a stage pipeline with interviews, scorecards, offers and an onboarding handof
 |---|---|
 | `recruitment_openings` | A role being hired for: title, code, location, work mode, experience + budget band, positions, skills, JD, hiring manager, recruiters, status (draft/open/on_hold/closed/filled), priority, target date, scorecard template. |
 | `recruitment_stages` | Org-wide pipeline, seeded from `DEFAULT_STAGES` (Sourced → Screening → Shortlisted → Interview → Final Round → Offer → Hired / Rejected). `kind` = active/hired/rejected. |
-| `candidates` | One row per person: contact (email/phone normalised to `email_norm`/`phone_norm`, **unique per org**), experience in months, company/designation, CTC current/expected, notice (days + status), education[] and workHistory[] (jsonb), skills, links, source + detail, legacy CV link, tags, rating, AI summary, owner, status, consent. `resume_text` (primary CV text) + a generated **`search_tsv`** (GIN) power full-text search. |
-| `candidate_documents` | CV versions (one primary), cover/offer letters, ID proofs — `fileId` from `/media/upload`, extracted text, parse status, parsed JSON. |
+| `candidates` | One row per person: contact (email/phone normalised to `email_norm`/`phone_norm`, **unique per org**), experience in months, company/designation, CTC current/expected, notice (days + status), education[] and workHistory[] (jsonb), skills, links, source + detail, legacy CV link, tags, rating, owner, status, consent. A generated **`search_tsv`** (GIN) powers full-text search over the profile (the legacy `ai_summary`/`resume_text` columns are no longer written). |
+| `candidate_documents` | CV versions (one primary), cover/offer letters, ID proofs — `fileId` from `/media/upload`, version, primary flag (the legacy text/parse columns are no longer written). |
 | `candidate_applications` | Candidate × opening (unique while not deleted): stage, status (active/hired/rejected/withdrawn), rejection reason, owner, timestamps. |
 | `application_stage_events` | Append-only stage trail → funnel, time-in-stage, time-to-hire. |
 | `recruitment_interviews` | Rounds: type, time, duration, interviewer ids (GIN), meeting link or built-in meeting id, criteria, status, reminder stamp. |
@@ -46,16 +46,13 @@ The migration also appends `recruitment` (all actions) to existing `owner`,
 - Every CV open (`…/access`), export and import writes to the org **Activity** feed (`category: recruitment`).
 - Owners / interviewers / hiring managers must be active **staff** members.
 
-## CV parsing (`CvParseService`)
+## CVs (`CandidateFilesService`) — no AI, nothing read from the file
 
-1. `/media/upload` → `POST /candidates/parse {fileId}`. File must belong to the caller's org.
-2. Text: PDF via `pdf-parse` (shared `knowledge/text-extraction`), DOCX via `mammoth`, text files decoded. Scanned PDFs → `no_text` (manual entry).
-3. `AiService.complete` with feature **`recruitment_cv_parse`** (policy gate + metering + PII redaction), temperature 0, strict JSON prompt. The CV is treated as untrusted data.
-4. `sanitizeParsedCandidate` validates everything (emails, E.164 phones, URL hosts, experience months, dedup skills); regex backfills contact details.
-5. AI unavailable/denied → regex fallback (`engine: 'regex'`, `parseStatus: 'partial'`) — never blocks the recruiter.
-6. Response includes **duplicates** (email/phone/name). `POST /candidates/from-cv` creates a candidate or attaches the CV to an existing one (fills blanks unless `overwrite`).
+Recruitment uses **no AI**. A CV is stored and shown exactly as uploaded; profile details are typed in by the team.
 
-Cutshort file names (`Cutshort-<Name>-…`) set `source = cutshort`.
+1. `/media/upload` → `POST /candidates/:id/documents {fileId, kind: 'resume'}` (edit) adds a new **version** and makes it primary; `POST …/:docId/primary` switches back; `DELETE …/:docId` removes one (the newest remaining CV becomes primary). `POST /candidates/from-cv {fileId, data}` (create) creates a candidate with typed-in details and the CV, or attaches it to `candidateId` (edit; fills blanks unless `overwrite`). File must belong to the caller's org.
+2. **Viewing in the portal:** `GET /candidates/:id/documents/:docId/file` streams the bytes inline (PDF/images render in the browser) and `GET …/preview` returns `{kind:'html', html}` for Word files (mammoth → HTML, shown in a sandboxed frame) or `{kind:'file'}` otherwise. Both use the same access as the profile (recruitment view, or an assigned interviewer for CVs only) and are audited as `recruitment.document_viewed`.
+3. Cutshort file names (`Cutshort-<Name>-…`) set `source = cutshort`; duplicates are checked on the typed-in email/phone/name.
 
 ## Spreadsheet import (`POST /candidates/import`)
 
@@ -98,7 +95,7 @@ A **Sales lead** is client demand; its `sales_requirements` (now with `positions
 
 ## REST — `/api/v1/recruitment` (JWT, org-scoped)
 
-- Candidates: `GET /candidates` (q, openingId, stageId, applicationStatus, source, status, ownerId, expMin/expMax years, noticeMax, location, skills, tags, hasResume, updatedSince, sort, order, page, limit) · `GET /candidates/export` · `GET /candidates/duplicates` · `POST /candidates/import|parse|from-cv|merge|bulk` · `POST /candidates` · `GET/PATCH/DELETE /candidates/:id` · documents `POST /candidates/:id/documents`, `GET …/:docId/access`, `POST …/:docId/primary`, `DELETE …/:docId` · timeline `POST /candidates/:id/activities`, `DELETE …/:activityId`.
+- Candidates: `GET /candidates` (q, openingId, stageId, applicationStatus, source, status, ownerId, expMin/expMax years, noticeMax, location, skills, tags, hasResume, updatedSince, sort, order, page, limit) · `GET /candidates/export` · `GET /candidates/duplicates` · `POST /candidates/import|from-cv|merge|bulk` · `POST /candidates` · `GET/PATCH/DELETE /candidates/:id` · documents `POST /candidates/:id/documents`, `GET …/:docId/access|file|preview`, `POST …/:docId/primary`, `DELETE …/:docId` · timeline `POST /candidates/:id/activities`, `DELETE …/:activityId`.
 - Openings: `GET/POST /openings`, `GET/PATCH/DELETE /openings/:id`, `GET /openings/:id/board`.
 - Applications: `POST /applications`, `POST /applications/bulk-move`, `PATCH /applications/:id/move`, `PATCH/DELETE /applications/:id`.
 - Interviews: `GET/POST /interviews`, `GET/PATCH/DELETE /interviews/:id`, `POST /interviews/:id/feedback`.
@@ -115,17 +112,18 @@ A **Sales lead** is client demand; its `sales_requirements` (now with `positions
 
 ## Frontend
 
-`/recruitment` dashboard · `/recruitment/candidates` (search incl. CV text, filters, bulk actions, Excel export) · `/recruitment/candidates/[id]` (profile, pipeline stepper, interviews + scorecards, offers + handoff, documents, timeline, AI auto-fill, merge duplicates) · `/recruitment/candidates/upload` (bulk AI CV review queue) · `/recruitment/candidates/import` (Excel wizard with preview) · `/recruitment/openings` + `/[id]` (drag-and-drop board, list, JD) · `/recruitment/interviews` + `/[id]` (panel view, scorecard) · `/recruitment/offers` · `/recruitment/settings` · `/recruitment/leads` (client leads list) + `/[id]` (workspace: stage, owner, requirements with a submission mini-board, find matches / submit / create opening, candidates, client interviews, follow-ups, notes, documents, timeline).
+`/recruitment` dashboard · `/recruitment/candidates` (search, filters, bulk actions, Excel export) · `/recruitment/candidates/[id]` (profile, pipeline stepper, interviews + scorecards, offers + handoff, CV viewer with versions, documents, timeline, merge duplicates) · `/recruitment/candidates/upload` (bulk CV upload: view each CV beside a short form) · `/recruitment/candidates/import` (Excel wizard with preview) · `/recruitment/openings` + `/[id]` (drag-and-drop board, list, JD) · `/recruitment/interviews` + `/[id]` (panel view, scorecard) · `/recruitment/offers` · `/recruitment/settings` · `/recruitment/leads` (client leads list) + `/[id]` (workspace: stage, owner, requirements with a submission mini-board, find matches / submit / create opening, candidates, client interviews, follow-ups, notes, documents, timeline).
 Candidates list has pool tabs and per-lead statuses; profiles have a **Client leads** tab and "Where they fit" suggestions; Upload CVs lets you choose Talent pool / Opening / Client lead and flags duplicates (existing by name/email/phone, and within the batch) before saving. Sample CVs live in `public/samples/` (regenerate with `node scripts/generate-recruitment-samples.mjs`). The Sales lead page shows a read-only Candidates panel.
 
 ## Tests
 
-- Unit: `recruitment.utils.spec.ts` (normalisers), `services/cv-parse.service.spec.ts` (AI path, fallback, org isolation), `matching.spec.ts` (scorer).
-- e2e: `features/recruitment.feature` — search, duplicate guard, permission + cross-org isolation, CTC masking, rejection reason + stage trail, interviewer-only access + scorecards, Excel import dry-run/commit/merge, CV upload → parse → create → full-text search, offer → hired → opening filled + analytics, merge.
-- e2e: `features/recruitment-leads.feature` — sample CVs parse, submit + duplicate 409, full client path fills the requirement, client interview advances, 403/404/masking, talent pool, suggestions & matches, opening from requirement, import with Lead column, lead workspace edits, one candidate in 4 leads at different stages, import preview duplicate flags.
+- Unit: `recruitment.utils.spec.ts` (normalisers), `services/candidate-files.service.spec.ts` (org isolation, Word preview), `matching.spec.ts` (scorer).
+- e2e: `features/recruitment.feature` — search, duplicate guard, permission + cross-org isolation, CTC masking, rejection reason + stage trail, interviewer-only access + scorecards, Excel import dry-run/commit/merge, CV upload with typed-in details → viewable as stored (parse endpoint gone), offer → hired → opening filled + analytics, merge.
+- e2e: `features/recruitment-team-access.feature` — recruiter CRUD end to end, CV versions (upload, new version, switch primary, remove) with byte-identical viewing, NUL-byte CV, create-with-CV, viewer read-only (403 on every write), employee 403 / other org 404, no AI usage recorded.
+- e2e: `features/recruitment-leads.feature` — sample PDF/DOCX CVs view in the portal, submit + duplicate 409, full client path fills the requirement, client interview advances, 403/404/masking, talent pool, suggestions & matches, opening from requirement, import with Lead column, lead workspace edits, one candidate in 4 leads at different stages, import preview duplicate flags.
 
 ## Operations
 
-- Needs `ANTHROPIC_API_KEY` (or the configured `AI_PROVIDER`) for AI parsing; without it parsing degrades to contact-detail extraction.
-- CV files follow `StorageService` (S3 when configured). Note the platform-wide `/media/files/:id` download is org-member scoped; CV file ids are only exposed to authorised recruitment views.
+- No AI provider is needed for recruitment.
+- CV files follow `StorageService` (S3 when configured). The portal opens CVs through the recruitment `…/file` route (permission-checked and audited); the platform-wide `/media/files/:id` download is org-member scoped and not used for CVs.
 - Data retention: candidates can be soft-deleted individually or in bulk; `consentAt` records consent when captured.

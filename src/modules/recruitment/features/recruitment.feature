@@ -62,12 +62,13 @@ Feature: Recruitment — talent pool, pipeline, interviews and offers
     Then the org has 2 candidates and "Data Engineer" has 2 applications
     And "Akash Shaw" has 108 months experience and a cleaned company
 
-  Scenario: a CV upload is parsed and creates a searchable candidate
+  Scenario: a CV is uploaded with typed-in details and shown as stored
     Given an organization with an opening "BI Developer"
-    When the owner uploads a text CV and parses it without AI
-    Then the parse extracts the email and phone
+    When the owner uploads a text CV
+    Then the CV-reading endpoint no longer exists
     When the owner saves the candidate from the CV into the opening
-    Then the candidate has a primary CV and is found by a word from the CV
+    Then the candidate has the CV as primary, with only the typed-in details
+    And the CV can be opened in the portal exactly as uploaded
 
   Scenario: an accepted offer hires the candidate and fills the opening
     Given an organization with candidate "Zaid Alam" in opening "GenAI Engineer"

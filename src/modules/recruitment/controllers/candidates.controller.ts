@@ -1,16 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RequirePermission } from '../../organization/guards/require-permission.decorator';
 import { RecruitmentAccessGuard } from '../guards/recruitment-access.guard';
 import { CandidatesService, CandidateListQuery } from '../services/candidates.service';
-import { CvParseService } from '../services/cv-parse.service';
 import { ImportExportService } from '../services/import-export.service';
 import { MatchingService } from '../services/matching.service';
 import { callerFromRequest } from '../services/recruitment-caller';
 import {
   AddDocumentDto, BulkCandidateActionDto, CandidateFromCvDto, CreateCandidateActivityDto, CreateCandidateDto,
-  ImportCandidatesDto, MergeCandidatesDto, ParseCvDto, UpdateCandidateDto,
+  ImportCandidatesDto, MergeCandidatesDto, UpdateCandidateDto,
 } from '../dto';
 
 const R = 'recruitment';
@@ -25,7 +25,6 @@ const R = 'recruitment';
 export class CandidatesController {
   constructor(
     private readonly candidates: CandidatesService,
-    private readonly cv: CvParseService,
     private readonly io: ImportExportService,
     private readonly matching: MatchingService,
   ) {}
@@ -62,10 +61,11 @@ export class CandidatesController {
     return this.ok(await this.io.importRows(callerFromRequest(req), dto));
   }
 
-  @Post('parse')
+  /** Preview a freshly uploaded CV before it is attached (Word → HTML; `{ kind: 'file' }` for PDFs/images). */
+  @Get('files/:fileId/preview')
   @RequirePermission(R, 'create')
-  async parse(@Req() req: any, @Body() dto: ParseCvDto) {
-    return this.ok(await this.cv.parse(callerFromRequest(req), dto.fileId, { skipAi: dto.skipAi }));
+  async filePreview(@Req() req: any, @Param('fileId') fileId: string) {
+    return this.ok(await this.candidates.filePreview(callerFromRequest(req), fileId));
   }
 
   @Post('from-cv')
@@ -126,6 +126,24 @@ export class CandidatesController {
   @Get(':id/documents/:docId/access')
   async accessDocument(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string) {
     return this.ok(await this.candidates.accessDocument(callerFromRequest(req), id, docId));
+  }
+
+  /** The file itself, for viewing in the portal (PDF/image inline). Same access as `access`; audited. */
+  @Get(':id/documents/:docId/file')
+  async documentFile(@Req() req: any, @Res() res: Response, @Param('id') id: string, @Param('docId') docId: string) {
+    const { file, bytes } = await this.candidates.documentFile(callerFromRequest(req), id, docId);
+    const safeName = (file.originalName || 'document').replace(/[^\w.\-]+/g, '_');
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(bytes);
+  }
+
+  /** A Word CV rendered as HTML for the viewer; `{ kind: 'file' }` for anything shown directly. */
+  @Get(':id/documents/:docId/preview')
+  async documentPreview(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string) {
+    return this.ok(await this.candidates.documentPreview(callerFromRequest(req), id, docId));
   }
 
   @Post(':id/documents/:docId/primary')
