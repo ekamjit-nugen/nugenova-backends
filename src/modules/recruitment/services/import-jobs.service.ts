@@ -103,7 +103,7 @@ export class ImportJobsService implements OnModuleInit, OnModuleDestroy {
           caller: { userId: caller.userId, orgId: caller.orgId, isAdmin: caller.isAdmin, actions: caller.actions },
           fileName: dto.fileName.trim().slice(0, 255) || 'Spreadsheet', fileSize: dto.fileSize ?? null,
           sheetNames: [...new Set(dto.rows.map((r) => r.sheet).filter((s): s is string => typeof s === 'string' && !!s))].slice(0, 100) as string[],
-          idempotencyKey: key, status: 'queued', options: { defaultSource: dto.defaultSource, tags: dto.tags ?? [] },
+          idempotencyKey: key, status: 'queued', options: { defaultSource: dto.defaultSource, tags: dto.tags ?? [], duplicates: dto.duplicates ?? 'merge', skipPossibleDuplicates: !!dto.skipPossibleDuplicates },
           totalRows: dto.rows.length,
         });
         for (let i = 0; i < dto.rows.length; i += INSERT_CHUNK) {

@@ -34,7 +34,7 @@ export class RecruitmentImportJobEntity extends PgBaseEntity {
   status: ImportJobStatus;
 
   @Column({ type: 'jsonb', default: () => "'{}'" })
-  options: { defaultSource?: string; tags?: string[] };
+  options: { defaultSource?: string; tags?: string[]; duplicates?: 'merge' | 'skip'; skipPossibleDuplicates?: boolean };
 
   @Column({ type: 'int', default: 0 }) totalRows: number;
   @Column({ type: 'int', default: 0 }) processedRows: number;

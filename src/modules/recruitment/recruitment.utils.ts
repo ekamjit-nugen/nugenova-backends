@@ -331,6 +331,24 @@ export function sanitizeParsedCandidate(raw: any): ParsedCandidate {
  * Cheap regex fallback used when the LLM is unavailable: pulls email, phones and
  * a LinkedIn/GitHub URL straight from the CV text.
  */
+/**
+ * The candidate's name as CVs usually print it: one of the first lines, 2–4
+ * words of letters only ("ANMOL KUMAR SHARMA", "Priya S. Nair"). Skips headings
+ * such as "Curriculum Vitae" or "Profile Summary".
+ */
+export function guessNameFromText(text: string): string | null {
+  const lines = (text || '').split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 6);
+  for (const line of lines) {
+    if (line.length < 4 || line.length > 40) continue;
+    if (!/^[\p{L}][\p{L}.' -]*$/u.test(line)) continue;
+    const words = line.split(' ').filter(Boolean);
+    if (words.length < 2 || words.length > 4) continue;
+    if (/\b(resume|résumé|curriculum|vitae|cv|profile|summary|objective|contact|experience|education|skills|address|personal|details)\b/i.test(line)) continue;
+    return tidyName(line);
+  }
+  return null;
+}
+
 export function regexExtract(text: string): Partial<ParsedCandidate> {
   const email = normalizeEmail(text.match(/[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0]);
   const phoneMatches = text.match(/(?:\+?\d[\d\s().-]{8,16}\d)/g) ?? [];
@@ -339,6 +357,7 @@ export function regexExtract(text: string): Partial<ParsedCandidate> {
   const github = text.match(/(?:https?:\/\/)?github\.com\/[A-Za-z0-9_-]+/i)?.[0];
   const exp = text.match(/(\d+(?:\.\d+)?)\s*\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:total\s+)?(?:work\s+|professional\s+|industry\s+)?experience/i);
   return {
+    fullName: guessNameFromText(text),
     email,
     phone: phones[0] ?? null,
     altPhone: phones[1] ?? null,

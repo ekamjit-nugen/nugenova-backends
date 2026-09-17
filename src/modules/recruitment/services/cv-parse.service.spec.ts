@@ -18,7 +18,24 @@ function build(opts: { aiText?: string; aiError?: Error; fileOrg?: string; bytes
 }
 
 describe('CvParseService', () => {
+  const previous = process.env.RECRUITMENT_CV_AI;
+  afterEach(() => {
+    if (previous === undefined) delete process.env.RECRUITMENT_CV_AI; else process.env.RECRUITMENT_CV_AI = previous;
+  });
+
+  it('reads CVs without AI by default: name, contact details, no external call, no warning', async () => {
+    delete process.env.RECRUITMENT_CV_AI;
+    const { svc, ai } = build();
+    const res = await svc.parse(caller, 'f1');
+    expect(ai.complete).not.toHaveBeenCalled();
+    expect(res.engine).toBe('regex');
+    expect(res.warning).toBeNull();
+    expect(res.source).toBe('cutshort');
+    expect(res.extracted).toMatchObject({ fullName: 'Aviral Sharma', email: 'sharmaaviral743@gmail.com', phone: '+918889839544' });
+  });
+
   it('uses the model output, sanitised, and tags Cutshort files', async () => {
+    process.env.RECRUITMENT_CV_AI = 'on';
     const { svc, ai } = build({
       aiText: '```json\n{"fullName":"AVIRAL SHARMA","emails":["SharmaAviral743@gmail.com"],"phones":["8889839544"],"totalExpMonths":40,"skills":["SQL","Python","sql"],"summary":"Data engineer."}\n```',
     });
@@ -31,6 +48,7 @@ describe('CvParseService', () => {
   });
 
   it('falls back to regex extraction when the model is unavailable', async () => {
+    process.env.RECRUITMENT_CV_AI = 'on';
     const { svc } = build({ aiError: new Error('AI service is temporarily unavailable') });
     const res = await svc.parse(caller, 'f1');
     expect(res.engine).toBe('regex');
@@ -41,6 +59,7 @@ describe('CvParseService', () => {
   });
 
   it('never calls the model when skipAi is set or the file has no text', async () => {
+    process.env.RECRUITMENT_CV_AI = 'on';
     const a = build();
     await a.svc.parse(caller, 'f1', { skipAi: true });
     expect(a.ai.complete).not.toHaveBeenCalled();

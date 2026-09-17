@@ -1,6 +1,6 @@
 import {
   cleanCell, cleanList, experienceFromHistory, extractJsonObject, isCutshortFileName, looksLikeSheetNote, normalizeEmail, normalizePhone,
-  normalizeSource, parseExperienceMonths, parseLegacyRemarks, parseNotice, regexExtract, sanitizeParsedCandidate,
+  guessNameFromText, normalizeSource, parseExperienceMonths, parseLegacyRemarks, parseNotice, regexExtract, sanitizeParsedCandidate,
   tidyCompany, tidyName, toPrefixTsQuery,
 } from './recruitment.utils';
 
@@ -167,5 +167,16 @@ describe('looksLikeSheetNote', () => {
       expect(looksLikeSheetNote(n)).toBe(false);
     }
     expect(looksLikeSheetNote(null)).toBe(false);
+  });
+});
+
+describe('guessNameFromText', () => {
+  it('reads the name printed at the top of a CV', () => {
+    expect(guessNameFromText('ANMOL KUMAR SHARMA\nS C | P BI\nNoida, UP 201003 ◆ +91 - 9906152344')).toBe('Anmol Kumar Sharma');
+    expect(guessNameFromText('Curriculum Vitae\nPriya S. Nair\npriya@example.com')).toBe('Priya S. Nair');
+  });
+  it('skips headings, contact lines and long sentences', () => {
+    expect(guessNameFromText('Professional Summary\nemail: a@b.com\nSeasoned data analytics professional with 8 years of experience')).toBeNull();
+    expect(guessNameFromText('')).toBeNull();
   });
 });

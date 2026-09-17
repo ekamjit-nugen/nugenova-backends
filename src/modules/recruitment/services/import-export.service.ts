@@ -49,6 +49,9 @@ export interface ImportContext {
   dryRun: boolean;
   defaultSource: CandidateSource;
   extraTags: string[];
+  /** 'skip' discards rows matching an existing candidate or an earlier row instead of merging them. */
+  duplicates: 'merge' | 'skip';
+  skipPossibleDuplicates: boolean;
   stages: Awaited<ReturnType<PipelineService['ensureStages']>>;
   seq: number;
   batch: Map<string, string>;
@@ -137,7 +140,7 @@ export class ImportExportService {
   async importRows(caller: RecruitmentCaller, dto: ImportCandidatesDto) {
     assertCan(caller, 'create');
     const dryRun = !!dto.dryRun;
-    const ctx = await this.createContext(caller, { defaultSource: dto.defaultSource, tags: dto.tags }, dryRun);
+    const ctx = await this.createContext(caller, { defaultSource: dto.defaultSource, tags: dto.tags, duplicates: dto.duplicates, skipPossibleDuplicates: dto.skipPossibleDuplicates }, dryRun);
     if (dryRun) ctx.existing = await this.indexExisting(caller.orgId, dto.rows, ctx.defaultSource);
     const results: ImportRowResult[] = [];
     for (const row of dto.rows) results.push(await this.processRow(ctx, row));
@@ -149,11 +152,17 @@ export class ImportExportService {
   }
 
   /** Shared state for one import (preview, sync import or a background job). */
-  async createContext(caller: RecruitmentCaller, options: { defaultSource?: string; tags?: string[] }, dryRun: boolean): Promise<ImportContext> {
+  async createContext(
+    caller: RecruitmentCaller,
+    options: { defaultSource?: string; tags?: string[]; duplicates?: 'merge' | 'skip'; skipPossibleDuplicates?: boolean },
+    dryRun: boolean,
+  ): Promise<ImportContext> {
     return {
       caller, dryRun,
       defaultSource: (options.defaultSource ?? 'import') as CandidateSource,
       extraTags: cleanList(options.tags ?? [], 10),
+      duplicates: options.duplicates === 'skip' ? 'skip' : 'merge',
+      skipPossibleDuplicates: !!options.skipPossibleDuplicates,
       stages: await this.pipeline.ensureStages(caller.orgId),
       seq: 0,
       batch: new Map(), batchRows: new Map(), nameRows: new Map(),
@@ -250,6 +259,18 @@ export class ImportExportService {
           res.duplicate = { kind: 'file', action: 'flagged', candidateId: null, fullName: earlier.fullName, row: earlier.row, matchedOn: ['name'] };
           res.messages.push(`Same name as ${earlier.row ? `row ${earlier.row}` : 'an earlier row'} but different contact details — review before importing`);
         }
+      }
+
+      // "Discard duplicates": keep what's already there and drop this row.
+      if (candidateId && ctx.duplicates === 'skip') {
+        const who = res.duplicate?.kind === 'file' ? `row ${res.duplicate.row ?? '?'} in this file` : `existing “${res.duplicate?.fullName ?? 'candidate'}”`;
+        res.messages = [`Discarded — duplicate of ${who} (same ${res.duplicate?.matchedOn.join(' & ') ?? 'details'})`];
+        return res;
+      }
+      if (!candidateId && res.duplicate?.action === 'flagged' && ctx.skipPossibleDuplicates) {
+        const who = res.duplicate.kind === 'file' ? `row ${res.duplicate.row ?? '?'} in this file` : `existing “${res.duplicate.fullName}”`;
+        res.messages = [`Discarded — possible duplicate of ${who} (same name)`];
+        return res;
       }
 
       if (candidateId) {

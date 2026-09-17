@@ -248,6 +248,50 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('duplicates can be discarded instead of merged', ({ given, and, when, then }) => {
+    let org: CreatedOrg;
+    let jobId: string;
+    let raviId: string;
+    const u = uniq();
+    given('an organization', async () => { org = await newOrg(); });
+    and(/^an existing candidate "(.*)" with email "(.*)" and company "(.*)"$/, async (name: string, email: string, company: string) => {
+      raviId = (await api().post(`${API}/candidates`).set(auth(org.ownerToken)).send({ fullName: name, email, currentCompany: company }).expect(201)).body.data.id;
+    });
+    and(/^an existing candidate "(.*)" with phone "(.*)"$/, async (name: string, phone: string) => {
+      await api().post(`${API}/candidates`).set(auth(org.ownerToken)).send({ fullName: name, phone }).expect(201);
+    });
+    when(/^the owner imports with duplicates discarded: a row matching Ravi by email, a new person twice and a different "(.*)"$/, async (other: string) => {
+      const res = await start(org, {
+        duplicates: 'skip', skipPossibleDuplicates: true,
+        rows: [
+          { sheet: 'S', rowNumber: 2, fullName: 'Ravi Menon', email: 'ravi.menon@example.com', currentCompany: 'New Co' },
+          { sheet: 'S', rowNumber: 3, fullName: 'Tara Das', email: `tara.${u}@example.com` },
+          { sheet: 'S', rowNumber: 4, fullName: 'TARA DAS', email: `tara.${u}@example.com` },
+          { sheet: 'S', rowNumber: 5, fullName: other, email: `sunita.other.${u}@example.com` },
+        ],
+      }).expect(202);
+      jobId = res.body.data.id;
+    });
+    then(/^the import finishes with (\d+) new, (\d+) merged and (\d+) ignored$/, async (n: string, m: string, s: string) => {
+      const job = await waitDone(org, jobId);
+      expect(job.counts.created).toBe(Number(n));
+      expect(job.counts.merged).toBe(Number(m));
+      expect(job.counts.skipped).toBe(Number(s));
+      expect(await candidateCount(org)).toBe(3);
+    });
+    and(/^Ravi's profile still says "(.*)"$/, async (company: string) => {
+      const c = (await api().get(`${API}/candidates/${raviId}`).set(auth(org.ownerToken)).expect(200)).body.data.candidate;
+      expect(c.currentCompany).toBe(company);
+    });
+    and('each discarded row names the candidate or row it duplicates', async () => {
+      const rows = (await api().get(`${API}/imports/${jobId}/rows?filter=skipped`).set(auth(org.ownerToken)).expect(200)).body.data.items;
+      const byRow = Object.fromEntries(rows.map((r: any) => [r.rowNumber, r.messages.join(' ')]));
+      expect(byRow[2]).toMatch(/Discarded — duplicate of existing “Ravi Menon” \(same email/);
+      expect(byRow[4]).toMatch(/Discarded — duplicate of row 3 in this file/);
+      expect(byRow[5]).toMatch(/Discarded — possible duplicate of existing “Sunita Rao” \(same name\)/);
+    });
+  });
+
   test('finished imports can be dismissed and only failed rows are retried', ({ given, and, when, then }) => {
     let org: CreatedOrg;
     let jobId: string;

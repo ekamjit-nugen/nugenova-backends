@@ -142,7 +142,9 @@ export class CvParseService {
     let warning: string | null = null;
     let parseStatus: ParseStatus = 'partial';
 
-    if (opts.skipAi) {
+    // AI extraction is switched off for now (RECRUITMENT_CV_AI=on re-enables it): uploads read
+    // contact details, name and experience straight from the text — instant, no external call.
+    if (opts.skipAi || process.env.RECRUITMENT_CV_AI !== 'on') {
       extracted = fallback();
     } else {
       try {

@@ -331,6 +331,10 @@ export class ImportRowDto {
 export class ImportCandidatesDto {
   @IsArray() @ArrayMaxSize(5000) @ValidateNested({ each: true }) @Type(() => ImportRowDto) rows: ImportRowDto[];
   @IsOptional() @IsBoolean() dryRun?: boolean;
+  /** What to do with a row that matches an existing candidate or an earlier row: fill blanks (merge) or discard it. */
+  @IsOptional() @IsIn(['merge', 'skip']) duplicates?: 'merge' | 'skip';
+  /** Also discard rows that only share a name with someone (possible duplicates) instead of creating them. */
+  @IsOptional() @IsBoolean() skipPossibleDuplicates?: boolean;
   /** Source applied when a row has none (the team sources from Cutshort). */
   @IsOptional() @IsIn(list(CANDIDATE_SOURCES)) defaultSource?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
@@ -345,6 +349,8 @@ export class CreateImportJobDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10000) @ValidateNested({ each: true }) @Type(() => ImportRowDto) rows: ImportRowDto[];
   @IsOptional() @IsIn(list(CANDIDATE_SOURCES)) defaultSource?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(10) @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
+  @IsOptional() @IsIn(['merge', 'skip']) duplicates?: 'merge' | 'skip';
+  @IsOptional() @IsBoolean() skipPossibleDuplicates?: boolean;
 }
 
 

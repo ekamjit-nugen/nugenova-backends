@@ -45,3 +45,13 @@ Feature: Recruitment — background spreadsheet imports
     Then cancelling it is rejected as already finished
     And retrying it is rejected because nothing failed
     And dismissing it hides it from the dashboard list
+
+  Scenario: duplicates can be discarded instead of merged
+    Given an organization
+    And an existing candidate "Ravi Menon" with email "ravi.menon@example.com" and company "Old Co"
+    And an existing candidate "Sunita Rao" with phone "9811100022"
+    When the owner imports with duplicates discarded: a row matching Ravi by email, a new person twice and a different "Sunita Rao"
+    Then the import finishes with 1 new, 0 merged and 3 ignored
+    And Ravi's profile still says "Old Co"
+    And each discarded row names the candidate or row it duplicates
+
