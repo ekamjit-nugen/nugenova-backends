@@ -81,6 +81,22 @@ function looksBinary(buf: Buffer): boolean {
   return control / sample.length > 0.3;
 }
 
+/**
+ * Make extracted text safe to store and index. PDFs with custom font encodings
+ * often yield NUL bytes (U+0000) for some glyphs — Postgres text/jsonb reject
+ * them outright ("invalid byte sequence for encoding UTF8: 0x00"), which used
+ * to fail the whole CV upload. Also drops other C0 control characters (keeping
+ * tab/newline/CR), unpaired surrogates and replacement characters, and tidies
+ * the runs of spaces the removed glyphs leave behind.
+ */
+export function sanitizeExtractedText(text: string): string {
+  return text
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\uFFFD]/g, '')
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
+    .replace(/[ \t]{3,}/g, '  ')
+    .trim();
+}
+
 /** Decode a textual buffer to a UTF-8 string. */
 function decodeText(buf: Buffer): string {
   return buf.toString('utf8');
@@ -118,7 +134,7 @@ export async function extractText(
       const bytes = new Uint8Array(buffer.length);
       bytes.set(buffer);
       const parsed = await pdfParse(bytes);
-      const text = (parsed?.text || '').trim();
+      const text = sanitizeExtractedText(parsed?.text || '');
       if (!text) return { status: 'empty', text: '', reason: 'pdf had no extractable text' };
       return { status: 'ok', text };
     } catch (err) {
@@ -136,14 +152,14 @@ export async function extractText(
     if (looksBinary(buffer)) {
       return { status: 'unextractable', text: '', reason: 'declared text but bytes look binary' };
     }
-    const text = decodeText(buffer).trim();
+    const text = sanitizeExtractedText(decodeText(buffer));
     if (!text) return { status: 'empty', text: '', reason: 'no text content' };
     return { status: 'ok', text };
   }
 
   // Unknown type: accept only if it decodes as clean text, else skip.
   if (!looksBinary(buffer)) {
-    const text = decodeText(buffer).trim();
+    const text = sanitizeExtractedText(decodeText(buffer));
     if (text) return { status: 'ok', text };
     return { status: 'empty', text: '', reason: 'no text content' };
   }
