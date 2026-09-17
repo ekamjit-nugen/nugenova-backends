@@ -65,13 +65,22 @@ describe('MembershipService (unit, no DB)', () => {
     membershipRepo.findOne.mockResolvedValue(null); // no existing membership
   };
 
-  it('attaches the tier system role when no custom role is picked', async () => {
+  it('gives just the tier, with no role row, when no custom role is picked', async () => {
     freshUser();
-    // The org's Manager system role backs the 'manager' tier.
-    roleRepo.findOne.mockResolvedValue({ id: 'sys-manager', tier: 'manager', isSystem: true });
+    // Even if a built-in role with that tier exists (the education pack has
+    // them), it must NOT be attached — nothing should hand a manager "Principal".
+    roleRepo.findOne.mockResolvedValue({ id: 'edu-principal', name: 'principal', tier: 'manager', isSystem: true });
     await service.addMember('org-1', { email: 'a@b.com', role: 'manager' } as any, 'inviter');
     expect(membershipRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ role: 'manager', roleId: 'sys-manager' }),
+      expect.objectContaining({ role: 'manager', roleId: null }),
+    );
+  });
+
+  it('defaults to the employee tier when neither a tier nor a role is given', async () => {
+    freshUser();
+    await service.addMember('org-1', { email: 'a@b.com' } as any, 'inviter');
+    expect(membershipRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'employee', roleId: null }),
     );
   });
 

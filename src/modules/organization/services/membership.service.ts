@@ -104,17 +104,14 @@ export class MembershipService {
     orgId: string,
     input: { role?: string; roleId?: string; departmentId?: string },
   ): Promise<{ tier: string; roleId: string | null; departmentId: string | null }> {
-    // No custom role picked → attach the SYSTEM role for the requested tier, so
-    // every member holds a real, visible role row (never a bare tier). Falls
-    // back to the raw tier only if the org has no seeded system role (legacy).
+    // No custom role picked → the member holds just the tier, with no role row.
+    // There are no built-in tier roles to attach any more, and a lookup by
+    // (tier, isSystem) would be actively wrong: the education pack's built-in
+    // roles carry tiers too, so it could hand an admin the "Principal" role.
     if (!input.roleId) {
-      const tier = input.role || 'employee';
-      const sys = await this.roleRepo.findOne({
-        where: { organizationId: orgId, tier, isSystem: true, isDeleted: false },
-      });
       return {
-        tier,
-        roleId: sys?.id ?? null,
+        tier: input.role || 'employee',
+        roleId: null,
         departmentId: input.departmentId ?? null,
       };
     }
