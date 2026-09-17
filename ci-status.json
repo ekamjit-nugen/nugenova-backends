@@ -4,239 +4,239 @@
     "passed": 58,
     "failed": 0,
     "total": 58,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "sales": {
     "status": "passing",
     "passed": 35,
     "failed": 0,
     "total": 35,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "storage": {
     "status": "passing",
     "passed": 50,
     "failed": 0,
     "total": 50,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "discussion-boards": {
     "status": "passing",
     "passed": 22,
     "failed": 0,
     "total": 22,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "chat": {
     "status": "passing",
     "passed": 119,
     "failed": 0,
     "total": 119,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "assessment": {
     "status": "passing",
     "passed": 21,
     "failed": 0,
     "total": 21,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
-  },
-  "meetings": {
-    "status": "passing",
-    "passed": 21,
-    "failed": 0,
-    "total": 21,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "lms": {
     "status": "passing",
     "passed": 25,
     "failed": 0,
     "total": 25,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
+  },
+  "meetings": {
+    "status": "passing",
+    "passed": 21,
+    "failed": 0,
+    "total": 21,
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "onboarding": {
     "status": "passing",
     "passed": 63,
     "failed": 0,
     "total": 63,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "organization": {
     "status": "passing",
     "passed": 117,
     "failed": 0,
     "total": 117,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "auth": {
     "status": "passing",
     "passed": 64,
     "failed": 0,
     "total": 64,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "notification": {
     "status": "passing",
     "passed": 122,
     "failed": 0,
     "total": 122,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "terms": {
     "status": "passing",
     "passed": 17,
     "failed": 0,
     "total": 17,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
+  },
+  "recruitment": {
+    "status": "passing",
+    "passed": 97,
+    "failed": 0,
+    "total": 97,
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "guardian": {
     "status": "passing",
     "passed": 18,
     "failed": 0,
     "total": 18,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "ai-chat": {
     "status": "passing",
     "passed": 16,
     "failed": 0,
     "total": 16,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
-  },
-  "recruitment": {
-    "status": "passing",
-    "passed": 93,
-    "failed": 0,
-    "total": 93,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "vertical": {
     "status": "passing",
     "passed": 17,
     "failed": 0,
     "total": 17,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "payroll": {
     "status": "passing",
     "passed": 91,
     "failed": 0,
     "total": 91,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
-  },
-  "calendar": {
-    "status": "passing",
-    "passed": 13,
-    "failed": 0,
-    "total": 13,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "knowledge": {
     "status": "passing",
     "passed": 21,
     "failed": 0,
     "total": 21,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
+  },
+  "calendar": {
+    "status": "passing",
+    "passed": 13,
+    "failed": 0,
+    "total": 13,
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "academic": {
     "status": "passing",
     "passed": 17,
     "failed": 0,
     "total": 17,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
-  },
-  "policy": {
-    "status": "passing",
-    "passed": 59,
-    "failed": 0,
-    "total": 59,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
-  },
-  "ai": {
-    "status": "passing",
-    "passed": 33,
-    "failed": 0,
-    "total": 33,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "activity": {
     "status": "passing",
     "passed": 15,
     "failed": 0,
     "total": 15,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
+  },
+  "policy": {
+    "status": "passing",
+    "passed": 59,
+    "failed": 0,
+    "total": 59,
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
+  },
+  "ai": {
+    "status": "passing",
+    "passed": 33,
+    "failed": 0,
+    "total": 33,
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "attendance": {
     "status": "passing",
     "passed": 82,
     "failed": 0,
     "total": 82,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "platform-events": {
     "status": "passing",
     "passed": 4,
     "failed": 0,
     "total": 4,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "leave": {
     "status": "passing",
     "passed": 23,
     "failed": 0,
     "total": 23,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "health": {
     "status": "passing",
     "passed": 2,
     "failed": 0,
     "total": 2,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "timesheet": {
     "status": "passing",
     "passed": 8,
     "failed": 0,
     "total": 8,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   },
   "admin-platform": {
     "status": "passing",
     "passed": 2,
     "failed": 0,
     "total": 2,
-    "ranAt": "2026-09-17T13:16:02.195Z",
-    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35225159774"
+    "ranAt": "2026-09-17T13:25:39.179Z",
+    "runUrl": "https://github.com/ekamjit-nugen/nugenova-backends/actions/runs/35226101738"
   }
 }
