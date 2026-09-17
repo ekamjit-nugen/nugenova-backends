@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PostgresModule } from './bootstrap/database/postgres.module';
@@ -38,6 +38,25 @@ import { CalendarModule } from './modules/calendar/calendar.module';
 import { RecruitmentModule } from './modules/recruitment/recruitment.module';
 
 /**
+ * Scheduled jobs (@Cron: attendance absent marking and reminders, the daily
+ * attendance summary, onboarding reminders, retention…) run only when
+ * ScheduleModule is registered. `ENABLE_SCHEDULED_JOBS=false` leaves it out, so
+ * every @Cron is inert.
+ *
+ * Production leaves it unset (jobs on). Set it to false anywhere else that
+ * points at a shared database — otherwise a local `npm run dev` runs the same
+ * jobs against that data a second time. Read after ConfigModule.forRoot() has
+ * loaded .env, so it can be set there or in the shell.
+ */
+function scheduledJobs() {
+  if (String(process.env.ENABLE_SCHEDULED_JOBS ?? '').trim().toLowerCase() === 'false') {
+    new Logger('Scheduler').warn('ENABLE_SCHEDULED_JOBS=false — scheduled jobs are OFF for this process');
+    return [];
+  }
+  return [ScheduleModule.forRoot()];
+}
+
+/**
  * Nugenova backend root module.
  *
  * Postgres-only. Migrated modules are added to the imports below one at a time
@@ -48,7 +67,8 @@ import { RecruitmentModule } from './modules/recruitment/recruitment.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     PostgresModule,
-    ScheduleModule.forRoot(),
+    // Must stay after ConfigModule.forRoot(), which loads .env into process.env.
+    ...scheduledJobs(),
     // Global domain event bus (§08 layer 1) — registers EventEmitterModule.forRoot()
     // ONCE (like ScheduleModule) and exposes DomainEventsService. Also serves chat's
     // in-process bus: MessagesService emits and ChatGateway @OnEvent listens through
