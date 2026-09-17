@@ -1,9 +1,16 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { ActivityCategory, ActivityEventEntity } from './entities/activity-event.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { ERROR_AREAS, areaKeyOf, isErrorArea } from './error-areas';
+
+/**
+ * An error row's area: the stored `metadata.area`, or — for rows written before
+ * areas existed — the first segment of its API path (`/api/v1/<segment>/...`).
+ */
+const AREA_SQL = `COALESCE(e.metadata->>'area', split_part(split_part(e.metadata->>'path', '?', 1), '/', 4))`;
 
 export interface ActivityCaller {
   userId: string;
@@ -28,6 +35,8 @@ export interface ActivityQuery {
   scope?: 'all' | 'me';
   actorId?: string;
   category?: ActivityCategory;
+  /** Errors only: the part of the app they came from (see error-areas). */
+  area?: string;
   from?: string;
   to?: string;
   page?: number;
@@ -90,25 +99,59 @@ export class ActivityService {
     const page = Math.max(1, Number(q.page) || 1);
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(q.limit) || 25));
 
+    const qb = this.scoped(orgId, caller, q);
+    if (q.category) qb.andWhere('e.category = :category', { category: q.category });
+    if (q.area) {
+      // An area only means something for errors.
+      qb.andWhere('e.category = :errors', { errors: 'errors' });
+      if (!isErrorArea(q.area)) throw new BadRequestException(`Unknown error area "${q.area}"`);
+      if (q.area === 'other') {
+        const known = ERROR_AREAS.flatMap((a) => (a.key === 'other' ? [] : [a.key, ...a.segments]));
+        qb.andWhere(`${AREA_SQL} NOT IN (:...known)`, { known });
+      } else {
+        const area = ERROR_AREAS.find((a) => a.key === q.area)!;
+        qb.andWhere(`${AREA_SQL} IN (:...keys)`, { keys: [area.key, ...area.segments] });
+      }
+    }
+
+    const [items, total] = await qb
+      .orderBy('e.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+    return { items, page, limit, total };
+  }
+
+  /**
+   * How many errors each area has, for the Activity page's area filter. Same
+   * visibility rules as the feed (a non-admin counts only their own errors).
+   */
+  async errorAreas(orgId: string, caller: ActivityCaller, q: Pick<ActivityQuery, 'scope' | 'actorId' | 'from' | 'to'>) {
+    const rows = await this.scoped(orgId, caller, q)
+      .andWhere('e.category = :errors', { errors: 'errors' })
+      .select(AREA_SQL, 'segment')
+      .addSelect('COUNT(*)::int', 'count')
+      .groupBy('segment')
+      .getRawMany<{ segment: string | null; count: number }>();
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const key = areaKeyOf(r.segment);
+      counts.set(key, (counts.get(key) ?? 0) + Number(r.count));
+    }
+    return ERROR_AREAS.filter((a) => counts.has(a.key)).map((a) => ({ key: a.key, label: a.label, count: counts.get(a.key)! }));
+  }
+
+  /** Org + who-can-see-what + date window, shared by the feed and the area counts. */
+  private scoped(orgId: string, caller: ActivityCaller, q: Pick<ActivityQuery, 'scope' | 'actorId' | 'from' | 'to'>) {
+    const qb = this.events.createQueryBuilder('e').where('e.organizationId = :orgId', { orgId });
     // A non-admin can only ever read their own activity.
     const scopeMe = !caller.isAdmin || q.scope === 'me';
-    const where: Record<string, unknown> = { organizationId: orgId };
-    if (scopeMe) where.actorId = caller.userId;
-    else if (q.actorId) where.actorId = q.actorId;
-    if (q.category) where.category = q.category;
-
+    if (scopeMe) qb.andWhere('e.actorId = :me', { me: caller.userId });
+    else if (q.actorId) qb.andWhere('e.actorId = :actorId', { actorId: q.actorId });
     const from = q.from ? new Date(q.from) : null;
     const to = q.to ? new Date(q.to) : null;
-    if (from && to) where.createdAt = Between(from, to);
-    else if (from) where.createdAt = MoreThanOrEqual(from);
-    else if (to) where.createdAt = LessThanOrEqual(to);
-
-    const [items, total] = await this.events.findAndCount({
-      where,
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
-    return { items, page, limit, total };
+    if (from) qb.andWhere('e.createdAt >= :from', { from });
+    if (to) qb.andWhere('e.createdAt <= :to', { to });
+    return qb;
   }
 }
