@@ -8,6 +8,7 @@ import { AuthService } from './auth.service';
 import { AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 import { SessionSweepService } from './services/session-sweep.service';
+import { DashboardLayoutService } from './services/dashboard-layout.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { AuthPublicApiImpl } from './public-api/auth-public-api.impl';
@@ -54,6 +55,7 @@ import { OrganizationEntity } from '../organization/entities/organization.entity
     AuditService,
     TokenRevocationService,
     SessionSweepService,
+    DashboardLayoutService,
     JwtAuthGuard,
     PlatformAdminGuard,
     AuthPublicApiImpl,
