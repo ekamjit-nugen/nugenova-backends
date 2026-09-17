@@ -223,7 +223,6 @@ export class OrganizationService {
       .catch((e) =>
         this.logger.warn(`Role seed failed for ${org.id}: ${e?.message ?? e}`),
       );
-    const ownerRole = await this.roles.systemRoleForTier(org.id, 'owner');
 
     // Owner membership — refuse a duplicate (idempotency guard).
     const existing = await this.membershipRepo.findOne({
@@ -237,7 +236,8 @@ export class OrganizationService {
         userId: owner.id,
         organizationId: org.id,
         role: 'owner',
-        roleId: ownerRole?.id ?? null,
+        // Full access comes from the 'owner' tier itself; there is no Owner role row.
+        roleId: null,
         status: 'active',
         joinedAt: new Date(),
         invitedBy: createdByUserId,

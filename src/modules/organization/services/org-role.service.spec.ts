@@ -51,41 +51,49 @@ describe('OrgRoleService (unit, no DB)', () => {
         service.create('org-1', { name: 'Auditor' } as any, 'creator'),
       ).rejects.toBeInstanceOf(ConflictException);
     });
+
+    // There are no built-in tier roles any more, so those names are free: an org
+    // can create its own "Manager" or "Admin" custom role.
+    it.each(['owner', 'admin', 'manager', 'employee', 'member', 'viewer'])(
+      'allows a custom role named %s',
+      async (name) => {
+        repo.findOne.mockResolvedValue(null);
+        await expect(
+          service.create('org-1', { name } as any, 'creator'),
+        ).resolves.toEqual(expect.objectContaining({ name, isSystem: false }));
+      },
+    );
   });
 
   describe('seedDefaults', () => {
-    it('creates the system tier roles + default custom roles when none exist', async () => {
+    it('creates only the default custom roles when none exist', async () => {
       repo.find.mockResolvedValueOnce([]); // none present yet
       repo.find.mockResolvedValueOnce([]); // list() after
       await service.seedDefaults('org-1', 'creator');
       const created = repo.save.mock.calls[0][0];
       expect(Array.isArray(created)).toBe(true);
       const names = created.map((r: any) => r.name);
-      // System tiers are seeded as real, visible role rows...
-      expect(names).toEqual(expect.arrayContaining(['owner', 'admin', 'manager', 'employee', 'member', 'viewer']));
-      // ...plus the default custom roles.
-      expect(names).toEqual(expect.arrayContaining(DEFAULT_ROLES.map((r) => r.name)));
-      // Owner is a system role with a non-empty (full-access) matrix.
-      const owner = created.find((r: any) => r.name === 'owner');
-      expect(owner.isSystem).toBe(true);
-      expect(owner.tier).toBe('owner');
-      expect(owner.permissions.length).toBeGreaterThan(0);
+      // Exactly the default custom roles — no built-in tier roles of any kind.
+      expect(names.sort()).toEqual(DEFAULT_ROLES.map((r) => r.name).sort());
+      for (const tier of ['owner', 'admin', 'manager', 'employee', 'member', 'viewer']) {
+        expect(names).not.toContain(tier);
+      }
+      expect(created.every((r: any) => r.isSystem === false)).toBe(true);
     });
 
     it('skips roles that already exist (no duplicates)', async () => {
-      // owner + hr already present → they are not re-created.
-      repo.find.mockResolvedValueOnce([{ id: 'ox', name: 'owner' }, { id: 'hrx', name: 'hr' }]);
+      // hr already present → not re-created; the rest still are.
+      repo.find.mockResolvedValueOnce([{ id: 'hrx', name: 'hr' }]);
       repo.find.mockResolvedValueOnce([]);
       await service.seedDefaults('org-1', 'creator');
       const names = repo.save.mock.calls[0][0].map((r: any) => r.name);
-      expect(names).not.toContain('owner');
       expect(names).not.toContain('hr');
-      expect(names).toContain('manager');
       expect(names).toContain('developer');
+      expect(names).toContain('designer');
     });
 
     it('does nothing when every role already exists', async () => {
-      const allNames = ['owner', 'admin', 'manager', 'employee', 'member', 'viewer', ...DEFAULT_ROLES.map((r) => r.name)];
+      const allNames = DEFAULT_ROLES.map((r) => r.name);
       repo.find.mockResolvedValueOnce(allNames.map((n) => ({ id: n, name: n })));
       repo.find.mockResolvedValueOnce([]);
       await service.seedDefaults('org-1', 'creator');

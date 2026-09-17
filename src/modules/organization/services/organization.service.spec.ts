@@ -94,7 +94,6 @@ describe('OrganizationService (unit, no DB)', () => {
           provide: OrgRoleService,
           useValue: {
             seedDefaults: jest.fn().mockResolvedValue([]),
-            systemRoleForTier: jest.fn().mockResolvedValue({ id: 'owner-role-id' }),
           },
         },
         {
@@ -164,6 +163,8 @@ describe('OrganizationService (unit, no DB)', () => {
         expect.objectContaining({
           organizationId: 'org-1',
           role: 'owner',
+          // Full access comes from the tier; the founder holds no role row.
+          roleId: null,
           status: 'active',
           invitedBy: 'super-admin-1',
         }),
