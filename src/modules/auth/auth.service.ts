@@ -23,6 +23,7 @@ import { AuditAction, AuditService } from './services/audit.service';
 import { TokenRevocationService } from './services/token-revocation.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { otpEmail, securityAlertEmail } from '../../bootstrap/mail/email-layout';
+import { SECURITY_ALERT_COPY, SECURITY_ALERT_CTA } from './security-alert-copy';
 
 export interface AuthTokens {
   accessToken: string;
@@ -823,15 +824,10 @@ export class AuthService {
         }),
       );
       if (seenBefore === 0) {
-        void this.sendSecurityAlert(user.email, {
-          title: 'New sign-in to your account',
-          intro: `Your Nugenova account was just accessed from a device we haven't seen before.`,
-          rows: [
-            { label: 'Device', value: deviceLabel },
-            ...(device?.ipAddress ? [{ label: 'IP address', value: device.ipAddress }] : []),
-            { label: 'When', value: new Date().toUTCString() },
-          ],
-        });
+        void this.sendSecurityAlert(
+          user.email,
+          SECURITY_ALERT_COPY.newSignin({ label: deviceLabel, ipAddress: device?.ipAddress, when: new Date().toUTCString() }),
+        );
       }
     } catch (err: any) {
       this.logger.warn(`Failed to create session: ${err?.message || err}`);
@@ -1009,11 +1005,7 @@ export class AuthService {
       action: AuditAction.MFA_ENABLED,
       userId: user.id,
     });
-    void this.sendSecurityAlert(user.email, {
-      title: 'Two-factor authentication enabled',
-      intro:
-        'Two-factor authentication was just turned on for your Nugenova account. From now on you\'ll enter a code from your authenticator app when you sign in.',
-    });
+    void this.sendSecurityAlert(user.email, SECURITY_ALERT_COPY.mfaEnabled());
     return { backupCodes };
   }
 
@@ -1029,11 +1021,7 @@ export class AuthService {
       action: AuditAction.MFA_DISABLED,
       userId: user.id,
     });
-    void this.sendSecurityAlert(user.email, {
-      title: 'Two-factor authentication disabled',
-      intro:
-        'Two-factor authentication was just turned off for your Nugenova account. Your account is now protected by the sign-in code alone.',
-    });
+    void this.sendSecurityAlert(user.email, SECURITY_ALERT_COPY.mfaDisabled());
   }
 
   /**
@@ -1050,8 +1038,8 @@ export class AuthService {
         title: opts.title,
         intro: opts.intro,
         rows: opts.rows,
-        ctaText: 'Review security',
-        ctaUrl: `${(this.configService.get<string>('FRONTEND_URL') || '').replace(/\/+$/, '')}/settings/security`,
+        ctaText: SECURITY_ALERT_CTA.text,
+        ctaUrl: `${(this.configService.get<string>('FRONTEND_URL') || '').replace(/\/+$/, '')}${SECURITY_ALERT_CTA.path}`,
       });
       await this.mail.send({ to: { email }, subject, html, category: 'security' });
     } catch (err) {

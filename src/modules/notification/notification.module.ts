@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { NotificationEntity } from './entities/notification.entity';
 import { NotificationPreferenceEntity } from './entities/notification-preference.entity';
 import { OrgNotificationSettingEntity } from './entities/org-notification-setting.entity';
@@ -12,6 +13,7 @@ import { NotificationService } from './notification.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { OrgNotificationSettingService } from './org-notification-setting.service';
 import { NotifierService } from './notifier.service';
+import { EmailRoutingService } from './email-routing.service';
 import { NotificationController } from './notification.controller';
 import { PushTokenEntity } from './entities/push-token.entity';
 import { FcmClient } from './push/fcm.client';
@@ -39,6 +41,7 @@ import { PushController } from './push/push.controller';
       OrgMembershipEntity,
       RoleEntity,
       UserEntity,
+      OrganizationEntity,
     ]),
   ],
   controllers: [NotificationController, PushController],
@@ -46,6 +49,7 @@ import { PushController } from './push/push.controller';
     NotificationService,
     NotificationPreferenceService,
     OrgNotificationSettingService,
+    EmailRoutingService,
     NotifierService,
     FcmClient,
     PushService,
@@ -56,6 +60,7 @@ import { PushController } from './push/push.controller';
     NotificationService,
     NotificationPreferenceService,
     OrgNotificationSettingService,
+    EmailRoutingService,
   ],
 })
 export class NotificationModule {}

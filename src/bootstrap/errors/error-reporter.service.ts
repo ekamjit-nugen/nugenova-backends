@@ -8,23 +8,11 @@ import { MailService } from '../mail/mail.service';
 import { OrganizationEntity } from '../../modules/organization/entities/organization.entity';
 import { OrgMembershipEntity } from '../../modules/auth/entities/org-membership.entity';
 import { UserEntity } from '../../modules/auth/entities/user.entity';
+import { ReportedError, renderErrorAlertEmail } from './error-alert-email';
 
-/** Everything known about one failed request. */
-export interface ReportedError {
-  /** Short id shown to the caller, logged, and put in the email subject. */
-  reference: string;
-  status: number;
-  method: string;
-  path: string;
-  message: string;
-  /** Present for a real exception; absent when a non-Error was thrown. */
-  stack?: string;
-  organizationId?: string | null;
-  userId?: string | null;
-  userEmail?: string | null;
-  ip?: string | null;
-  at: Date;
-}
+export type { ReportedError } from './error-alert-email';
+
+
 
 /** Default gap between two alerts about the same route+message. */
 const DEFAULT_THROTTLE_MINUTES = 15;
@@ -108,8 +96,7 @@ export class ErrorReporterService {
         to: to.map((email) => ({ email })),
         organizationId: err.organizationId ?? undefined,
         category: 'error-alert',
-        subject: `[Nugenova] ${err.status} on ${err.method} ${err.path} (${err.reference})`,
-        html: this.body(err),
+        ...renderErrorAlertEmail(err),
       });
     } catch (e) {
       this.logger.warn(`[${err.reference}] alert failed: ${(e as Error).message}`);
@@ -159,48 +146,4 @@ export class ErrorReporterService {
       return null;
     }
   }
-
-  private body(err: ReportedError): string {
-    const rows: [string, string][] = [
-      ['Reference', err.reference],
-      ['When', err.at.toISOString()],
-      ['Status', String(err.status)],
-      ['Request', `${err.method} ${err.path}`],
-      ['Organization', err.organizationId ?? '—'],
-      ['User', err.userEmail || err.userId || 'not signed in'],
-      ['IP', err.ip ?? '—'],
-    ];
-    const table = rows
-      .map(
-        ([k, v]) =>
-          `<tr><td style="padding:4px 12px 4px 0;color:#64748B">${k}</td><td style="padding:4px 0;color:#0F172A"><b>${esc(v)}</b></td></tr>`,
-      )
-      .join('');
-    return `
-      <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0F172A">
-        <h2 style="margin:0 0 4px">A request failed with a ${err.status}</h2>
-        <p style="margin:0 0 16px;color:#64748B">This is the complete reason, as recorded in the activity log.</p>
-        <table style="border-collapse:collapse;font-size:13px">${table}</table>
-        <h3 style="margin:20px 0 4px;font-size:14px">Message</h3>
-        <pre style="white-space:pre-wrap;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;font-size:12px">${esc(err.message)}</pre>
-        ${
-          err.stack
-            ? `<h3 style="margin:20px 0 4px;font-size:14px">Stack</h3>
-        <pre style="white-space:pre-wrap;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;font-size:11.5px;color:#334155">${esc(err.stack)}</pre>`
-            : ''
-        }
-        <p style="margin:20px 0 0;font-size:12px;color:#94A3B8">
-          Further alerts about this same request are held back for a few minutes so a repeating fault doesn't flood your inbox.
-        </p>
-      </div>`;
-  }
-}
-
-/** The stack and message are untrusted text — never interpolate them raw. */
-function esc(value: string): string {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }

@@ -72,6 +72,26 @@ export const NOTIFICATION_EMAIL: Record<string, NotificationEmailMeta> = {
   org_reactivated: { eyebrow: 'Account status', cta: 'Open Nugenova' },
 };
 
+/**
+ * Email copy some callers pass to notify() as an `email` override. Kept here, not
+ * inline at the call site, so the Roles page preview renders exactly what the
+ * real send uses.
+ */
+export const EMAIL_OVERRIDES = {
+  leadAssigned: { eyebrow: 'Sales', cta: 'View lead' },
+  supportRequest: { eyebrow: 'Support request', cta: 'View request' },
+  agreementSignRequest: (agreementTitle: string) => ({
+    eyebrow: 'Signature requested',
+    cta: 'Review & sign',
+    subject: `Please sign “${agreementTitle}”`,
+  }),
+  agreementSigned: (companyName: string, agreementTitle: string) => ({
+    eyebrow: 'Agreement signed',
+    cta: 'View agreement',
+    subject: `${companyName} signed “${agreementTitle}”`,
+  }),
+};
+
 export function emailMetaForType(type: string): NotificationEmailMeta | null {
   return NOTIFICATION_EMAIL[type] ?? null;
 }

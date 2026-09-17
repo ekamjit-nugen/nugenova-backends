@@ -15,6 +15,7 @@ import { LeaveRequestEntity } from '../../leave/entities/leave-request.entity';
 import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
 import { PolicyService } from '../../policy/policy.service';
 import { NotifierService } from '../../notification/notifier.service';
+import { EmailRoutingService, OrgEmailRouting } from '../../notification/email-routing.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import {
   attendanceAbsentEmail,
@@ -70,6 +71,7 @@ export class AttendanceCronService {
     @InjectRepository(MemberOnboardingEntity) private readonly onboardings: Repository<MemberOnboardingEntity>,
     private readonly policy: PolicyService,
     private readonly notifier: NotifierService,
+    private readonly emailRouting: EmailRoutingService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
     private readonly attendanceService: AttendanceService,
@@ -154,6 +156,7 @@ export class AttendanceCronService {
             attendanceUrl: `${this.frontendUrl()}/attendance`,
           }),
           'attendance.missed_checkout',
+          saved.employeeId,
         );
         await this.escalate(orgId, saved.employeeId, {
           type: 'attendance_missed_checkout',
@@ -219,6 +222,7 @@ export class AttendanceCronService {
               attendanceUrl: `${this.frontendUrl()}/attendance`,
             }),
             'attendance.absent',
+            uid,
           );
           await this.escalate(org.id, uid, {
             type: 'attendance_absent',
@@ -274,6 +278,7 @@ export class AttendanceCronService {
             attendanceUrl: `${this.frontendUrl()}/attendance`,
           }),
           'attendance.not_clocked_in',
+          uid,
         );
         await this.escalate(org.id, uid, {
           type: 'attendance_not_clocked_in',
@@ -331,8 +336,11 @@ export class AttendanceCronService {
         data: { actionUrl: '/attendance/activity', absent, late, halfDay, missed },
         priority: 'low',
       });
-      // Email the same roll-up to each approver.
-      const approvers = await this.notifier.resolveManagers(org.id, 'attendance', 'view');
+      // Email the roll-up to the roles the org chose for it (Roles & Permissions →
+      // Email notifications; owners and admins by default). It used to go to every
+      // role that could view attendance, which sent an org-wide summary to anyone
+      // granted attendance:view so they could use the Attendance page.
+      const approvers = (await this.routingFor(org.id)).teamRecipients('attendance.daily_digest');
       if (approvers.length) {
         const built = attendanceDigestEmail({
           orgName: await this.orgNameFor(org.id),
@@ -498,10 +506,41 @@ export class AttendanceCronService {
     return org?.name || 'your team';
   }
 
-  /** Best-effort email send — never throws (MailService already swallows). */
-  private async email(orgId: string, to: string | null, built: { subject: string; html: string }, category: string): Promise<void> {
+  /**
+   * Best-effort email send — never throws (MailService already swallows). When a
+   * recipient is named, the org's per-role choice for this email is honoured.
+   */
+  private async email(
+    orgId: string,
+    to: string | null,
+    built: { subject: string; html: string },
+    category: string,
+    recipientUserId?: string,
+  ): Promise<void> {
     if (!to) return;
+    if (recipientUserId) {
+      try {
+        if (!(await this.routingFor(orgId)).allowsUser(category, recipientUserId)) return;
+      } catch (err) {
+        this.logger.warn(`email routing unavailable for ${orgId}; sending anyway: ${String(err)}`);
+      }
+    }
     await this.mail.send({ to, subject: built.subject, html: built.html, category, organizationId: orgId });
+  }
+
+  /**
+   * An org's email routing, reused for a minute. A cron run emails many people in
+   * the same org; this avoids reloading the settings for each one, while a change
+   * on the Roles page still takes effect by the next run.
+   */
+  private readonly routingCache = new Map<string, { at: number; routing: Promise<OrgEmailRouting> }>();
+  private routingFor(orgId: string): Promise<OrgEmailRouting> {
+    const hit = this.routingCache.get(orgId);
+    if (hit && Date.now() - hit.at < 60_000) return hit.routing;
+    const routing = this.emailRouting.forOrg(orgId);
+    this.routingCache.set(orgId, { at: Date.now(), routing });
+    routing.catch(() => this.routingCache.delete(orgId)); // don't cache a failure
+    return routing;
   }
 
   private dayKey(anchor: Date): string {

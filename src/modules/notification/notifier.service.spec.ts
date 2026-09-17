@@ -11,6 +11,7 @@ import { MailService } from '../../bootstrap/mail/mail.service';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { EmailRoutingService } from './email-routing.service';
 
 /**
  * Unit specs for the notify() dual-channel fan-out: an email-worthy type sends a
@@ -54,6 +55,8 @@ describe('NotifierService (email fan-out)', () => {
         { provide: getRepositoryToken(RoleEntity), useValue: {} },
         { provide: getRepositoryToken(UserEntity), useValue: { findOne: userFindOne } },
         { provide: PushService, useValue: { sendToUser } },
+        // Role routing is exercised in email-routing.service.spec; here it lets everything through.
+        { provide: EmailRoutingService, useValue: { allows: jest.fn().mockResolvedValue(true), forOrg: jest.fn() } },
       ],
     }).compile();
     service = moduleRef.get(NotifierService);
@@ -175,5 +178,58 @@ describe('NotifierService (email fan-out)', () => {
       await expect(service.notify({ ...base, type: 'leave_approved' })).resolves.toBeUndefined();
       expect(create).toHaveBeenCalled();
     });
+  });
+
+  describe('team emails follow the roles the org chose, not permissions', () => {
+    const ROUTING = { allowsUser: () => true, teamRecipients: jest.fn() };
+    let routing: any;
+
+    beforeEach(() => {
+      routing = moduleRouting();
+      // Permission holders (who can approve leave in the app): a manager and HR.
+      jest.spyOn(service, 'resolveManagers').mockResolvedValue(['u-manager', 'u-hr']);
+      userFindOne.mockImplementation(async ({ where }: any) => ({ id: where.id, email: `${where.id}@acme.test`, firstName: where.id }));
+    });
+
+    function moduleRouting() {
+      const r = (service as any).routing;
+      r.forOrg = jest.fn().mockResolvedValue({ ...ROUTING, teamRecipients: () => ['u-owner', 'u-hr'] });
+      return r;
+    }
+
+    const leaveRequest = {
+      organizationId: 'org1', actorId: 'u-employee', resource: 'leaves', action: 'edit',
+      type: 'leave_requested', title: 'Leave request to review', body: 'Priya requested Casual Leave (2 days).',
+      data: { actionUrl: '/leaves' },
+    };
+
+    it('notifies permission holders in-app, but emails only the chosen roles', async () => {
+      await service.notifyManagers(leaveRequest);
+      // In-app: the people who can act on it.
+      expect(create.mock.calls.map((c) => c[0].userId).sort()).toEqual(['u-hr', 'u-manager']);
+      // Email: the roles picked on the Roles page (owner + HR here) — the manager
+      // holds the permission but isn't in a ticked role, so gets no email.
+      expect(send.mock.calls.map((c) => c[0].to.email).sort()).toEqual(['u-hr@acme.test', 'u-owner@acme.test']);
+      expect(routing.forOrg).toHaveBeenCalledWith('org1');
+    });
+
+    it('never emails the person whose action it was', async () => {
+      routing.forOrg.mockResolvedValue({ ...ROUTING, teamRecipients: () => ['u-owner', 'u-employee'] });
+      await service.notifyManagers(leaveRequest);
+      expect(send.mock.calls.map((c) => c[0].to.email)).toEqual(['u-owner@acme.test']);
+    });
+
+    it('leaves a non-team type exactly as before: in-app and email to permission holders', async () => {
+      await service.notifyManagers({ ...leaveRequest, type: 'leave_approved' });
+      expect(routing.forOrg).not.toHaveBeenCalled();
+      expect(send.mock.calls.map((c) => c[0].to.email).sort()).toEqual(['u-hr@acme.test', 'u-manager@acme.test']);
+    });
+  });
+
+  it("drops a personal email for a recipient whose role the org unticked", async () => {
+    (service as any).routing.allows = jest.fn().mockResolvedValue(false);
+    await service.notify({ ...base, type: 'leave_approved' });
+    expect(create).toHaveBeenCalledTimes(1); // in-app still delivered
+    expect(send).not.toHaveBeenCalled(); // email held back
   });
 });

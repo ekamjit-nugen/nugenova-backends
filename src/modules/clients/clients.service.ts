@@ -20,6 +20,8 @@ import { BoardNodeEntity } from '../discussion-boards/entities/board-node.entity
 import { BoardCommentEntity } from '../discussion-boards/entities/board-comment.entity';
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { NotifierService } from '../notification/notifier.service';
+import { EMAIL_OVERRIDES } from '../notification/notification-catalog';
+import { clientPortalInviteEmail } from '../../bootstrap/mail/email-layout';
 import {
   AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateTicketDto,
 } from './dto';
@@ -279,10 +281,11 @@ export class ClientsService {
     contact.userId = user.id;
     await this.contacts.save(contact);
 
+    const invite = clientPortalInviteEmail({ contactName: contact.name, companyName: client.companyName });
     void this.mail?.send({
       to: email,
-      subject: `You've been invited to ${client.companyName}'s client portal`,
-      html: `<p>Hello ${contact.name},</p><p>You've been given access to the client portal where you can follow the work and discussions shared with you. Sign in with this email to get started.</p>`,
+      subject: invite.subject,
+      html: invite.html,
       category: 'clients.portal_invite',
       organizationId: orgId,
     }).catch(() => undefined);
@@ -555,7 +558,7 @@ export class ClientsService {
         title: `Reminder: please sign “${a.title}”`,
         body: `${companyName} is waiting for your signature on “${a.title}”.`,
         data: { actionUrl: `/portal/agreements/${a.id}`, agreementId: a.id },
-        email: { eyebrow: 'Signature requested', cta: 'Review & sign', subject: `Please sign “${a.title}”` },
+        email: EMAIL_OVERRIDES.agreementSignRequest(a.title),
       }).catch(() => undefined);
       sent++;
     }
@@ -682,7 +685,7 @@ export class ClientsService {
     for (const userId of userIds) {
       await this.notifier.notify({
         organizationId: orgId, userId, type, title, body: body || null,
-        data: { actionUrl, ticketId }, email: { eyebrow: 'Support request', cta: 'View request' },
+        data: { actionUrl, ticketId }, email: EMAIL_OVERRIDES.supportRequest,
       }).catch(() => undefined);
     }
   }
@@ -876,7 +879,7 @@ export class ClientsService {
         title: `${signerName} signed “${a.title}”`,
         body: `${companyName} signed the agreement “${a.title}”.`,
         data: { actionUrl: `/clients/${a.clientId}`, clientId: a.clientId, agreementId: a.id },
-        email: { eyebrow: 'Agreement signed', cta: 'View agreement', subject: `${companyName} signed “${a.title}”` },
+        email: EMAIL_OVERRIDES.agreementSigned(companyName, a.title),
       }).catch(() => undefined);
     }
   }

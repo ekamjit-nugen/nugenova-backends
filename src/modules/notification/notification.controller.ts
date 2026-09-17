@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -24,6 +25,7 @@ import {
   OrgNotificationSettingService,
   UpdateOrgNotificationInput,
 } from './org-notification-setting.service';
+import { EmailRoutingService } from './email-routing.service';
 
 /**
  * Notifications — the caller's own inbox. Guarded by JWT only: there is no
@@ -39,6 +41,7 @@ export class NotificationController {
     private readonly notifications: NotificationService,
     private readonly preferences: NotificationPreferenceService,
     private readonly orgSettings: OrgNotificationSettingService,
+    private readonly emailRouting: EmailRoutingService,
   ) {}
 
   private userId(req: any): string {
@@ -63,6 +66,36 @@ export class NotificationController {
   }
 
   /** The org-wide policy for what employees receive (owner/admin only). */
+  /**
+   * Email notifications × roles — the matrix on the Roles & Permissions page:
+   * every email the product sends, which roles receive it, and its kind.
+   */
+  @Get('emails')
+  async emailMatrix(@Req() req: any) {
+    return { success: true, data: await this.emailRouting.matrix(this.requireOrgAdmin(req)) };
+  }
+
+  /** Tick or untick one role for one email. Fixed emails are refused. */
+  @Put('emails/:key/routing')
+  async setEmailRouting(
+    @Param('key') key: string,
+    @Body() body: { audience?: string; enabled?: boolean },
+    @Req() req: any,
+  ) {
+    const orgId = this.requireOrgAdmin(req);
+    if (typeof body?.audience !== 'string' || typeof body?.enabled !== 'boolean') {
+      throw new BadRequestException('Send { audience: string, enabled: boolean }');
+    }
+    const data = await this.emailRouting.set(orgId, key, body.audience, body.enabled);
+    return { success: true, message: 'Email recipients updated', data };
+  }
+
+  /** Exactly what one email looks like — subject + HTML, rendered with sample data. */
+  @Get('emails/:key/preview')
+  async emailPreview(@Param('key') key: string, @Req() req: any) {
+    return { success: true, data: await this.emailRouting.preview(this.requireOrgAdmin(req), key) };
+  }
+
   @Get('org-settings')
   async getOrgSettings(@Req() req: any) {
     return { success: true, data: await this.orgSettings.get(this.requireOrgAdmin(req)) };

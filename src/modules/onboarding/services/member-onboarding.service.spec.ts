@@ -12,6 +12,7 @@ import { PolicyService } from '../../policy/policy.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { NotifierService } from '../../notification/notifier.service';
 import { OnboardingConfig } from '../../policy/onboarding-catalog';
+import { EmailRoutingService } from '../../notification/email-routing.service';
 
 /**
  * Pure unit specs — NO database. Repos + PolicyService + MailService are mocks.
@@ -61,6 +62,7 @@ describe('OnboardingLifecycleService (unit, no DB)', () => {
         { provide: MailService, useValue: { send: jest.fn().mockResolvedValue(true) } },
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: NotifierService, useValue: notifier },
+        { provide: EmailRoutingService, useValue: { forOrg: jest.fn().mockResolvedValue({ allowsMember: () => true }) } },
       ],
     }).compile();
     service = moduleRef.get(OnboardingLifecycleService);

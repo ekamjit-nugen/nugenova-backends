@@ -18,6 +18,7 @@ import { ROLE_NAME_TO_TIER } from '../default-roles';
 import { OrgLimitsService } from './org-limits.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
+import { emailChangedNoticeEmail } from '../../../bootstrap/mail/email-layout';
 
 export interface MemberView {
   membershipId: string;
@@ -492,25 +493,9 @@ export class MembershipService {
     if (oldEmail) {
       const org = await this.orgRepo.findOne({ where: { id: orgId } });
       const orgName = org?.name || 'your organization';
-      const name = user.firstName ? `${user.firstName}` : 'there';
       const when = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-      await this.mail.send({
-        to: oldEmail,
-        subject: `Security notice: the email on your ${orgName} account was changed`,
-        html:
-          `<p>Hi ${name},</p>` +
-          `<p>The sign-in email for your <strong>${orgName}</strong> account was just changed from ` +
-          `<strong>${oldEmail}</strong> to <strong>${newEmail}</strong> by an administrator on ${when}.</p>` +
-          `<p>You are receiving this at your previous email as a security precaution. ` +
-          `<strong>If you did not expect this change, contact your organization administrator immediately</strong> — ` +
-          `your account may be compromised.</p>` +
-          `<p>— ${orgName} (via Nugenova)</p>`,
-        text:
-          `Hi ${name},\n\nThe sign-in email for your ${orgName} account was changed from ${oldEmail} ` +
-          `to ${newEmail} by an administrator on ${when}.\n\nYou are receiving this at your previous email ` +
-          `as a security precaution. If you did not expect this change, contact your organization ` +
-          `administrator immediately.\n\n— ${orgName} (via Nugenova)`,
-      });
+      const notice = emailChangedNoticeEmail({ name: user.firstName, orgName, oldEmail, newEmail, when });
+      await this.mail.send({ to: oldEmail, subject: notice.subject, html: notice.html, text: notice.text });
     }
     void actorUserId; // reserved for future audit-log correlation
 
