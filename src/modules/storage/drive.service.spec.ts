@@ -577,4 +577,34 @@ describe('DriveService', () => {
       await expect(service.getFileStream('org1', 'f1', 'owner1')).resolves.toBeTruthy();
     });
   });
+
+  describe('listFiles', () => {
+    const whereOf = () => fileRepo.findAndCount.mock.calls.at(-1)[0].where;
+
+    it('lists one folder by default (the root when folderId is null)', async () => {
+      await service.listFiles('org1', 'personal', 'user1', null);
+      expect(whereOf().folderId).toBeDefined();
+    });
+
+    it('drops the folder filter when flat, so a picker sees files inside folders', async () => {
+      await service.listFiles('org1', 'personal', 'user1', null, 1, 200, { flat: true });
+      const where = whereOf();
+      expect(where.folderId).toBeUndefined();
+      // Still scoped to the caller's own drive — flat must not widen access.
+      expect(where.ownerId).toBe('user1');
+      expect(where.scope).toBe('personal');
+      expect(where.isDeleted).toBe(false);
+      expect(where.systemManaged).toBe(false);
+    });
+
+    it('narrows by name when a search term is given', async () => {
+      await service.listFiles('org1', 'team', 'user1', null, 1, 50, { flat: true, q: ' report ' });
+      expect(whereOf().name).toBeDefined();
+    });
+
+    it('ignores a blank search term', async () => {
+      await service.listFiles('org1', 'team', 'user1', null, 1, 50, { flat: true, q: '   ' });
+      expect(whereOf().name).toBeUndefined();
+    });
+  });
 });

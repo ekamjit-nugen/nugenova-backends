@@ -189,6 +189,8 @@ export class DriveController {
     @Query('folderId') folderId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('flat') flat?: string,
+    @Query('q') q?: string,
   ) {
     return this.drive.listFiles(
       req.user.organizationId,
@@ -197,6 +199,9 @@ export class DriveController {
       folderId || null,
       page ? Number(page) : 1,
       limit ? Number(limit) : 50,
+      // `flat=true` returns every file in the scope instead of one folder's
+      // contents — for pickers, which have no folder to browse.
+      { flat: flat === 'true' || flat === '1', q },
     );
   }
 
