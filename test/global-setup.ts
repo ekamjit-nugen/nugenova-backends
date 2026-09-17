@@ -90,6 +90,7 @@ import { LeadClientSourceFollowups1788450000000 } from '../src/bootstrap/databas
 import { MemberTitle1788480000000 } from '../src/bootstrap/database/migrations/1788480000000-MemberTitle';
 import { RetireMemberViewerRoles1788490000000 } from '../src/bootstrap/database/migrations/1788490000000-RetireMemberViewerRoles';
 import { RetireTierRoles1788500000000 } from '../src/bootstrap/database/migrations/1788500000000-RetireTierRoles';
+import { EmailRouting1788510000000 } from '../src/bootstrap/database/migrations/1788510000000-EmailRouting';
 import { RECRUITMENT_ENTITIES } from '../src/modules/recruitment/entities';
 import { RequirementPriorityOther1788420000000 } from '../src/bootstrap/database/migrations/1788420000000-RequirementPriorityOther';
 import { Activity1788220000000 } from '../src/bootstrap/database/migrations/1788220000000-Activity';
@@ -353,6 +354,7 @@ module.exports = async function globalSetup(): Promise<void> {
       MemberTitle1788480000000,
       RetireMemberViewerRoles1788490000000,
       RetireTierRoles1788500000000,
+      EmailRouting1788510000000,
       Meetings1788200000000,
       MeetingRecurrence1788210000000,
       Activity1788220000000,

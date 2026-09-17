@@ -11,6 +11,7 @@ import { UserEntity } from '../auth/entities/user.entity';
 import { NotifierService } from '../notification/notifier.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { newObjectId } from '../../bootstrap/database/object-id';
+import { activityBackupEmail } from '../../bootstrap/mail/email-layout';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_DAYS = 15;
@@ -184,11 +185,12 @@ export class ActivityRetentionService {
       data: { actionUrl: '/activity' },
       email: false, // the email with the attachment is sent below
     }).catch(() => undefined);
+    const built = activityBackupEmail({ count, retentionDays: RETENTION_DAYS, cutoffLabel: cutoff.toISOString().slice(0, 10) });
     return this.mail.send({
       to: { email: owner.email, name: `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || undefined },
-      subject: `Activity log backup — ${count} entries archived`,
-      html: `<p>Attached is your organization's activity-log backup (${count} entries older than ${RETENTION_DAYS} days, up to ${cutoff.toISOString().slice(0, 10)}).</p><p>These entries have been archived and removed from the live activity log. Keep this zip for your records.</p>`,
-      text: `Activity log backup: ${count} entries older than ${RETENTION_DAYS} days archived and removed from the live log.`,
+      subject: built.subject,
+      html: built.html,
+      text: built.text,
       attachments: [{ filename, content: zip, contentType: 'application/zip' }],
       category: 'activity.retention_backup',
       organizationId: orgId,

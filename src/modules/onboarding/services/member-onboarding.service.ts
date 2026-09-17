@@ -30,6 +30,7 @@ import {
   onboardingWelcomeEmail,
 } from '../../../bootstrap/mail/email-layout';
 import { InitiateOnboardingDto } from '../dto';
+import { EmailRoutingService } from '../../notification/email-routing.service';
 
 /** The HR-facing onboarding record view (with a rolled-up progress summary). */
 export interface OnboardingView {
@@ -95,6 +96,7 @@ export class OnboardingLifecycleService {
     private readonly mail: MailService,
     private readonly config: ConfigService,
     private readonly notifier: NotifierService,
+    private readonly emailRouting: EmailRoutingService,
   ) {}
 
   private frontendUrl(): string {
@@ -237,6 +239,7 @@ export class OnboardingLifecycleService {
 
   private async sendWelcomeEmail(record: MemberOnboardingEntity): Promise<void> {
     if (!record.employeeEmail) return;
+    if (!(await this.hireReceives(record, 'onboarding.welcome'))) return;
     const { subject, html } = onboardingWelcomeEmail({
       employeeName: record.employeeName,
       orgName: await this.orgNameFor(record.organizationId),
@@ -251,6 +254,21 @@ export class OnboardingLifecycleService {
       category: 'onboarding.welcome',
       organizationId: record.organizationId,
     });
+  }
+
+  /**
+   * The org's per-role choice for a new-hire email, keyed off the hire's
+   * membership (they may not have signed in yet, so there's no user to look up).
+   * Fails open.
+   */
+  private async hireReceives(record: MemberOnboardingEntity, key: string): Promise<boolean> {
+    try {
+      const m = await this.memberships.findOne({ where: { id: record.membershipId } });
+      if (!m) return true;
+      return (await this.emailRouting.forOrg(record.organizationId)).allowsMember(key, m);
+    } catch {
+      return true;
+    }
   }
 
   private async orgNameFor(orgId: string): Promise<string> {
@@ -711,7 +729,7 @@ export class OnboardingLifecycleService {
 
       let notified = false;
 
-      if (r.employeeEmail) {
+      if (r.employeeEmail && (await this.hireReceives(r, 'onboarding.reminder'))) {
         const { subject, html } = onboardingReminderEmail({
           employeeName: r.employeeName,
           orgName: await this.orgNameFor(r.organizationId),

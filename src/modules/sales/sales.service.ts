@@ -16,6 +16,7 @@ import { ClientEntity } from '../clients/entities/client.entity';
 import { NotifierService } from '../notification/notifier.service';
 import { ClientsService } from '../clients/clients.service';
 import { DEFAULT_STAGES, LEAD_SOURCE_FIELDS, LeadSource, SalesEntityType } from './sales.constants';
+import { EMAIL_OVERRIDES } from '../notification/notification-catalog';
 import {
   CreateAccountDto, CreateActivityDto, CreateContactDto, CreateFollowupDto, CreateLeadDto, CreateLeadDocumentDto,
   CreateQuoteDto, CreateRequirementDto, CreateStageDto, MoveStageDto, UpdateAccountDto, UpdateContactDto,
@@ -763,7 +764,7 @@ export class SalesService {
       title: `You've been assigned a lead: ${lead.name}`,
       body: lead.company ?? null,
       data: { actionUrl: `/sales/leads/${lead.id}`, leadId: lead.id },
-      email: { eyebrow: 'Sales', cta: 'View lead' },
+      email: EMAIL_OVERRIDES.leadAssigned,
     }).catch(() => undefined);
   }
 }

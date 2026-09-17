@@ -603,3 +603,63 @@ export function onboardingReminderEmail(params: {
     }),
   };
 }
+
+/**
+ * Security notice to a member's PREVIOUS address when an admin changes their
+ * sign-in email. Always sent. Every interpolated value is escaped — the name, org
+ * and addresses are user-controlled and used to be pasted into the HTML raw.
+ */
+export function emailChangedNoticeEmail(params: {
+  name?: string | null;
+  orgName: string;
+  oldEmail: string;
+  newEmail: string;
+  when: string;
+}): { subject: string; html: string; text: string } {
+  const name = params.name || 'there';
+  return {
+    subject: `Security notice: the email on your ${params.orgName} account was changed`,
+    html:
+      `<p>Hi ${esc(name)},</p>` +
+      `<p>The sign-in email for your <strong>${esc(params.orgName)}</strong> account was just changed from ` +
+      `<strong>${esc(params.oldEmail)}</strong> to <strong>${esc(params.newEmail)}</strong> by an administrator on ${esc(params.when)}.</p>` +
+      `<p>You are receiving this at your previous email as a security precaution. ` +
+      `<strong>If you did not expect this change, contact your organization administrator immediately</strong> — ` +
+      `your account may be compromised.</p>` +
+      `<p>— ${esc(params.orgName)} (via Nugenova)</p>`,
+    text:
+      `Hi ${name},\n\nThe sign-in email for your ${params.orgName} account was changed from ${params.oldEmail} ` +
+      `to ${params.newEmail} by an administrator on ${params.when}.\n\nYou are receiving this at your previous email ` +
+      `as a security precaution. If you did not expect this change, contact your organization ` +
+      `administrator immediately.\n\n— ${params.orgName} (via Nugenova)`,
+  };
+}
+
+/** The activity-log archive emailed to the org owner (the zip is attached by the caller). */
+export function activityBackupEmail(params: {
+  count: number;
+  retentionDays: number;
+  /** YYYY-MM-DD — the newest entry the archive covers. */
+  cutoffLabel: string;
+}): { subject: string; html: string; text: string } {
+  return {
+    subject: `Activity log backup — ${params.count} entries archived`,
+    html:
+      `<p>Attached is your organization's activity-log backup (${params.count} entries older than ${params.retentionDays} days, up to ${esc(params.cutoffLabel)}).</p>` +
+      `<p>These entries have been archived and removed from the live activity log. Keep this zip for your records.</p>`,
+    text: `Activity log backup: ${params.count} entries older than ${params.retentionDays} days archived and removed from the live log.`,
+  };
+}
+
+/** Invitation for a client's contact to the client portal. Values are escaped. */
+export function clientPortalInviteEmail(params: {
+  contactName: string;
+  companyName: string;
+}): { subject: string; html: string } {
+  return {
+    subject: `You've been invited to ${params.companyName}'s client portal`,
+    html:
+      `<p>Hello ${esc(params.contactName)},</p>` +
+      `<p>You've been given access to the client portal where you can follow the work and discussions shared with you. Sign in with this email to get started.</p>`,
+  };
+}

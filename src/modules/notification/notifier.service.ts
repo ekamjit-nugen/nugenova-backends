@@ -9,23 +9,16 @@ import { RoleEntity } from '../auth/entities/role.entity';
 import { UserEntity } from '../auth/entities/user.entity';
 import { permMapAllows } from '../organization/guards/require-permission.decorator';
 import { MailService } from '../../bootstrap/mail/mail.service';
-import { notificationEmail } from '../../bootstrap/mail/email-layout';
 import { NotificationService } from './notification.service';
 import { PushService } from './push/push.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { OrgNotificationSettingService } from './org-notification-setting.service';
-import { emailMetaForType, isCriticalNotification } from './notification-catalog';
+import { EmailRoutingService } from './email-routing.service';
+import { emailKind } from './email-catalog';
+import { isCriticalNotification } from './notification-catalog';
+import { EmailOption, renderNotificationEmail } from './notification-email';
 
-/** Per-notification email control: force-off, force-on, or override the copy. */
-export type EmailOption =
-  | boolean
-  | {
-      eyebrow?: string;
-      cta?: string;
-      subject?: string;
-      bodyHtml?: string;
-      footerNote?: string;
-    };
+export type { EmailOption } from './notification-email';
 
 export interface NotifyInput {
   organizationId: string;
@@ -80,6 +73,7 @@ export class NotifierService {
     private readonly orgSettings: OrgNotificationSettingService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
+    private readonly routing: EmailRoutingService,
     @InjectRepository(OrgMembershipEntity)
     private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(RoleEntity)
@@ -181,27 +175,22 @@ export class NotifierService {
   private async maybeEmail(input: NotifyInput, priority: string, critical: boolean): Promise<void> {
     try {
       if (input.email === false && !critical) return; // explicitly in-app only
-      const override = typeof input.email === 'object' ? input.email : null;
-      const meta = override
-        ? { eyebrow: override.eyebrow ?? 'Notification', cta: override.cta, footerNote: override.footerNote }
-        : emailMetaForType(input.type);
-      if (!meta) return; // not an email-worthy type and no override
+      const built = renderNotificationEmail({
+        type: input.type,
+        title: input.title,
+        body: input.body,
+        actionUrl: (input.data?.actionUrl as string) || '',
+        email: input.email,
+        absoluteUrl: (path) => this.absoluteUrl(path),
+      });
+      if (!built) return; // not an email-worthy type and no override
       if (!critical && !(await this.preferences.allowsEmail(input.userId, input.type, priority))) return;
       if (!(await this.orgAllows(input.organizationId, input.userId, input.type, 'email'))) return;
+      // The org's per-role choice (Roles & Permissions → Email notifications).
+      if (!critical && !(await this.routing.allows(input.organizationId, input.type, input.userId))) return;
       const user = await this.users.findOne({ where: { id: input.userId } });
       if (!user?.email) return;
-      const actionUrl = (input.data?.actionUrl as string) || '';
-      const ctaText = override?.cta ?? meta.cta;
-      const ctaUrl = ctaText && actionUrl ? this.absoluteUrl(actionUrl) : undefined;
-      const { subject, html } = notificationEmail({
-        eyebrow: override?.eyebrow ?? meta.eyebrow,
-        title: override?.subject ?? input.title,
-        body: input.body,
-        bodyHtml: override?.bodyHtml,
-        ctaText: ctaUrl ? ctaText : undefined,
-        ctaUrl,
-        footerNote: override?.footerNote ?? meta.footerNote,
-      });
+      const { subject, html } = built;
       await this.mail.send({
         to: { email: user.email, name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || undefined },
         subject,
@@ -234,6 +223,11 @@ export class NotifierService {
         input.resource,
         input.action,
       );
+      // A TEAM email (a leave request to approve, a timesheet to review…) is
+      // emailed to the roles the org picked for it — not to everyone who happens
+      // to hold the permission. The in-app notification still follows the
+      // permission, since that's who can act on it in the app.
+      const teamEmail = emailKind(input.type) === 'team';
       for (const userId of recipients) {
         await this.notify({
           organizationId: input.organizationId,
@@ -244,7 +238,29 @@ export class NotifierService {
           body: input.body ?? null,
           data: input.data ?? {},
           priority: input.priority ?? 'normal',
+          ...(teamEmail ? { email: false } : {}),
         });
+      }
+      if (teamEmail) {
+        const priority = input.priority ?? 'normal';
+        const routing = await this.routing.forOrg(input.organizationId);
+        for (const userId of routing.teamRecipients(input.type)) {
+          if (input.actorId && input.actorId === userId) continue; // not about your own action
+          await this.maybeEmail(
+            {
+              organizationId: input.organizationId,
+              userId,
+              actorId: input.actorId ?? null,
+              type: input.type,
+              title: input.title,
+              body: input.body ?? null,
+              data: input.data ?? {},
+              priority,
+            },
+            priority,
+            false,
+          );
+        }
       }
     } catch (err) {
       this.logger.error(`notifyManagers failed (type=${input.type}): ${String(err)}`);
@@ -280,7 +296,8 @@ export class NotifierService {
       for (const rid of roleIds) {
         let role = roleCache.get(rid);
         if (role === undefined) {
-          role = await this.roles.findOne({ where: { id: rid } });
+          // A deleted role grants nothing (auth ignores it too).
+          role = await this.roles.findOne({ where: { id: rid, isDeleted: false } });
           roleCache.set(rid, role);
         }
         if (role && this.roleGrants(role, resource, action)) {
