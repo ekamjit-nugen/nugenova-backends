@@ -96,6 +96,7 @@ export const RECRUITMENT_NOTIFICATIONS = {
   OFFER_ACCEPTED: 'recruitment_offer_accepted',
   SUBMISSION_CREATED: 'recruitment_submission_created',
   SUBMISSION_DECISION: 'recruitment_submission_decision',
+  IMPORT_FINISHED: 'recruitment_import_finished',
 } as const;
 
 /** Candidate pools for the talent-pool views. */

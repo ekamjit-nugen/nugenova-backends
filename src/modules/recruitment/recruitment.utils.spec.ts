@@ -1,5 +1,5 @@
 import {
-  cleanCell, cleanList, experienceFromHistory, extractJsonObject, isCutshortFileName, normalizeEmail, normalizePhone,
+  cleanCell, cleanList, experienceFromHistory, extractJsonObject, isCutshortFileName, looksLikeSheetNote, normalizeEmail, normalizePhone,
   normalizeSource, parseExperienceMonths, parseLegacyRemarks, parseNotice, regexExtract, sanitizeParsedCandidate,
   tidyCompany, tidyName, toPrefixTsQuery,
 } from './recruitment.utils';
@@ -151,5 +151,21 @@ describe('recruitment.utils', () => {
     expect(toPrefixTsQuery('Power BI  dev!')).toBe('power:* & bi:* & dev:*');
     expect(toPrefixTsQuery("'; drop table --")).toBe('drop:* & table:*');
     expect(toPrefixTsQuery('  ')).toBeNull();
+  });
+});
+
+describe('looksLikeSheetNote', () => {
+  it('flags sheet footers, banners and totals', () => {
+    expect(looksLikeSheetNote('Total candidates in this sheet: 10')).toBe(true);
+    expect(looksLikeSheetNote('Generated: Candidate_Summary_by_Capability.xlsx | Auto-extracted - please verify contact details before outreach')).toBe(true);
+    expect(looksLikeSheetNote('Grand Total')).toBe(true);
+    expect(looksLikeSheetNote('Count: 23')).toBe(true);
+    expect(looksLikeSheetNote('12/09/2026')).toBe(true);
+  });
+  it('keeps real names', () => {
+    for (const n of ['Dinesh Kumar', 'Sasikala. M', 'Krati', "D'Souza, Anita", 'Mohd. Arif Khan', 'Totaram Singh', 'Noteworthy Sharma']) {
+      expect(looksLikeSheetNote(n)).toBe(false);
+    }
+    expect(looksLikeSheetNote(null)).toBe(false);
   });
 });

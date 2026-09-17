@@ -135,13 +135,33 @@ export class OpeningsService {
   /** Find an opening by title (case-insensitive) or create it — used by the importer. */
   async findOrCreateByTitle(caller: RecruitmentCaller, title: string, dryRun = false): Promise<{ id: string | null; title: string; created: boolean }> {
     const clean = title.trim().slice(0, 200);
-    const existing = await this.openings.createQueryBuilder('o')
+    const find = () => this.openings.createQueryBuilder('o')
       .where('o.organization_id = :orgId AND o.is_deleted = false AND lower(o.title) = lower(:title)', { orgId: caller.orgId, title: clean })
+      .orderBy('o.created_at', 'ASC')
       .getOne();
+    const existing = await find();
     if (existing) return { id: existing.id, title: existing.title, created: false };
     if (dryRun) return { id: null, title: clean, created: true };
-    const o = await this.create(caller, { title: clean });
-    return { id: o.id, title: o.title, created: true };
+
+    // Two imports (or two server instances) reaching the same new title must not both create it:
+    // serialise on a transaction-scoped advisory lock keyed by org + title, then re-check and
+    // insert on that same connection (never hold one pooled connection while waiting for another).
+    const result = await this.openings.manager.transaction(async (m) => {
+      await m.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`rec-opening:${caller.orgId}:${clean.toLowerCase()}`]);
+      const again = await m.getRepository(RecruitmentOpeningEntity).createQueryBuilder('o')
+        .where('o.organization_id = :orgId AND o.is_deleted = false AND lower(o.title) = lower(:title)', { orgId: caller.orgId, title: clean })
+        .orderBy('o.created_at', 'ASC')
+        .getOne();
+      if (again) return { id: again.id, title: again.title, created: false };
+      const saved = await m.getRepository(RecruitmentOpeningEntity).save(m.getRepository(RecruitmentOpeningEntity).create({
+        organizationId: caller.orgId, title: clean, status: 'open', priority: 'medium', workMode: 'onsite',
+        employmentType: 'full_time', positions: 1, skills: [], recruiterIds: [], currency: 'INR', createdBy: caller.userId,
+        openedAt: new Date(), isDeleted: false,
+      }));
+      return { id: saved.id, title: saved.title, created: true };
+    });
+    if (result.created) this.pipeline.audit(caller, 'recruitment.opening_created', `Created opening "${result.title}" from an import`, { type: 'opening', id: result.id });
+    return result;
   }
 
   async update(caller: RecruitmentCaller, id: string, dto: UpdateOpeningDto) {

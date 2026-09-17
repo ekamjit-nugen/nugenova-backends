@@ -12,6 +12,10 @@ export { CandidateActivityEntity } from './candidate-activity.entity';
 export { RecruitmentSettingsEntity } from './recruitment-settings.entity';
 export { RecruitmentSubmissionEntity } from './recruitment-submission.entity';
 export { SubmissionEventEntity } from './submission-event.entity';
+export { RecruitmentImportJobEntity } from './recruitment-import-job.entity';
+export type { ImportJobStatus } from './recruitment-import-job.entity';
+export { RecruitmentImportRowEntity } from './recruitment-import-row.entity';
+export type { ImportRowStatus } from './recruitment-import-row.entity';
 
 import { RecruitmentOpeningEntity } from './recruitment-opening.entity';
 import { RecruitmentStageEntity } from './recruitment-stage.entity';
@@ -27,6 +31,8 @@ import { CandidateActivityEntity } from './candidate-activity.entity';
 import { RecruitmentSettingsEntity } from './recruitment-settings.entity';
 import { RecruitmentSubmissionEntity } from './recruitment-submission.entity';
 import { SubmissionEventEntity } from './submission-event.entity';
+import { RecruitmentImportJobEntity } from './recruitment-import-job.entity';
+import { RecruitmentImportRowEntity } from './recruitment-import-row.entity';
 
 /** Every entity the module owns (for TypeOrmModule.forFeature + test setup). */
 export const RECRUITMENT_ENTITIES = [
@@ -44,4 +50,6 @@ export const RECRUITMENT_ENTITIES = [
   RecruitmentSettingsEntity,
   RecruitmentSubmissionEntity,
   SubmissionEventEntity,
+  RecruitmentImportJobEntity,
+  RecruitmentImportRowEntity,
 ];

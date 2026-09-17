@@ -31,6 +31,8 @@ import { LeadsController } from './controllers/leads.controller';
 import { CandidatesController } from './controllers/candidates.controller';
 import { PipelineController } from './controllers/pipeline.controller';
 import { InterviewsController } from './controllers/interviews.controller';
+import { ImportsController } from './controllers/imports.controller';
+import { ImportJobsService } from './services/import-jobs.service';
 
 /**
  * Recruitment (ATS) — talent pool, job openings, pipeline board, AI CV parsing,
@@ -50,9 +52,10 @@ import { InterviewsController } from './controllers/interviews.controller';
       ...RECRUITMENT_ENTITIES, UserEntity, OrgMembershipEntity, OrganizationEntity, LeadEntity, RequirementEntity, SalesFollowupEntity,
     ]),
   ],
-  controllers: [CandidatesController, PipelineController, InterviewsController, LeadsController],
+  controllers: [CandidatesController, PipelineController, InterviewsController, LeadsController, ImportsController],
   providers: [
     RecruitmentAccessGuard,
+    ImportJobsService,
     PipelineService,
     CvParseService,
     CandidatesService,

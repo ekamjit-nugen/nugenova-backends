@@ -64,6 +64,18 @@ The frontend maps columns (auto-detected for the legacy sheet) and sends rows; a
 
 Optional `Lead` / `Requirement` columns shortlist the row against a Sales lead (matched by company/name and requirement role/title); rows with no opening and no lead land in the **talent pool**. The preview flags duplicates per row (`duplicate: { kind: existing|file, action: merged|flagged, matchedOn }`): email/phone matches merge, a name-only match is **flagged** (created separately — review and merge), repeats inside the file merge into the earlier row. Summary adds `submissions`, `talentPool`, `duplicatesMerged`, `duplicatesFlagged`. The downloadable template (`buildImportTemplate` in the frontend) has Candidates / Instructions / Reference sheets.
 
+## Background imports (migration `1788460000000-RecruitmentImportJobs`)
+
+The UI previews synchronously (`POST /candidates/import` with `dryRun`, ≤ 5,000 rows per call, set-based lookups — no per-row queries) and commits through a **background job**:
+
+- `POST /imports` → **202** at once. Stores the job + every mapped row (`recruitment_import_jobs`, `recruitment_import_rows`), ≤ 10,000 rows. The wizard sends an `idempotencyKey` per preview; a double-click, retry or second tab gets the same job back (partial unique index).
+- **Worker** (`ImportJobsService`, every API instance): claims the oldest ready job with `FOR UPDATE SKIP LOCKED` under a transaction advisory lock, **one running job per organization**. Rows are saved one at a time with the same `ImportExportService.processRow` the preview uses; counters are recomputed from the row table every 25 rows (exact and restart-safe) and double as the heartbeat. A job whose heartbeat is older than 90 s is resumed by any instance; in-file identity is rebuilt from saved rows so resumed jobs don't duplicate people. Rows that crash the worker 3× are set aside as errors; a job interrupted 5× fails (retry continues from the last saved row). Env: `RECRUITMENT_IMPORT_WORKER=off` disables the worker on an instance, `RECRUITMENT_IMPORT_POLL_MS` (default 5000).
+- `GET /imports` (running + last 7 days, not dismissed), `GET /imports/:id`, `GET /imports/:id/rows?filter=issues|skipped|error|flagged|all`, `POST /imports/:id/cancel|retry|dismiss`. Cancel/retry: the starter (with create) or a recruitment editor. Notification `recruitment_import_finished` to the starter; audit events `recruitment.import_*`.
+- **Ignored rows** (reported as skipped with a reason, never saved): no name; the name cell is a sheet note/total/banner (`looksLikeSheetNote`); no valid email, phone, web CV link or LinkedIn after invalid values are dropped. Summary/master/generic sheets never become openings (frontend), and opening find-or-create is serialised with an advisory lock.
+- Dashboard shows each file with a segmented bar (new / merged / ignored / failed), ETA, stop / retry / review rows / dismiss; the import page shows the same card and can be left while it runs.
+
+**Database connections:** Supabase's session pooler caps clients for the whole project. The per-process pool is `DB_POOL_MAX` (default 5) with idle release and a connect timeout; the importer never holds one connection while waiting for another.
+
 ## Client leads & submissions (migration `1788440000000-RecruitmentLeadSubmissions`)
 
 A **Sales lead** is client demand; its `sales_requirements` (now with `positions`) are the roles. Recruiters work leads from Recruitment without touching the Sales timeline (commit 977cac7 keeps system rows out of `sales_activities`).

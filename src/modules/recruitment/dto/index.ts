@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, IsUrl,
+  ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, IsUrl, Matches,
   Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 import {
@@ -334,6 +334,17 @@ export class ImportCandidatesDto {
   /** Source applied when a row has none (the team sources from Cutshort). */
   @IsOptional() @IsIn(list(CANDIDATE_SOURCES)) defaultSource?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
+}
+
+/** Commit a previewed spreadsheet as a background import job (returns 202 at once). */
+export class CreateImportJobDto {
+  @IsString() @MaxLength(255) fileName: string;
+  @IsOptional() @IsInt() @Min(0) fileSize?: number;
+  /** Client-generated per preview; retries of the same click return the same job. */
+  @IsOptional() @IsString() @Matches(/^[A-Za-z0-9_-]{8,64}$/) idempotencyKey?: string;
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10000) @ValidateNested({ each: true }) @Type(() => ImportRowDto) rows: ImportRowDto[];
+  @IsOptional() @IsIn(list(CANDIDATE_SOURCES)) defaultSource?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(10) @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
 }
 
 
