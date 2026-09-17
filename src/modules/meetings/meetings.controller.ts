@@ -34,6 +34,15 @@ export class MeetingsController {
     return { success: true, data: await this.meetings.create(this.orgId(req), this.caller(req), dto) };
   }
 
+  /**
+   * People the caller can invite — any member may schedule a meeting, so any
+   * member may see who they can add. Must stay above `@Get(':id')`.
+   */
+  @Get('invitable')
+  async invitable(@Req() req: any) {
+    return { success: true, data: await this.meetings.invitable(this.orgId(req), req.user?.userId) };
+  }
+
   /** Start a meeting now (returns join config). */
   @Post('instant')
   async instant(@Req() req: any, @Body() dto: InstantMeetingDto) {

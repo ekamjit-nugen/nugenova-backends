@@ -6,6 +6,7 @@ describe('MeetingsService', () => {
   let noticesRepo: any;
   const noticeStore = new Map<string, any>();
   let usersRepo: any;
+  let membershipsRepo: any;
   let notifier: { notify: jest.Mock };
   let config: { get: jest.Mock };
   let service: MeetingsService;
@@ -38,6 +39,28 @@ describe('MeetingsService', () => {
       const ids: string[] = op?._value ?? op?.value ?? [];
       return Promise.resolve(ids.map((id) => ({ id, firstName: id, lastName: 'U', email: `${id}@x.com` })));
     });
+    // Org membership fixture: everyone the existing tests invite is an active
+    // member of orgA, plus the cases the org check must reject.
+    const MEMBERSHIPS = [
+      ...['admin1', 'host1', 'u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8', 'u9'].map((userId, i) => ({
+        userId, organizationId: 'orgA', status: 'active', email: `${userId}@x.com`, createdAt: new Date(2026, 0, i + 1),
+      })),
+      { userId: 'gone', organizationId: 'orgA', status: 'deactivated', email: 'gone@x.com', createdAt: new Date(2026, 1, 1) },
+      { userId: null, organizationId: 'orgA', status: 'active', email: 'pending@x.com', createdAt: new Date(2026, 1, 2) }, // invite not accepted
+      { userId: 'outsider', organizationId: 'orgB', status: 'active', email: 'outsider@other.com', createdAt: new Date(2026, 1, 3) },
+    ];
+    membershipsRepo = {
+      find: jest.fn(({ where }) => {
+        const ids: string[] | undefined = where.userId?._value ?? where.userId?.value;
+        return Promise.resolve(
+          MEMBERSHIPS.filter((m) =>
+            m.organizationId === where.organizationId &&
+            m.status === where.status &&
+            (!ids || ids.includes(m.userId as string)),
+          ),
+        );
+      }),
+    };
     notifier = { notify: jest.fn().mockResolvedValue(undefined) };
     config = { get: jest.fn(() => undefined) }; // meet.jit.si, no JWT
     const activity = { record: jest.fn().mockResolvedValue(undefined) };
@@ -47,7 +70,7 @@ describe('MeetingsService', () => {
       create: jest.fn((v) => ({ ...v })),
       save: jest.fn((v) => { noticeStore.set(`${v.meetingId}|${v.userId}`, v); return Promise.resolve(v); }),
     };
-    service = new MeetingsService(meetingsRepo as any, noticesRepo as any, usersRepo as any, config as any, notifier as any, activity as any);
+    service = new MeetingsService(meetingsRepo as any, noticesRepo as any, usersRepo as any, membershipsRepo as any, config as any, notifier as any, activity as any);
   });
 
   it('create: persists, notifies invitees (not the host), carries recurrence', async () => {
@@ -163,6 +186,38 @@ describe('MeetingsService', () => {
       expect(await service.incoming('orgA', member('u2'), NOW)).toEqual([]);
       await service.markNotice('orgA', member('u2'), meeting.id, 'dismissed');
       expect(noticeStore.get(`${meeting.id}|u2`).action).toBe('joined');
+    });
+  });
+
+  describe('who can be invited', () => {
+    it("never adds someone from another organization, or a deactivated member", async () => {
+      const out = await service.create('orgA', host, { title: 'Sync', participantIds: ['u2', 'outsider', 'gone', 'made-up'] });
+      expect(out.participants.map((p: any) => p.userId)).toEqual(['u2']);
+      // Only the real invitee is notified — the outsider learns nothing.
+      expect(notifier.notify).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops an outsider when adding people to an existing meeting too', async () => {
+      const m = await service.create('orgA', host, { title: 'Sync', participantIds: ['u2'] });
+      await service.addParticipants('orgA', host, m.id, ['u3', 'outsider']);
+      const saved = store.get(m.id);
+      expect(saved.participants.map((p: any) => p.userId).sort()).toEqual(['u2', 'u3']);
+    });
+
+    it('lists active colleagues for any member — not just admins — excluding the caller', async () => {
+      const people = await service.invitable('orgA', 'u4');
+      const ids = people.map((p: any) => p.userId);
+      expect(ids).toContain('host1');
+      expect(ids).toContain('u2');
+      expect(ids).not.toContain('u4'); // the caller
+      expect(ids).not.toContain('gone'); // deactivated
+      expect(ids).not.toContain('outsider'); // another org
+      expect(ids).not.toContain(null); // an invite nobody has accepted yet
+    });
+
+    it('shares only name, email and avatar', async () => {
+      const [first] = await service.invitable('orgA', 'u4');
+      expect(Object.keys(first).sort()).toEqual(['avatar', 'email', 'firstName', 'lastName', 'userId']);
     });
   });
 });
