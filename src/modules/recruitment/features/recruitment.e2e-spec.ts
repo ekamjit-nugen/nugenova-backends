@@ -280,45 +280,56 @@ defineFeature(feature, (test) => {
     });
   });
 
-  test('a CV upload is parsed and creates a searchable candidate', ({ given, when, then }) => {
+  test('a CV is uploaded with typed-in details and shown as stored', ({ given, when, then, and }) => {
     let org: CreatedOrg;
     let opening: any;
     let fileId: string;
-    let parsed: any;
     let candidateId: string;
+    const cvText = 'Sagar Yadav\nSenior Power BI Developer\nsagaryadav1108@gmail.com | +91 7509869971\n5+ years of experience building Kusto dashboards.';
     given(/^an organization with an opening "(.*)"$/, async (title: string) => {
       org = await newOrg();
       opening = await createOpening(org, title);
     });
-    when('the owner uploads a text CV and parses it without AI', async () => {
-      const cvText = 'Sagar Yadav\nSenior Power BI Developer\nsagaryadav1108@gmail.com | +91 7509869971\nlinkedin.com/in/sagar-yadav\n5+ years of experience building Kusto dashboards at Yash Technologies.';
+    when('the owner uploads a text CV', async () => {
       const up = await api().post('/api/v1/media/upload').set(auth(org.ownerToken))
         .attach('file', Buffer.from(cvText), { filename: 'Cutshort-SagarYadav-Power-BI-Developer.txt', contentType: 'text/plain' }).expect(201);
       fileId = up.body.data.id;
-      parsed = (await api().post(`${API}/candidates/parse`).set(auth(org.ownerToken)).send({ fileId, skipAi: true }).expect(201)).body.data;
     });
-    then('the parse extracts the email and phone', () => {
-      expect(parsed.extracted.email).toBe('sagaryadav1108@gmail.com');
-      expect(parsed.extracted.phone).toBe('+917509869971');
-      expect(parsed.extracted.totalExpMonths).toBe(60);
-      expect(parsed.source).toBe('cutshort');
-      expect(parsed.duplicates).toEqual([]);
+    then('the CV-reading endpoint no longer exists', async () => {
+      await api().post(`${API}/candidates/parse`).set(auth(org.ownerToken)).send({ fileId }).expect(404);
     });
     when('the owner saves the candidate from the CV into the opening', async () => {
       const res = await api().post(`${API}/candidates/from-cv`).set(auth(org.ownerToken))
-        .send({ fileId, openingId: opening.id, data: { ...parsed.extracted, fullName: 'Sagar Yadav', source: 'cutshort' } }).expect(201);
+        .send({ fileId, openingId: opening.id, data: { fullName: 'Sagar Yadav', phone: '7509869971' } }).expect(201);
       expect(res.body.data.created).toBe(true);
       candidateId = res.body.data.candidate.id;
     });
-    then('the candidate has a primary CV and is found by a word from the CV', async () => {
+    then('the candidate has the CV as primary, with only the typed-in details', async () => {
       const detail = (await api().get(`${API}/candidates/${candidateId}`).set(auth(org.ownerToken)).expect(200)).body.data;
       expect(detail.documents).toHaveLength(1);
       expect(detail.documents[0].isPrimary).toBe(true);
       expect(detail.applications[0].openingTitle).toBe('BI Developer');
-      const res = await api().get(`${API}/candidates`).query({ q: 'kusto' }).set(auth(org.ownerToken)).expect(200);
-      expect(res.body.data.items.map((i: any) => i.id)).toEqual([candidateId]);
+      expect(detail.candidate.source).toBe('cutshort');
+      // Nothing is read out of the file: the email in the CV was not filled in.
+      expect(detail.candidate.email).toBeNull();
+      expect(detail.candidate.phone).toBe('+917509869971');
+      expect(detail.candidate).not.toHaveProperty('aiSummary');
       await api().post(`${API}/candidates/from-cv`).set(auth(org.ownerToken))
-        .send({ fileId, data: { fullName: 'Sagar Y', email: 'sagaryadav1108@gmail.com' } }).expect(409);
+        .send({ fileId, data: { fullName: 'Sagar Y', phone: '7509869971' } }).expect(409);
+    });
+    and('the CV can be opened in the portal exactly as uploaded', async () => {
+      const detail = (await api().get(`${API}/candidates/${candidateId}`).set(auth(org.ownerToken)).expect(200)).body.data;
+      const doc = detail.documents[0];
+      const file = await api().get(`${API}/candidates/${candidateId}/documents/${doc.id}/file`).set(auth(org.ownerToken)).buffer(true).parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      }).expect(200);
+      expect(file.headers['content-type']).toMatch(/text\/plain/);
+      expect(file.headers['content-disposition']).toMatch(/^inline/);
+      expect((file.body as Buffer).toString()).toBe(cvText);
+      const preview = (await api().get(`${API}/candidates/${candidateId}/documents/${doc.id}/preview`).set(auth(org.ownerToken)).expect(200)).body.data;
+      expect(preview.kind).toBe('file');
     });
   });
 

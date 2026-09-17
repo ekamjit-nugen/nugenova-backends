@@ -4,10 +4,11 @@ Feature: Recruitment — client leads, submissions, talent pool and suggestions
   step. Candidates that are not in an opening or a lead sit in the talent pool,
   and the system suggests where they fit.
 
-  Scenario: the downloadable sample CVs parse
+  Scenario: the downloadable sample CVs can be viewed in the portal
     Given an organization
-    When the owner uploads the sample CV as PDF and as DOCX and parses them without AI
-    Then both parses extract the sample email, phone and 72 months experience
+    When the owner attaches the sample CV as PDF and as DOCX to a candidate
+    Then the PDF opens inline as a PDF
+    And the DOCX opens as a readable preview showing "Aarav Sharma"
 
   Scenario: submitting a candidate to a lead requirement starts work on it
     Given an organization with a lead "Acme Corp" needing 1 "Senior Data Engineer" with skills "PySpark, SQL"

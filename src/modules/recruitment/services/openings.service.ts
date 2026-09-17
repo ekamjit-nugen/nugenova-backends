@@ -221,6 +221,7 @@ export class OpeningsService {
           noticePeriodDays: c.noticePeriodDays, noticeStatus: c.noticeStatus, rating: c.rating, tags: c.tags, source: c.source,
           skills: (c.skills ?? []).slice(0, 5), lastActivityAt: c.lastActivityAt, hasResume: docByCand.has(c.id),
           primaryResumeFileId: docByCand.get(c.id)?.fileId ?? null,
+          primaryResume: docByCand.has(c.id) ? { id: docByCand.get(c.id)!.id, fileName: docByCand.get(c.id)!.fileName, mimeType: docByCand.get(c.id)!.mimeType } : null,
         },
         interviews: {
           total: myInterviews.length,

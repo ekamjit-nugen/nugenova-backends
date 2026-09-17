@@ -1,6 +1,6 @@
 import {
-  cleanCell, cleanList, experienceFromHistory, extractJsonObject, isCutshortFileName, looksLikeSheetNote, normalizeEmail, normalizePhone,
-  guessNameFromText, normalizeSource, parseExperienceMonths, parseLegacyRemarks, parseNotice, regexExtract, sanitizeParsedCandidate,
+  cleanCell, cleanList, isCutshortFileName, looksLikeSheetNote, normalizeEmail, normalizePhone,
+  normalizeSource, parseExperienceMonths, parseLegacyRemarks, parseNotice,
   tidyCompany, tidyName, toPrefixTsQuery,
 } from './recruitment.utils';
 
@@ -92,61 +92,6 @@ describe('recruitment.utils', () => {
     expect(tidyCompany('Currently at Yash Technologies as Senior Power BI')).toBe('Yash Technologies as Senior Power BI');
   });
 
-  it('experienceFromHistory merges overlapping ranges', () => {
-    const now = new Date(2026, 0, 1);
-    const months = experienceFromHistory([
-      { company: 'A', designation: null, from: '2020-01', to: '2023-01', current: false, summary: null },
-      { company: 'B', designation: null, from: '2022-01', to: null, current: true, summary: null },
-    ], now);
-    expect(months).toBe(72);
-  });
-
-  describe('sanitizeParsedCandidate', () => {
-    it('normalises and drops junk', () => {
-      const out = sanitizeParsedCandidate({
-        fullName: 'AKASH SHAW', emails: ['Akash.PShaw524@gmail.com'], phones: ['9804753101', '+91 98047 53101', '8888888888'],
-        totalExperience: '7 years', noticePeriod: '30 days', skills: ['SQL', 'sql', 'Power BI'],
-        linkedinUrl: 'linkedin.com/in/akash', githubUrl: 'https://evil.example.com/x', currentCtc: '12,00,000',
-        workHistory: [{ company: 'Acme', designation: 'Engineer', from: '2019', to: 'Present', current: true }],
-        education: [{ degree: 'B.Tech', institution: 'IIT' }, { foo: 'bar' }],
-      });
-      expect(out.fullName).toBe('Akash Shaw');
-      expect(out.email).toBe('akash.pshaw524@gmail.com');
-      expect(out.phone).toBe('+919804753101');
-      expect(out.altPhone).toBe('+918888888888');
-      expect(out.totalExpMonths).toBe(84);
-      expect(out.noticePeriodDays).toBe(30);
-      expect(out.skills).toEqual(['SQL', 'Power BI']);
-      expect(out.linkedinUrl).toBe('https://linkedin.com/in/akash');
-      expect(out.githubUrl).toBeNull();
-      expect(out.currentCtc).toBe(1200000);
-      expect(out.currentCompany).toBe('Acme');
-      expect(out.education).toHaveLength(1);
-      expect(out.highestQualification).toBe('B.Tech');
-    });
-    it('reads CTC given in lakhs', () => {
-      expect(sanitizeParsedCandidate({ currentCtc: 18, expectedCtc: '26 LPA' })).toMatchObject({ currentCtc: 1800000, expectedCtc: 2600000 });
-    });
-    it('survives garbage input', () => {
-      expect(sanitizeParsedCandidate(null).fullName).toBeNull();
-      expect(sanitizeParsedCandidate('x' as any).skills).toEqual([]);
-    });
-  });
-
-  it('regexExtract finds contact details', () => {
-    const r = regexExtract('John Doe\njohn.doe@mail.com | +91 98765 43210\nlinkedin.com/in/johndoe\n6+ years of experience in data');
-    expect(r.email).toBe('john.doe@mail.com');
-    expect(r.phone).toBe('+919876543210');
-    expect(r.linkedinUrl).toBe('https://linkedin.com/in/johndoe');
-    expect(r.totalExpMonths).toBe(72);
-  });
-
-  it('extractJsonObject tolerates fences and prose', () => {
-    expect(extractJsonObject('Here you go:\n```json\n{"a":1}\n```')).toEqual({ a: 1 });
-    expect(extractJsonObject('{"a": {"b": 2}} trailing')).toEqual({ a: { b: 2 } });
-    expect(extractJsonObject('nope')).toBeNull();
-  });
-
   it('toPrefixTsQuery sanitises input', () => {
     expect(toPrefixTsQuery('Power BI  dev!')).toBe('power:* & bi:* & dev:*');
     expect(toPrefixTsQuery("'; drop table --")).toBe('drop:* & table:*');
@@ -167,16 +112,5 @@ describe('looksLikeSheetNote', () => {
       expect(looksLikeSheetNote(n)).toBe(false);
     }
     expect(looksLikeSheetNote(null)).toBe(false);
-  });
-});
-
-describe('guessNameFromText', () => {
-  it('reads the name printed at the top of a CV', () => {
-    expect(guessNameFromText('ANMOL KUMAR SHARMA\nS C | P BI\nNoida, UP 201003 ◆ +91 - 9906152344')).toBe('Anmol Kumar Sharma');
-    expect(guessNameFromText('Curriculum Vitae\nPriya S. Nair\npriya@example.com')).toBe('Priya S. Nair');
-  });
-  it('skips headings, contact lines and long sentences', () => {
-    expect(guessNameFromText('Professional Summary\nemail: a@b.com\nSeasoned data analytics professional with 8 years of experience')).toBeNull();
-    expect(guessNameFromText('')).toBeNull();
   });
 });

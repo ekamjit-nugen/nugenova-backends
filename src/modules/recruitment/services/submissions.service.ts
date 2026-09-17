@@ -111,7 +111,7 @@ export class SubmissionsService {
         billRate: bill, billUnit: s.billUnit, currency: s.currency,
         costRate: showMoney ? cost : null, marginPct: showMoney ? marginPct(bill, cost) : null, moneyHidden: !showMoney,
         availableFrom: s.availableFrom, proposedStart: s.proposedStart,
-        sharedDocument: d ? { id: d.id, fileId: d.fileId, fileName: d.fileName } : null,
+        sharedDocument: d ? { id: d.id, fileId: d.fileId, fileName: d.fileName, mimeType: d.mimeType } : null,
         clientFeedback: s.clientFeedback, rejectionReason: s.rejectionReason,
         ownerId: s.ownerId, ownerName: s.ownerId ? names.get(s.ownerId) ?? null : null,
         accountManagerId: s.accountManagerId, accountManagerName: s.accountManagerId ? names.get(s.accountManagerId) ?? null : null,
