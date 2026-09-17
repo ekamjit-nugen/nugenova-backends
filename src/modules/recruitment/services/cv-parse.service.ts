@@ -5,7 +5,7 @@ import { Brackets, Repository } from 'typeorm';
 import { StorageService } from '../../../bootstrap/storage/storage.service';
 import { DocumentFileEntity } from '../../../bootstrap/storage/document-file.entity';
 import { AiService } from '../../ai/services/ai.service';
-import { extractText } from '../../knowledge/text-extraction';
+import { extractText, sanitizeExtractedText } from '../../knowledge/text-extraction';
 import { CandidateEntity } from '../entities';
 import { ParseStatus } from '../recruitment.constants';
 import {
@@ -105,7 +105,7 @@ export class CvParseService {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const mammoth = require('mammoth') as { extractRawText(i: { buffer: Buffer }): Promise<{ value: string }> };
         const { value } = await mammoth.extractRawText({ buffer });
-        const text = (value || '').trim();
+        const text = sanitizeExtractedText(value || '');
         return { status: text ? 'ok' : 'empty', text };
       }
       const res = await extractText(buffer, name, mime);

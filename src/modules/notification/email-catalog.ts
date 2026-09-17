@@ -338,6 +338,14 @@ export const EMAIL_CATALOG: EmailCatalogEntry[] = [
     about: 'When a client shortlists, interviews, selects or rejects a submitted candidate.',
     preview: viaNotify('recruitment_submission_decision', { title: 'Arjun Mehta: Shortlisted', body: 'Acme Retail', actionUrl: '/recruitment/leads' }),
   },
+  {
+    key: 'recruitment_import_finished',
+    label: 'Candidate import finished',
+    group: 'Recruitment',
+    kind: 'personal',
+    about: 'When a spreadsheet import you started finishes or stops, with how many rows were added, merged or need attention.',
+    preview: viaNotify('recruitment_import_finished', { title: 'Import finished: Candidate_Summary.xlsx', body: '118 new · 12 merged · 3 need attention', actionUrl: '/recruitment' }),
+  },
 
   // ── Sales ─────────────────────────────────────────────────────────────────
   {
