@@ -1,14 +1,16 @@
 Feature: Choosing which roles receive which emails
   Owners and admins pick, per email, which roles receive it, and can preview
-  exactly what each email looks like. Team emails (something to review) default
-  to owners and admins; personal emails default to everyone. Sign-in codes,
-  security alerts and legal notices are always sent.
+  exactly what each email looks like. The columns are the same roles as the
+  permission matrix. Owners and admins receive every email, as they hold every
+  permission. Team emails (something to review) reach a role once it is ticked;
+  personal emails default to everyone. Sign-in codes, security alerts and legal
+  notices are always sent.
 
   Scenario: an owner sees every email with its default recipients
     Given an organization with a custom role
     When the owner opens the email notification settings
-    Then every email is listed with Owner, Admin, each role and No custom role as columns
-    And the daily attendance summary goes to owners and admins only
+    Then every email is listed with the organization's roles as its columns
+    And no role is ticked for the daily attendance summary
 
   @security
   Scenario: an employee cannot see or change email settings
@@ -23,7 +25,7 @@ Feature: Choosing which roles receive which emails
 
   Scenario: an always-sent email cannot be switched off for a role
     Given an organization with a custom role
-    When the owner tries to stop sign-in codes for members with no custom role
+    When the owner tries to stop sign-in codes for the HR role
     Then the change is refused
 
   Scenario: a team email reaches a role only once it is ticked

@@ -55,27 +55,23 @@ defineFeature(feature, (test) => {
     when('the owner opens the email notification settings', async () => {
       res = await as(ctx.o.ownerToken).get('/notifications/emails');
     });
-    then('every email is listed with Owner, Admin, each role and No custom role as columns', () => {
+    then("every email is listed with the organization's roles as its columns", async () => {
       expect(res.status).toBe(200);
-      const labels = res.body.data.audiences.map((a: any) => a.label);
-      expect(labels[0]).toBe('Owner');
-      expect(labels[1]).toBe('Admin');
-      expect(labels).toContain('HR');
-      expect(labels[labels.length - 1]).toBe('No custom role');
-      expect(res.body.data.emails.length).toBeGreaterThan(40);
+      const { audiences, emails } = res.body.data;
+      // Exactly the permission matrix's columns, in its order: no Owner / Admin /
+      // "No custom role" columns that the permission matrix doesn't have.
+      const roles = await as(ctx.o.ownerToken).get('/org/roles').expect(200);
+      expect(audiences.map((a: any) => a.roleId)).toEqual(roles.body.data.map((r: any) => r.id));
+      expect(audiences.map((a: any) => a.label)).toContain('HR');
+      expect(emails.length).toBeGreaterThan(40);
     });
-    and('the daily attendance summary goes to owners and admins only', () => {
+    and('no role is ticked for the daily attendance summary', () => {
       const digest = res.body.data.emails.find((e: any) => e.key === 'attendance.daily_digest');
       expect(digest.kind).toBe('team');
-      expect(digest.routing['tier:owner']).toBe(true);
-      expect(digest.routing['tier:admin']).toBe(true);
-      expect(digest.routing.norole).toBe(false);
-      // Every role column is off by default — including the one we just created,
-      // and any roles the org was seeded with.
-      const roleCols = Object.entries(digest.routing).filter(([k]) => k.startsWith('role:'));
-      expect(roleCols.length).toBeGreaterThan(0);
-      expect(roleCols.map(([k]) => k)).toContain(`role:${ctx.roleId}`);
-      expect(roleCols.every(([, on]) => on === false)).toBe(true);
+      // Including the role we just created and any roles the org was seeded with.
+      expect(Object.keys(digest.routing)).toContain(`role:${ctx.roleId}`);
+      expect(Object.keys(digest.routing).every((k) => k.startsWith('role:'))).toBe(true);
+      expect(Object.values(digest.routing).every((on) => on === false)).toBe(true);
     });
   });
 
@@ -91,7 +87,7 @@ defineFeature(feature, (test) => {
     });
     then('the request is forbidden', async () => {
       expect(res.status).toBe(403);
-      expect((await as(employeeToken).put('/notifications/emails/attendance.daily_digest/routing', { audience: 'norole', enabled: true })).status).toBe(403);
+      expect((await as(employeeToken).put('/notifications/emails/attendance.daily_digest/routing', { audience: 'role:anything', enabled: true })).status).toBe(403);
     });
   });
 
@@ -113,13 +109,13 @@ defineFeature(feature, (test) => {
   });
 
   test('an always-sent email cannot be switched off for a role', ({ given, when, then }) => {
-    let o: CreatedOrg;
+    let ctx: { o: CreatedOrg; roleId: string };
     let res: request.Response;
     given('an organization with a custom role', async () => {
-      ({ o } = await orgWithRole());
+      ctx = await orgWithRole();
     });
-    when('the owner tries to stop sign-in codes for members with no custom role', async () => {
-      res = await as(o.ownerToken).put('/notifications/emails/otp/routing', { audience: 'norole', enabled: false });
+    when('the owner tries to stop sign-in codes for the HR role', async () => {
+      res = await as(ctx.o.ownerToken).put('/notifications/emails/otp/routing', { audience: `role:${ctx.roleId}`, enabled: false });
     });
     then('the change is refused', () => {
       expect(res.status).toBe(400);
