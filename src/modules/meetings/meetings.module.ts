@@ -6,6 +6,7 @@ import { NotificationModule } from '../notification/notification.module';
 import { VerticalModule } from '../vertical/vertical.module';
 import { ActivityModule } from '../activity/activity.module';
 import { UserEntity } from '../auth/entities/user.entity';
+import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 
 import { MeetingEntity } from './entities/meeting.entity';
 import { MeetingNoticeEntity } from './entities/meeting-notice.entity';
@@ -24,7 +25,7 @@ import { MeetingsCronService } from './meetings-cron.service';
     NotificationModule,
     VerticalModule,
     ActivityModule,
-    TypeOrmModule.forFeature([MeetingEntity, MeetingNoticeEntity, UserEntity]),
+    TypeOrmModule.forFeature([MeetingEntity, MeetingNoticeEntity, UserEntity, OrgMembershipEntity]),
   ],
   controllers: [MeetingsController],
   providers: [MeetingsService, MeetingsCronService],

@@ -41,3 +41,19 @@ Feature: Video meetings
     And the host adds the colleague and the stranger
     Then two people are added to the meeting
     And adding the colleague again adds no one
+
+  # Regression: the invite list came from /org/members, which needs
+  # employees:view — so only owners/admins ever saw anyone to invite.
+  Scenario: an employee can see who to invite and schedule a meeting with them
+    Given an organization with two members and a stranger
+    When the colleague lists the people they can invite
+    Then the list includes the host and the stranger but not the colleague
+    And the colleague can schedule a meeting inviting the stranger
+    And the full member directory is still not open to the colleague
+
+  @security
+  Scenario: someone from another organization cannot be added to a meeting
+    Given an organization with two members and a user from another organization
+    When the host schedules a meeting inviting the colleague and the outsider
+    Then only the colleague is a participant
+    And the outsider receives no meeting notification
