@@ -202,4 +202,33 @@ defineFeature(feature, (test) => {
       expect(bday).toBeTruthy();
     });
   });
+  test('members see only their own leave, managers see the team\'s', ({ given, and, when, then }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let stranger: Member;
+    let res: request.Response;
+    const leaveOwners = (r: request.Response) =>
+      (r.body.data as any[]).filter((e) => e.type === 'leave' || e.type === 'wfh').map((e) => e.meta?.userId);
+
+    given('an organization with a member and a stranger', async () => {
+      const made = await orgWithMember(true);
+      o = made.o;
+      member = made.member;
+      stranger = made.stranger!;
+    });
+    and('both have approved leave in September', async () => {
+      await seedApprovedLeave(o, member, 'casual');
+      await seedApprovedLeave(o, stranger, 'wfh');
+    });
+    when('the member reads the calendar for September', async () => {
+      res = await readCalendar(member.token).expect(200);
+    });
+    then("the member sees their own leave but not the stranger's", () => {
+      expect(leaveOwners(res)).toEqual([member.userId]);
+    });
+    and('the owner sees both', async () => {
+      const owner = await readCalendar(o.ownerToken).expect(200);
+      expect(leaveOwners(owner).sort()).toEqual([member.userId, stranger.userId].sort());
+    });
+  });
 });

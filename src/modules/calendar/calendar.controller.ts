@@ -21,7 +21,10 @@ export class CalendarController {
     return id;
   }
   private caller(req: any): CalendarCaller {
-    return { userId: req.user?.userId, isAdmin: req.user?.orgRole === 'owner' || req.user?.orgRole === 'admin' };
+    const isAdmin = req.user?.orgRole === 'owner' || req.user?.orgRole === 'admin';
+    const perms: Record<string, string[]> | null = req.user?.perms || null;
+    const grants = (resource: string) => Array.isArray(perms?.[resource]) && perms![resource].includes('view');
+    return { userId: req.user?.userId, isAdmin, canSeeTeamLeave: isAdmin || grants('leaves') || grants('attendance') };
   }
 
   @Get()

@@ -41,3 +41,11 @@ Feature: Unified calendar feed
     And the member has a birthday in September
     When the member reads the calendar for September
     Then a birthday event appears for the member
+
+  @security
+  Scenario: members see only their own leave, managers see the team's
+    Given an organization with a member and a stranger
+    And both have approved leave in September
+    When the member reads the calendar for September
+    Then the member sees their own leave but not the stranger's
+    And the owner sees both

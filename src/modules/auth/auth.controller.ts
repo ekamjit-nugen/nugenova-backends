@@ -24,6 +24,7 @@ import {
   VerifyOtpDto,
 } from './dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { DashboardLayoutService } from './services/dashboard-layout.service';
 
 /**
  * Auth HTTP surface — Phase 1 login core. Routes are mounted under the global
@@ -33,7 +34,10 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly dashboardLayout: DashboardLayoutService,
+  ) {}
 
   private setCookies(response: any, tokens: AuthTokens): void {
     const isProduction = process.env.NODE_ENV === 'production';
@@ -199,6 +203,19 @@ export class AuthController {
   async updateCurrentUser(@Body() dto: UpdateProfileDto, @Req() req: any) {
     const user = await this.authService.updateProfile(req.user.userId, dto);
     return { success: true, data: this.authService.toPublicUser(user) };
+  }
+
+  /** The caller's own dashboard arrangement: section order and hidden sections. */
+  @Get('me/dashboard-layout')
+  @UseGuards(JwtAuthGuard)
+  async getDashboardLayout(@Req() req: any) {
+    return { success: true, data: await this.dashboardLayout.get(req.user.userId) };
+  }
+
+  @Put('me/dashboard-layout')
+  @UseGuards(JwtAuthGuard)
+  async setDashboardLayout(@Body() body: unknown, @Req() req: any) {
+    return { success: true, data: await this.dashboardLayout.set(req.user.userId, body) };
   }
 
   @Get('check-email')

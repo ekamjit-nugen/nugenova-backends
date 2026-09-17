@@ -11,6 +11,11 @@ import { UserEntity } from '../auth/entities/user.entity';
 export interface CalendarCaller {
   userId: string;
   isAdmin: boolean;
+  /**
+   * May see colleagues' leave and WFH: owners/admins, or a role with leaves:view
+   * or attendance:view. Everyone else sees only their own.
+   */
+  canSeeTeamLeave?: boolean;
 }
 
 export type CalendarEventType = 'holiday' | 'leave' | 'wfh' | 'meeting' | 'birthday';
@@ -51,7 +56,7 @@ export class CalendarService {
     const people = await this.orgPeople(orgId);
     const [holidays, leaves, meetings, birthdays] = await Promise.all([
       this.holidayEvents(orgId, from, to),
-      this.leaveEvents(orgId, from, to, people),
+      this.leaveEvents(orgId, caller, from, to, people),
       this.meetingEvents(orgId, caller, from, to),
       this.birthdayEvents(from, to, people),
     ]);
@@ -82,10 +87,15 @@ export class CalendarService {
     }));
   }
 
-  private async leaveEvents(orgId: string, from: Date, to: Date, people: Map<string, { name: string }>): Promise<CalendarEvent[]> {
-    // Approved leaves overlapping the window.
+  private async leaveEvents(orgId: string, caller: CalendarCaller, from: Date, to: Date, people: Map<string, { name: string }>): Promise<CalendarEvent[]> {
+    // Approved leaves overlapping the window — a colleague's leave is HR data, so
+    // only people who manage leave or attendance see anyone's but their own.
+    const teamVisible = caller.isAdmin || caller.canSeeTeamLeave === true;
     const rows = await this.leaves.find({
-      where: { organizationId: orgId, status: 'approved', startDate: LessThanOrEqual(to), endDate: MoreThanOrEqual(from) },
+      where: {
+        organizationId: orgId, status: 'approved', startDate: LessThanOrEqual(to), endDate: MoreThanOrEqual(from),
+        ...(teamVisible ? {} : { userId: caller.userId }),
+      },
     });
     return rows.map((l) => {
       const name = people.get(l.userId)?.name || l.employeeName || 'Someone';
