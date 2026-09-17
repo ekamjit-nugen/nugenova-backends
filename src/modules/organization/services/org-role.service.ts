@@ -12,7 +12,7 @@ import {
   DEFAULT_ROLES,
   ROLE_NAME_TO_TIER,
   SYSTEM_ROLES,
-  SYSTEM_ROLE_NAMES,
+  RESERVED_ROLE_NAMES,
   LOCKED_SYSTEM_ROLE_NAMES,
 } from '../default-roles';
 
@@ -40,8 +40,8 @@ export class OrgRoleService {
       throw new ConflictException(`A role named '${dto.name.trim()}' already exists`);
     }
     const name = dto.name.trim();
-    if (SYSTEM_ROLE_NAMES.has(name)) {
-      throw new ConflictException(`'${name}' is a built-in system role`);
+    if (RESERVED_ROLE_NAMES.has(name)) {
+      throw new ConflictException(`'${name}' is a reserved built-in role name`);
     }
     return this.repo.save(
       this.repo.create({

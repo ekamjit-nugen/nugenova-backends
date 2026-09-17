@@ -49,20 +49,35 @@ const FULL_ACCESS = ALL_RESOURCES.map((r) => ({ resource: r, actions: [...ALL] }
  * these lived only as an enum on the membership and never appeared on the Roles
  * page — now every member holds one of these (or a custom role) via `roleId`, so
  * roles are entirely data-driven and visible. Owner/Admin are full-access and
- * locked; Manager/Employee/Member/Viewer start empty (self-service) and are
- * editable so an org can grant them whatever it wants.
+ * locked; Manager/Employee start empty (self-service) and are editable so an
+ * org can grant them whatever it wants.
+ *
+ * Manager and Employee are load-bearing even when nobody is assigned them
+ * directly: they are what a member falls back to when invited without a custom
+ * role, or when their custom role is cleared (see MembershipService.resolveRole).
  */
 export const SYSTEM_ROLES: SystemRoleDef[] = [
   { name: 'owner', displayName: 'Owner', description: 'Full access to everything in the organization.', tier: 'owner', permissions: FULL_ACCESS },
   { name: 'admin', displayName: 'Admin', description: 'Full administrative access.', tier: 'admin', permissions: FULL_ACCESS },
   { name: 'manager', displayName: 'Manager', description: 'Team lead — grant management permissions below as needed.', tier: 'manager', permissions: [] },
   { name: 'employee', displayName: 'Employee', description: 'Standard team member — self-service access.', tier: 'employee', permissions: [] },
-  { name: 'member', displayName: 'Member', description: 'Basic member — self-service access.', tier: 'member', permissions: [] },
-  { name: 'viewer', displayName: 'Viewer', description: 'Read-only member.', tier: 'viewer', permissions: [] },
 ];
+
+/**
+ * Built-ins that were removed: Member and Viewer. No membership in any org ever
+ * held them and nothing assigned their tiers, so they only cluttered the Roles
+ * page (their rows are retired by migration 1788490000000). The names stay
+ * reserved so a custom role can't reuse them and look like the old built-in.
+ *
+ * Note the `viewer` TIER is still valid — the education pack's Student and
+ * Guardian roles map to it on their own rows. Only the system ROLE is gone.
+ */
+export const RETIRED_SYSTEM_ROLE_NAMES = new Set(['member', 'viewer']);
 
 /** The set of system-role slugs (used to protect them from deletion). */
 export const SYSTEM_ROLE_NAMES = new Set(SYSTEM_ROLES.map((r) => r.name));
+/** Names a custom role may not take: current built-ins plus retired ones. */
+export const RESERVED_ROLE_NAMES = new Set([...SYSTEM_ROLE_NAMES, ...RETIRED_SYSTEM_ROLE_NAMES]);
 /** Owner/Admin are full-access and locked from editing (would risk a lockout). */
 export const LOCKED_SYSTEM_ROLE_NAMES = new Set(['owner', 'admin']);
 

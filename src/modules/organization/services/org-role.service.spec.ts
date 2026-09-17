@@ -51,6 +51,28 @@ describe('OrgRoleService (unit, no DB)', () => {
         service.create('org-1', { name: 'Auditor' } as any, 'creator'),
       ).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it.each(['owner', 'admin', 'manager', 'employee'])(
+      'rejects a custom role named after the built-in %s',
+      async (name) => {
+        repo.findOne.mockResolvedValue(null);
+        await expect(
+          service.create('org-1', { name } as any, 'creator'),
+        ).rejects.toBeInstanceOf(ConflictException);
+      },
+    );
+
+    // Retired built-ins stay reserved, so a custom role can't reuse the name and
+    // pass itself off as the old Member/Viewer role.
+    it.each(['member', 'viewer'])(
+      'rejects a custom role named after the retired %s role',
+      async (name) => {
+        repo.findOne.mockResolvedValue(null);
+        await expect(
+          service.create('org-1', { name } as any, 'creator'),
+        ).rejects.toBeInstanceOf(ConflictException);
+      },
+    );
   });
 
   describe('seedDefaults', () => {
@@ -62,7 +84,10 @@ describe('OrgRoleService (unit, no DB)', () => {
       expect(Array.isArray(created)).toBe(true);
       const names = created.map((r: any) => r.name);
       // System tiers are seeded as real, visible role rows...
-      expect(names).toEqual(expect.arrayContaining(['owner', 'admin', 'manager', 'employee', 'member', 'viewer']));
+      expect(names).toEqual(expect.arrayContaining(['owner', 'admin', 'manager', 'employee']));
+      // ...but never the retired Member/Viewer built-ins, which nobody held.
+      expect(names).not.toContain('member');
+      expect(names).not.toContain('viewer');
       // ...plus the default custom roles.
       expect(names).toEqual(expect.arrayContaining(DEFAULT_ROLES.map((r) => r.name)));
       // Owner is a system role with a non-empty (full-access) matrix.
