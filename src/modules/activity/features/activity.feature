@@ -19,3 +19,10 @@ Feature: Activity feed + retention
     And there are activity logs older than 15 days
     When the owner runs retention
     Then the old logs are emailed to the owner and removed
+
+  Scenario: errors can be narrowed to the part of the app they came from
+    Given an organization whose members hit errors in Recruitment, Attendance and an unknown area
+    When the owner asks which areas have errors
+    Then Recruitment, Attendance & timesheets and Other are listed with their counts
+    And filtering errors by Recruitment shows only the recruitment errors
+    And a member only counts their own errors

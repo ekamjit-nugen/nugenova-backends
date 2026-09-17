@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { ActivityService } from '../../modules/activity/activity.service';
+import { areaForPath } from '../../modules/activity/error-areas';
 import { MailService } from '../mail/mail.service';
 import { OrganizationEntity } from '../../modules/organization/entities/organization.entity';
 import { OrgMembershipEntity } from '../../modules/auth/entities/org-membership.entity';
@@ -66,6 +67,8 @@ export class ErrorReporterService {
         status: err.status,
         method: err.method,
         path: err.path,
+        // Which part of the app failed, so errors can be filtered by area.
+        area: areaForPath(err.path),
         message: err.message,
         // The stack is the point of the whole feature: "the complete reason"
         // has to be readable from the activity entry, not just the email.

@@ -108,4 +108,54 @@ defineFeature(feature, (test) => {
       expect(mails.length).toBeGreaterThanOrEqual(1);
     });
   });
+  test('errors can be narrowed to the part of the app they came from', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let member: Member;
+    let areas: request.Response;
+    const error = (actorId: string, path: string, withArea: boolean) =>
+      activity.save(activity.create({
+        organizationId: o.orgId, actorId, actorName: 'Someone', action: 'error.server', category: 'errors',
+        targetType: 'request', summary: `500 on GET ${path}`,
+        // Older rows have no `area`; it's worked out from the path.
+        metadata: { status: 500, method: 'GET', path, ...(withArea ? { area: path.includes('recruitment') ? 'recruitment' : 'attendance' } : {}) },
+      }));
+
+    given('an organization whose members hit errors in Recruitment, Attendance and an unknown area', async () => {
+      ({ o, member } = await setup());
+      const owner = (await h.users.findOne({ where: { email: o.ownerEmail.toLowerCase() } }))!.id;
+      await error(member.userId, '/api/v1/recruitment/candidates?pool=pipeline', true);
+      await error(owner, '/api/v1/recruitment/openings', false);
+      await error(owner, '/api/v1/timesheets?status=submitted', false);
+      await error(member.userId, '/api/v1/attendance/stats', true);
+      await error(owner, '/api/v1/vertical/pack', false);
+      // Not an error: never counted.
+      await activity.save(activity.create({ organizationId: o.orgId, actorId: owner, action: 'leave.applied', category: 'leave', metadata: { path: '/api/v1/leaves' } }));
+    });
+    when('the owner asks which areas have errors', async () => {
+      areas = await h.api().get(`${API}/activity/error-areas`).set('Authorization', `Bearer ${o.ownerToken}`);
+    });
+    then('Recruitment, Attendance & timesheets and Other are listed with their counts', () => {
+      expect(areas.status).toBe(200);
+      expect(areas.body.data).toEqual([
+        { key: 'recruitment', label: 'Recruitment', count: 2 },
+        { key: 'attendance', label: 'Attendance & timesheets', count: 2 },
+        { key: 'other', label: 'Other', count: 1 },
+      ]);
+    });
+    and('filtering errors by Recruitment shows only the recruitment errors', async () => {
+      const res = await h.api().get(`${API}/activity?category=errors&area=recruitment`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      expect(res.body.total).toBe(2);
+      expect(res.body.items.every((e: any) => String(e.metadata.path).startsWith('/api/v1/recruitment'))).toBe(true);
+      const other = await h.api().get(`${API}/activity?category=errors&area=other`).set('Authorization', `Bearer ${o.ownerToken}`).expect(200);
+      expect(other.body.items.map((e: any) => e.metadata.path)).toEqual(['/api/v1/vertical/pack']);
+      expect((await h.api().get(`${API}/activity?category=errors&area=bogus`).set('Authorization', `Bearer ${o.ownerToken}`)).status).toBe(400);
+    });
+    and('a member only counts their own errors', async () => {
+      const mine = await h.api().get(`${API}/activity/error-areas?scope=all`).set('Authorization', `Bearer ${member.token}`).expect(200);
+      expect(mine.body.data).toEqual([
+        { key: 'recruitment', label: 'Recruitment', count: 1 },
+        { key: 'attendance', label: 'Attendance & timesheets', count: 1 },
+      ]);
+    });
+  });
 });

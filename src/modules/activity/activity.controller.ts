@@ -40,11 +40,23 @@ export class ActivityController {
     @Query('to') to?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('area') area?: string,
   ) {
     const data = await this.activity.list(this.orgId(req), this.caller(req), {
-      scope, actorId, category, from, to, page: page ? Number(page) : undefined, limit: limit ? Number(limit) : undefined,
+      scope, actorId, category, from, to, area: area || undefined, page: page ? Number(page) : undefined, limit: limit ? Number(limit) : undefined,
     });
     return { success: true, ...data };
+  }
+
+  /** Error counts per area of the app (Recruitment, Attendance, …) for the Errors filter. */
+  @Get('error-areas')
+  async errorAreas(
+    @Req() req: any,
+    @Query('scope') scope?: 'all' | 'me',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return { success: true, data: await this.activity.errorAreas(this.orgId(req), this.caller(req), { scope, from, to }) };
   }
 
   /** The caller's own activity. */
