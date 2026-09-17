@@ -5,6 +5,7 @@ import { In, IsNull, Not, Repository } from 'typeorm';
 import { StorageService } from '../../bootstrap/storage/storage.service';
 import { UserEntity } from '../auth/entities/user.entity';
 import { NotifierService } from '../notification/notifier.service';
+import { DriveService } from '../storage/drive.service';
 import { DiscussionBoardEntity } from './entities/discussion-board.entity';
 import { BoardNoteEntity } from './entities/board-note.entity';
 import { BoardNodeEntity } from './entities/board-node.entity';
@@ -13,6 +14,14 @@ import { BoardCommentEntity } from './entities/board-comment.entity';
 /** Files uploaded as board images are tagged with this category so the public
  *  asset endpoint will only ever serve board images, never other documents. */
 export const BOARD_ASSET_CATEGORY = 'board-asset';
+/**
+ * Non-image files copied onto a board. Kept OUT of the public asset category so a
+ * copied document is only readable through the participant-gated board route.
+ */
+export const BOARD_FILE_CATEGORY = 'board-file';
+
+/** Matches both board asset URLs in note content: public images and gated files. */
+export const BOARD_FILE_URL_RE = /\/discussion-boards\/(?:assets\/([a-z0-9]{24})|[a-z0-9]{24}\/files\/([a-z0-9]{24})\/raw)/gi;
 
 /** Who is asking — drives participant-based access. */
 export interface BoardCaller {
@@ -62,6 +71,7 @@ export class DiscussionBoardsService {
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
     private readonly storage: StorageService,
+    private readonly drive: DriveService,
     private readonly notifier: NotifierService,
   ) {}
 
@@ -419,20 +429,20 @@ export class DiscussionBoardsService {
     const notes = await this.notes.find({ where: { boardId, organizationId: orgId, isDeleted: false } });
     // asset id → first note that references it
     const assetNote = new Map<string, string>();
-    const re = /\/discussion-boards\/assets\/([a-z0-9]{24})/gi;
+    const re = new RegExp(BOARD_FILE_URL_RE.source, 'gi');
     for (const n of notes) {
       let m: RegExpExecArray | null;
       const t = n.text ?? '';
-      while ((m = re.exec(t))) if (!assetNote.has(m[1])) assetNote.set(m[1], n.id);
+      while ((m = re.exec(t))) { const id = m[1] ?? m[2]; if (id && !assetNote.has(id)) assetNote.set(id, n.id); }
     }
     const ids = [...assetNote.keys()];
     if (!ids.length) return [];
     const files = await this.storage.listByIds(ids, orgId);
     return files
-      .filter((f) => f.category === 'board-asset')
+      .filter((f) => f.category === BOARD_ASSET_CATEGORY || f.category === BOARD_FILE_CATEGORY)
       .map((f) => ({
         id: f.id,
-        url: `/discussion-boards/assets/${f.id}`,
+        url: this.assetUrl(f.id, f.category, boardId),
         name: f.originalName,
         mimeType: f.mimeType,
         size: f.size,
@@ -459,22 +469,22 @@ export class DiscussionBoardsService {
 
     const notes = await this.notes.find({ where: { organizationId: orgId, boardId: In(boards.map((b) => b.id)), isDeleted: false } });
     const assetBoard = new Map<string, string>(); // assetId → boardId
-    const re = /\/discussion-boards\/assets\/([a-z0-9]{24})/gi;
+    const re = new RegExp(BOARD_FILE_URL_RE.source, 'gi');
     for (const n of notes) {
       let m: RegExpExecArray | null;
       const t = n.text ?? '';
-      while ((m = re.exec(t))) if (!assetBoard.has(m[1])) assetBoard.set(m[1], n.boardId);
+      while ((m = re.exec(t))) { const id = m[1] ?? m[2]; if (id && !assetBoard.has(id)) assetBoard.set(id, n.boardId); }
     }
     const ids = [...assetBoard.keys()];
     if (!ids.length) return [];
     const files = await this.storage.listByIds(ids, orgId);
     return files
-      .filter((f) => f.category === BOARD_ASSET_CATEGORY)
+      .filter((f) => f.category === BOARD_ASSET_CATEGORY || f.category === BOARD_FILE_CATEGORY)
       .map((f) => {
         const boardId = assetBoard.get(f.id) ?? null;
         return {
           id: f.id,
-          url: `/discussion-boards/assets/${f.id}`,
+          url: this.assetUrl(f.id, f.category, boardId),
           name: f.originalName,
           mimeType: f.mimeType,
           size: f.size,
@@ -484,6 +494,65 @@ export class DiscussionBoardsService {
         };
       })
       .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+  }
+
+  /** Public URL for images; participant-gated URL for copied documents. */
+  private assetUrl(id: string, category: string | null, boardId: string | null): string {
+    return category === BOARD_FILE_CATEGORY && boardId
+      ? `/discussion-boards/${boardId}/files/${id}/raw`
+      : `/discussion-boards/assets/${id}`;
+  }
+
+  /**
+   * Copy a Cloud Drive file onto a board. Checked BOTH ways: the caller must be on
+   * the board AND allowed to read that drive file (owner / team drive / shared with
+   * them / admin — see `DriveService.assertCanReadFile`). The bytes are copied, so
+   * the drive original and its permissions are untouched, and later changes there
+   * don't leak into the board.
+   *
+   * Images become normal board assets (embeddable via <img>); everything else is
+   * tagged `board-file` and is only readable through the participant-gated route.
+   */
+  async copyDriveFile(orgId: string, caller: BoardCaller, boardId: string, fileId: string): Promise<{
+    id: string; url: string; name: string; mimeType: string; size: number; isImage: boolean;
+  }> {
+    const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
+    if (!board) throw new NotFoundException('Board not found');
+    if (!this.canAccess(board, caller)) throw new ForbiddenException('You do not have access to this board');
+
+    const driveFile = await this.drive.assertCanReadFile(orgId, fileId, caller.userId, caller.isAdmin);
+    const meta = await this.storage.getMeta(driveFile.storageFileId);
+    const buffer = await this.storage.getBytes(meta);
+    const isImage = /^image\//i.test(meta.mimeType || '');
+
+    const saved = await this.storage.save({
+      organizationId: orgId,
+      uploadedBy: caller.userId,
+      originalName: driveFile.name || meta.originalName,
+      mimeType: meta.mimeType,
+      buffer,
+      category: isImage ? BOARD_ASSET_CATEGORY : BOARD_FILE_CATEGORY,
+    });
+    return {
+      id: saved.id,
+      url: this.assetUrl(saved.id, isImage ? BOARD_ASSET_CATEGORY : BOARD_FILE_CATEGORY, boardId),
+      name: saved.originalName,
+      mimeType: saved.mimeType,
+      size: saved.size,
+      isImage,
+    };
+  }
+
+  /** Bytes of a copied board document — participant-gated (never public). */
+  async getBoardFileBytes(orgId: string, caller: BoardCaller, boardId: string, assetId: string): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+    const board = await this.boards.findOne({ where: { id: boardId, organizationId: orgId, isDeleted: false } });
+    if (!board) throw new NotFoundException('Board not found');
+    if (!this.canAccess(board, caller)) throw new ForbiddenException('You do not have access to this board');
+    const f = await this.storage.getMeta(assetId).catch(() => null);
+    if (!f || (f.category !== BOARD_FILE_CATEGORY && f.category !== BOARD_ASSET_CATEGORY) || f.organizationId !== orgId) {
+      throw new NotFoundException('File not found');
+    }
+    return { buffer: await this.storage.getBytes(f), mimeType: f.mimeType, filename: f.originalName };
   }
 
   /** Raw bytes for the PUBLIC asset endpoint — ONLY files tagged `board-asset`,

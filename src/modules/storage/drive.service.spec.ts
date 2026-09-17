@@ -520,4 +520,91 @@ describe('DriveService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
+
+  describe('per-file read access (assertCanReadFile)', () => {
+    const personal = { id: 'f1', organizationId: 'org1', scope: 'personal', ownerId: 'owner1', folderId: null, isDeleted: false, storageFileId: 'doc1', name: 'salary.pdf' };
+    const inFolder = { ...personal, id: 'f2', folderId: 'child' };
+
+    beforeEach(() => { fileRepo.findOne.mockResolvedValue(personal); });
+
+    it('lets the owner read their own personal file', async () => {
+      await expect(service.assertCanReadFile('org1', 'f1', 'owner1')).resolves.toMatchObject({ id: 'f1' });
+    });
+
+    it('refuses another member — the bug this fixes', async () => {
+      await expect(service.assertCanReadFile('org1', 'f1', 'colleague')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('allows a team-drive file for any member', async () => {
+      fileRepo.findOne.mockResolvedValue({ ...personal, scope: 'team', ownerId: null });
+      await expect(service.assertCanReadFile('org1', 'f1', 'colleague')).resolves.toBeTruthy();
+    });
+
+    it('allows someone the file was shared with directly', async () => {
+      grantRepo.findOne.mockResolvedValue({ id: 'g1', targetType: 'file', targetId: 'f1', granteeUserId: 'colleague' });
+      await expect(service.assertCanReadFile('org1', 'f1', 'colleague')).resolves.toBeTruthy();
+    });
+
+    it('allows a grant on a folder ABOVE the file', async () => {
+      fileRepo.findOne.mockResolvedValue(inFolder);
+      grantRepo.find.mockResolvedValue([{ targetId: 'root' }]);          // granted the parent
+      folderRepo.findOne.mockImplementation(async ({ where }: any) =>
+        where.id === 'child' ? { parentFolderId: 'root' } : { parentFolderId: null });
+      await expect(service.assertCanReadFile('org1', 'f2', 'colleague')).resolves.toBeTruthy();
+    });
+
+    it('still refuses when the grant is on an unrelated folder', async () => {
+      fileRepo.findOne.mockResolvedValue(inFolder);
+      grantRepo.find.mockResolvedValue([{ targetId: 'someone-elses-folder' }]);
+      folderRepo.findOne.mockImplementation(async ({ where }: any) =>
+        where.id === 'child' ? { parentFolderId: 'root' } : { parentFolderId: null });
+      await expect(service.assertCanReadFile('org1', 'f2', 'colleague')).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets org admins read anything, and trusted server paths pass userId=null', async () => {
+      await expect(service.assertCanReadFile('org1', 'f1', 'colleague', true)).resolves.toBeTruthy();
+      await expect(service.assertCanReadFile('org1', 'f1', null)).resolves.toBeTruthy();
+    });
+
+    it('404s a file from another org', async () => {
+      fileRepo.findOne.mockResolvedValue(null);
+      await expect(service.assertCanReadFile('org1', 'nope', 'owner1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('downloads and PDF previews go through the same check', async () => {
+      await expect(service.getFileStream('org1', 'f1', 'colleague')).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.getPreviewPdf('org1', 'f1', 'colleague')).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.getFileStream('org1', 'f1', 'owner1')).resolves.toBeTruthy();
+    });
+  });
+
+  describe('listFiles', () => {
+    const whereOf = () => fileRepo.findAndCount.mock.calls.at(-1)[0].where;
+
+    it('lists one folder by default (the root when folderId is null)', async () => {
+      await service.listFiles('org1', 'personal', 'user1', null);
+      expect(whereOf().folderId).toBeDefined();
+    });
+
+    it('drops the folder filter when flat, so a picker sees files inside folders', async () => {
+      await service.listFiles('org1', 'personal', 'user1', null, 1, 200, { flat: true });
+      const where = whereOf();
+      expect(where.folderId).toBeUndefined();
+      // Still scoped to the caller's own drive — flat must not widen access.
+      expect(where.ownerId).toBe('user1');
+      expect(where.scope).toBe('personal');
+      expect(where.isDeleted).toBe(false);
+      expect(where.systemManaged).toBe(false);
+    });
+
+    it('narrows by name when a search term is given', async () => {
+      await service.listFiles('org1', 'team', 'user1', null, 1, 50, { flat: true, q: ' report ' });
+      expect(whereOf().name).toBeDefined();
+    });
+
+    it('ignores a blank search term', async () => {
+      await service.listFiles('org1', 'team', 'user1', null, 1, 50, { flat: true, q: '   ' });
+      expect(whereOf().name).toBeUndefined();
+    });
+  });
 });

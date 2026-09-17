@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { RoleEntity } from '../auth/entities/role.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { NotificationEntity } from './entities/notification.entity';
 import { NotificationPreferenceEntity } from './entities/notification-preference.entity';
 import { OrgNotificationSettingEntity } from './entities/org-notification-setting.entity';
@@ -12,7 +13,12 @@ import { NotificationService } from './notification.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { OrgNotificationSettingService } from './org-notification-setting.service';
 import { NotifierService } from './notifier.service';
+import { EmailRoutingService } from './email-routing.service';
 import { NotificationController } from './notification.controller';
+import { PushTokenEntity } from './entities/push-token.entity';
+import { FcmClient } from './push/fcm.client';
+import { PushService } from './push/push.service';
+import { PushController } from './push/push.controller';
 
 /**
  * Notification — the per-recipient in-app inbox (see PLAYBOOK.md). Persists every
@@ -31,23 +37,30 @@ import { NotificationController } from './notification.controller';
       NotificationEntity,
       NotificationPreferenceEntity,
       OrgNotificationSettingEntity,
+      PushTokenEntity,
       OrgMembershipEntity,
       RoleEntity,
       UserEntity,
+      OrganizationEntity,
     ]),
   ],
-  controllers: [NotificationController],
+  controllers: [NotificationController, PushController],
   providers: [
     NotificationService,
     NotificationPreferenceService,
     OrgNotificationSettingService,
+    EmailRoutingService,
     NotifierService,
+    FcmClient,
+    PushService,
   ],
   exports: [
+    PushService,
     NotifierService,
     NotificationService,
     NotificationPreferenceService,
     OrgNotificationSettingService,
+    EmailRoutingService,
   ],
 })
 export class NotificationModule {}

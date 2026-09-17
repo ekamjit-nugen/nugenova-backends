@@ -18,6 +18,7 @@ import { ROLE_NAME_TO_TIER } from '../default-roles';
 import { OrgLimitsService } from './org-limits.service';
 import { MailService } from '../../../bootstrap/mail/mail.service';
 import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboarding.entity';
+import { emailChangedNoticeEmail } from '../../../bootstrap/mail/email-layout';
 
 export interface MemberView {
   membershipId: string;
@@ -34,6 +35,13 @@ export interface MemberView {
   // Profile + HR attributes (for the member detail view).
   avatar: string | null;
   phoneNumber: string | null;
+  /**
+   * Job title in THIS org, or null when none is set. Deliberately NOT merged
+   * with `jobTitle`: a caller has to be able to tell an org title from the
+   * person's own profile title (the Directory shows the latter as placeholder
+   * text, so editing the field can't silently promote it into an org title).
+   */
+  title: string | null;
   jobTitle: string | null;
   location: string | null;
   timezone: string | null;
@@ -97,17 +105,14 @@ export class MembershipService {
     orgId: string,
     input: { role?: string; roleId?: string; departmentId?: string },
   ): Promise<{ tier: string; roleId: string | null; departmentId: string | null }> {
-    // No custom role picked → attach the SYSTEM role for the requested tier, so
-    // every member holds a real, visible role row (never a bare tier). Falls
-    // back to the raw tier only if the org has no seeded system role (legacy).
+    // No custom role picked → the member holds just the tier, with no role row.
+    // There are no built-in tier roles to attach any more, and a lookup by
+    // (tier, isSystem) would be actively wrong: the education pack's built-in
+    // roles carry tiers too, so it could hand an admin the "Principal" role.
     if (!input.roleId) {
-      const tier = input.role || 'employee';
-      const sys = await this.roleRepo.findOne({
-        where: { organizationId: orgId, tier, isSystem: true, isDeleted: false },
-      });
       return {
-        tier,
-        roleId: sys?.id ?? null,
+        tier: input.role || 'employee',
+        roleId: null,
         departmentId: input.departmentId ?? null,
       };
     }
@@ -316,6 +321,35 @@ export class MembershipService {
     await this.onboardingRepo.save(onboarding);
   }
 
+  /**
+   * Titles already in use in this org, for the Directory's title autocomplete.
+   * Suggestions keep spellings consistent ("Senior Engineer" vs "Sr. Engineer")
+   * without forcing a managed list — a genuinely new title can still be typed.
+   * Same staff scope as {@link list}, so students/guardians never contribute.
+   */
+  async titlesInUse(orgId: string): Promise<string[]> {
+    const memberships = await this.membershipRepo.find({
+      where: staffScope({ organizationId: orgId }),
+    });
+    const titles = memberships.map((m) => m.title);
+    // Members with no org title fall back to their own profile job title, so
+    // those count as "in use" too.
+    const needFallback = memberships
+      .filter((m) => !m.title?.trim() && m.userId)
+      .map((m) => m.userId as string);
+    if (needFallback.length) {
+      const users = await this.userRepo.find({ where: { id: In(needFallback) } });
+      titles.push(...users.map((u) => u.jobTitle));
+    }
+    // De-duplicate case-insensitively, keeping the first spelling seen.
+    const seen = new Map<string, string>();
+    for (const raw of titles) {
+      const t = (raw ?? '').trim();
+      if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  }
+
   async updateMember(
     orgId: string,
     membershipId: string,
@@ -325,6 +359,7 @@ export class MembershipService {
       departmentId?: string | null;
       status?: 'active' | 'deactivated';
       probationMonths?: number | null;
+      title?: string | null;
     },
     actorUserId?: string,
   ): Promise<MemberView> {
@@ -348,6 +383,10 @@ export class MembershipService {
         m.deactivatedBy = null;
       }
     }
+
+    // Blank (or whitespace) clears the org title, which drops the member back to
+    // whatever they set as their own job title in their profile.
+    if (patch.title !== undefined) m.title = patch.title?.trim() || null;
 
     // Apply the department first so role↔department validation sees the new dept.
     if (patch.departmentId !== undefined) m.departmentId = patch.departmentId || null;
@@ -451,25 +490,9 @@ export class MembershipService {
     if (oldEmail) {
       const org = await this.orgRepo.findOne({ where: { id: orgId } });
       const orgName = org?.name || 'your organization';
-      const name = user.firstName ? `${user.firstName}` : 'there';
       const when = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-      await this.mail.send({
-        to: oldEmail,
-        subject: `Security notice: the email on your ${orgName} account was changed`,
-        html:
-          `<p>Hi ${name},</p>` +
-          `<p>The sign-in email for your <strong>${orgName}</strong> account was just changed from ` +
-          `<strong>${oldEmail}</strong> to <strong>${newEmail}</strong> by an administrator on ${when}.</p>` +
-          `<p>You are receiving this at your previous email as a security precaution. ` +
-          `<strong>If you did not expect this change, contact your organization administrator immediately</strong> — ` +
-          `your account may be compromised.</p>` +
-          `<p>— ${orgName} (via Nugenova)</p>`,
-        text:
-          `Hi ${name},\n\nThe sign-in email for your ${orgName} account was changed from ${oldEmail} ` +
-          `to ${newEmail} by an administrator on ${when}.\n\nYou are receiving this at your previous email ` +
-          `as a security precaution. If you did not expect this change, contact your organization ` +
-          `administrator immediately.\n\n— ${orgName} (via Nugenova)`,
-      });
+      const notice = emailChangedNoticeEmail({ name: user.firstName, orgName, oldEmail, newEmail, when });
+      await this.mail.send({ to: oldEmail, subject: notice.subject, html: notice.html, text: notice.text });
     }
     void actorUserId; // reserved for future audit-log correlation
 
@@ -502,6 +525,7 @@ export class MembershipService {
       joinedAt: m.joinedAt,
       avatar: user?.avatar ?? null,
       phoneNumber: user?.phoneNumber ?? null,
+      title: m.title ?? null,
       jobTitle: user?.jobTitle ?? null,
       location: user?.location ?? null,
       timezone: user?.timezone ?? null,

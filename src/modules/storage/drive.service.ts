@@ -8,7 +8,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { ILike, In, IsNull, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { Readable } from 'stream';
 import * as bcrypt from 'bcrypt';
@@ -1054,6 +1054,17 @@ export class DriveService {
     return folderId;
   }
 
+  /**
+   * Files in a scope. By default this is ONE folder's contents (`folderId`,
+   * null being the root) — what the Drive browser shows.
+   *
+   * `opts.flat` drops the folder filter and returns every file in the scope,
+   * for callers that pick a file rather than browse to it (the board's Drive
+   * picker). Without it a picker sees only the root, which in practice is empty
+   * because people file things in folders. `opts.q` narrows by name, server
+   * side, so searching isn't limited to the first page. Neither option widens
+   * access: the owner/scope filter is unchanged.
+   */
   async listFiles(
     organizationId: string,
     scope: DriveScope,
@@ -1061,15 +1072,18 @@ export class DriveService {
     folderId: string | null,
     page = 1,
     limit = 50,
+    opts: { flat?: boolean; q?: string } = {},
   ): Promise<{ data: DriveFileEntity[]; total: number }> {
     const ownerId = this.ownerFor(scope, userId);
     const take = Math.min(Math.max(1, limit), 200);
+    const q = opts.q?.trim();
     const [data, total] = await this.files.findAndCount({
       where: {
         organizationId,
         scope,
         ownerId: ownerId === null ? IsNull() : ownerId,
-        folderId: folderId === null ? IsNull() : folderId,
+        ...(opts.flat ? {} : { folderId: folderId === null ? IsNull() : folderId }),
+        ...(q ? { name: ILike(`%${q}%`) } : {}),
         isDeleted: false,
         systemManaged: false,
       },
@@ -1159,19 +1173,69 @@ export class DriveService {
   }
 
   /** Stream a file's bytes through the API (authenticated in-app viewer). */
+  /**
+   * May this user READ this file? Team-scope files are the org's shared drive and
+   * are open to anyone with Cloud Drive access; a personal file is private to its
+   * owner unless it (or a folder above it) was granted to them. Org owners/admins
+   * administer the drive and can read everything.
+   *
+   * Callers pass `userId: null` only for trusted server-side paths (public share
+   * tokens, which authorize separately).
+   */
+  async assertCanReadFile(
+    organizationId: string,
+    fileId: string,
+    userId: string | null,
+    isAdmin = false,
+  ): Promise<DriveFileEntity> {
+    const f = await this.files.findOne({
+      where: { id: fileId, organizationId, isDeleted: false },
+    });
+    if (!f) throw new NotFoundException('File not found');
+    if (userId === null || isAdmin) return f;
+    if (f.scope !== 'personal') return f; // team drive
+    if (f.ownerId === userId) return f;
+
+    // Granted directly on the file?
+    const direct = await this.grants.findOne({
+      where: { organizationId, granteeUserId: userId, targetType: 'file', targetId: f.id },
+    });
+    if (direct) return f;
+
+    // …or on any folder above it.
+    const folderGrants = await this.grants.find({
+      where: { organizationId, granteeUserId: userId, targetType: 'folder' },
+      select: { targetId: true },
+    });
+    if (folderGrants.length) {
+      const granted = new Set(folderGrants.map((g) => g.targetId));
+      let folderId = f.folderId;
+      const seen = new Set<string>(); // cycle guard
+      while (folderId && !seen.has(folderId)) {
+        if (granted.has(folderId)) return f;
+        seen.add(folderId);
+        const parent: { parentFolderId: string | null } | null = await this.folders.findOne({
+          where: { id: folderId, organizationId },
+          select: { parentFolderId: true },
+        });
+        folderId = parent?.parentFolderId ?? null;
+      }
+    }
+    throw new ForbiddenException('You do not have access to this file');
+  }
+
   async getFileStream(
     organizationId: string,
     fileId: string,
+    userId: string | null = null,
+    isAdmin = false,
   ): Promise<{
     stream: Readable;
     mimeType: string;
     filename: string;
     size: number | null;
   }> {
-    const f = await this.files.findOne({
-      where: { id: fileId, organizationId, isDeleted: false },
-    });
-    if (!f) throw new NotFoundException('File not found');
+    const f = await this.assertCanReadFile(organizationId, fileId, userId, isAdmin);
     const meta = await this.storage.getMeta(f.storageFileId);
     const opened = await this.storage.openStream(meta);
     // Prefer the drive's own display name over the stored original name.
@@ -1186,11 +1250,10 @@ export class DriveService {
   async getPreviewPdf(
     organizationId: string,
     fileId: string,
+    userId: string | null = null,
+    isAdmin = false,
   ): Promise<{ stream: Readable; name: string; size: number | null }> {
-    const f = await this.files.findOne({
-      where: { id: fileId, organizationId, isDeleted: false },
-    });
-    if (!f) throw new NotFoundException('File not found');
+    const f = await this.assertCanReadFile(organizationId, fileId, userId, isAdmin);
     const meta = await this.storage.getMeta(f.storageFileId);
 
     if ((f.mimeType || '').includes('pdf') || /\.pdf$/i.test(f.name)) {

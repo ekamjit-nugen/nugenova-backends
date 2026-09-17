@@ -54,6 +54,12 @@ export class DriveController {
     return [req.user.firstName, req.user.lastName].filter(Boolean).join(' ');
   }
 
+  /** Owners/admins administer the org's drive and may read any file in it. */
+  private isDriveAdmin(req: any): boolean {
+    const role = req.user?.orgRole;
+    return role === 'owner' || role === 'admin' || req.user?.isPlatformAdmin === true;
+  }
+
   // ─── Overview / quota ────────────────────────────────────────────
 
   /** Nav self-check: does the CURRENT user have drive access? (No access guard.) */
@@ -183,6 +189,8 @@ export class DriveController {
     @Query('folderId') folderId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('flat') flat?: string,
+    @Query('q') q?: string,
   ) {
     return this.drive.listFiles(
       req.user.organizationId,
@@ -191,6 +199,9 @@ export class DriveController {
       folderId || null,
       page ? Number(page) : 1,
       limit ? Number(limit) : 50,
+      // `flat=true` returns every file in the scope instead of one folder's
+      // contents — for pickers, which have no folder to browse.
+      { flat: flat === 'true' || flat === '1', q },
     );
   }
 
@@ -259,7 +270,7 @@ export class DriveController {
   @Get('files/:id/raw')
   @UseGuards(CloudDriveAccessGuard)
   async raw(@Req() req: any, @Param('id') id: string, @Res() res: Response) {
-    const f = await this.drive.getFileStream(req.user.organizationId, id);
+    const f = await this.drive.getFileStream(req.user.organizationId, id, req.user.userId, this.isDriveAdmin(req));
     res.setHeader('Content-Type', f.mimeType || 'application/octet-stream');
     if (f.size) res.setHeader('Content-Length', String(f.size));
     const safe = f.filename.replace(/["\r\n]/g, '_');
@@ -272,7 +283,7 @@ export class DriveController {
   @Get('files/:id/pdf')
   @UseGuards(CloudDriveAccessGuard)
   async previewPdf(@Req() req: any, @Param('id') id: string, @Res() res: Response) {
-    const f = await this.drive.getPreviewPdf(req.user.organizationId, id);
+    const f = await this.drive.getPreviewPdf(req.user.organizationId, id, req.user.userId, this.isDriveAdmin(req));
     res.setHeader('Content-Type', 'application/pdf');
     if (f.size) res.setHeader('Content-Length', String(f.size));
     const safe = f.name.replace(/["\r\n]/g, '_');

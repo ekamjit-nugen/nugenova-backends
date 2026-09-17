@@ -16,6 +16,8 @@ export type ActivityCategory =
   | 'onboarding'
   | 'settings'
   | 'recruitment'
+  /** A failed request — 5xx server faults and the 4xx a member was refused. */
+  | 'errors'
   | 'other';
 
 /**

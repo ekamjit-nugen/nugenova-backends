@@ -10,7 +10,7 @@ function makeQb(result: { affected: number }) {
 }
 
 describe('ActivityRetentionService (unit, no DB)', () => {
-  let events: any, runs: any, orgs: any, memberships: any, users: any, mail: any;
+  let events: any, runs: any, orgs: any, memberships: any, users: any, mail: any, notifier: any;
   let claimResult: { affected: number };
   const NOW = new Date('2026-09-30T03:20:00.000Z');
 
@@ -19,7 +19,7 @@ describe('ActivityRetentionService (unit, no DB)', () => {
     { id: 'e2', organizationId: 'orgA', actorName: 'Emp', action: 'ai.used', category: 'ai', createdAt: new Date('2026-09-02') },
   ];
 
-  const build = () => new ActivityRetentionService(events, runs, orgs, memberships, users, mail);
+  const build = () => new ActivityRetentionService(events, runs, orgs, memberships, users, mail, notifier);
 
   beforeEach(() => {
     claimResult = { affected: 1 };
@@ -29,6 +29,7 @@ describe('ActivityRetentionService (unit, no DB)', () => {
     memberships = { findOne: jest.fn(() => Promise.resolve(null)) };
     users = { findOne: jest.fn(() => Promise.resolve({ id: 'owner1', email: 'owner@x.com', firstName: 'Olive', lastName: 'Owner' })) };
     mail = { send: jest.fn(() => Promise.resolve(true)) };
+    notifier = { notify: jest.fn(() => Promise.resolve(undefined)) };
   });
 
   it('archives old rows: emails the owner a valid zip, THEN deletes exactly those rows', async () => {
@@ -88,5 +89,13 @@ describe('ActivityRetentionService (unit, no DB)', () => {
     const total = await build().runAll(NOW);
     expect(orgs.find).toHaveBeenCalledWith({ where: { status: 'active' } });
     expect(total).toBe(0);
+  });
+
+  it('also drops the backup notice into the owner’s in-app inbox (pushed in real time)', async () => {
+    await build().runForOrg('orgA', NOW, false);
+    expect(notifier.notify).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: 'orgA', userId: 'owner1', type: 'activity_backup_ready', email: false,
+      data: { actionUrl: '/activity' },
+    }));
   });
 });

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThan, Repository } from 'typeorm';
 import JSZip from 'jszip';
@@ -8,8 +8,10 @@ import { ActivityRetentionRunEntity } from './entities/activity-retention-run.en
 import { OrganizationEntity } from '../organization/entities/organization.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { NotifierService } from '../notification/notifier.service';
 import { MailService } from '../../bootstrap/mail/mail.service';
 import { newObjectId } from '../../bootstrap/database/object-id';
+import { activityBackupEmail } from '../../bootstrap/mail/email-layout';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_DAYS = 15;
@@ -42,6 +44,7 @@ export class ActivityRetentionService {
     @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
     private readonly mail: MailService,
+    @Optional() private readonly notifier?: NotifierService,
   ) {}
 
   /** The org owner's user — via organizations.ownerId, falling back to the owner membership. */
@@ -171,11 +174,23 @@ export class ActivityRetentionService {
     }
     const stamp = new Date().toISOString().slice(0, 10);
     const filename = `activity-logs-${orgId}-${stamp}.zip`;
+    // In-app copy (and real-time push) so the owner sees it in Notifications too;
+    // the zip itself only goes by email.
+    await this.notifier?.notify({
+      organizationId: orgId,
+      userId: owner.id,
+      type: 'activity_backup_ready',
+      title: `Activity log backup — ${count} entries archived`,
+      body: `Entries older than ${RETENTION_DAYS} days were archived and emailed to you as a zip.`,
+      data: { actionUrl: '/activity' },
+      email: false, // the email with the attachment is sent below
+    }).catch(() => undefined);
+    const built = activityBackupEmail({ count, retentionDays: RETENTION_DAYS, cutoffLabel: cutoff.toISOString().slice(0, 10) });
     return this.mail.send({
       to: { email: owner.email, name: `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || undefined },
-      subject: `Activity log backup — ${count} entries archived`,
-      html: `<p>Attached is your organization's activity-log backup (${count} entries older than ${RETENTION_DAYS} days, up to ${cutoff.toISOString().slice(0, 10)}).</p><p>These entries have been archived and removed from the live activity log. Keep this zip for your records.</p>`,
-      text: `Activity log backup: ${count} entries older than ${RETENTION_DAYS} days archived and removed from the live log.`,
+      subject: built.subject,
+      html: built.html,
+      text: built.text,
       attachments: [{ filename, content: zip, contentType: 'application/zip' }],
       category: 'activity.retention_backup',
       organizationId: orgId,

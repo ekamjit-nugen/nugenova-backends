@@ -206,4 +206,76 @@ defineFeature(feature, (test) => {
       expect(again.body.data.added).toBe(0);
     });
   });
+
+  test('an employee can see who to invite and schedule a meeting with them', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let colleague: Member;
+    let stranger: Member;
+    let res: request.Response;
+
+    given('an organization with two members and a stranger', async () => {
+      ({ o, colleague, stranger } = (await setup(true)) as { o: CreatedOrg; colleague: Member; stranger: Member });
+    });
+    when('the colleague lists the people they can invite', async () => {
+      res = await h.api().get(`${API}/meetings/invitable`).set('Authorization', `Bearer ${colleague.token}`);
+    });
+    then('the list includes the host and the stranger but not the colleague', () => {
+      expect(res.status).toBe(200);
+      const ids = res.body.data.map((p: any) => p.userId);
+      expect(ids).toContain(o.ownerId);
+      expect(ids).toContain(stranger.userId);
+      expect(ids).not.toContain(colleague.userId);
+      // Names and emails only — no HR fields leak through this endpoint.
+      expect(Object.keys(res.body.data[0]).sort()).toEqual(['avatar', 'email', 'firstName', 'lastName', 'userId']);
+    });
+    and('the colleague can schedule a meeting inviting the stranger', async () => {
+      const created = await h
+        .api()
+        .post(`${API}/meetings`)
+        .set('Authorization', `Bearer ${colleague.token}`)
+        .send({
+          title: 'Pairing',
+          scheduledStart: '2026-09-10T10:00:00.000Z',
+          scheduledEnd: '2026-09-10T11:00:00.000Z',
+          participantIds: [stranger.userId],
+        });
+      expect(created.status).toBe(201);
+      expect(created.body.data.participants.map((p: any) => p.userId)).toContain(stranger.userId);
+    });
+    and('the full member directory is still not open to the colleague', async () => {
+      // Why the old invite list was empty — and it should stay admin-only.
+      const dir = await h.api().get(`${API}/org/members`).set('Authorization', `Bearer ${colleague.token}`);
+      expect(dir.status).toBe(403);
+    });
+  });
+
+  test('someone from another organization cannot be added to a meeting', ({ given, when, then, and }) => {
+    let o: CreatedOrg;
+    let colleague: Member;
+    let outsiderId: string;
+    let res: request.Response;
+
+    given('an organization with two members and a user from another organization', async () => {
+      ({ o, colleague } = await setup());
+      const other = await h.createOrg();
+      orgIds.add(other.orgId);
+      outsiderId = other.ownerId;
+    });
+    when('the host schedules a meeting inviting the colleague and the outsider', async () => {
+      res = await asHost(o)('/meetings').send({
+        title: 'Board prep',
+        scheduledStart: '2026-09-10T10:00:00.000Z',
+        scheduledEnd: '2026-09-10T11:00:00.000Z',
+        participantIds: [colleague.userId, outsiderId],
+      });
+    });
+    then('only the colleague is a participant', () => {
+      expect(res.status).toBe(201);
+      expect(res.body.data.participants.map((p: any) => p.userId)).toEqual([colleague.userId]);
+    });
+    and('the outsider receives no meeting notification', async () => {
+      const rows = await notifications.find({ where: { userId: outsiderId, type: 'meeting_invited' } });
+      expect(rows).toHaveLength(0);
+    });
+  });
 });

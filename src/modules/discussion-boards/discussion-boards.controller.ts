@@ -1,8 +1,21 @@
 import {
-  Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Req,
-  UploadedFile, UseGuards, UseInterceptors,
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { BoardCaller, DiscussionBoardsService } from './discussion-boards.service';
@@ -80,6 +93,24 @@ export class DiscussionBoardsController {
   ) {
     const data = await this.boards.uploadAsset(this.orgId(req), this.caller(req), boardId, file);
     return { success: true, data };
+  }
+
+  /** Copy a Cloud Drive file onto this board (access-checked on both sides). */
+  @Post(':boardId/assets/from-drive')
+  async copyDriveFile(@Req() req: any, @Param('boardId') boardId: string, @Body() body: { fileId?: string }) {
+    if (!body?.fileId) throw new BadRequestException('fileId is required');
+    const data = await this.boards.copyDriveFile(this.orgId(req), this.caller(req), boardId, body.fileId);
+    return { success: true, data };
+  }
+
+  /** Bytes of a copied (non-image) board file — board participants only. */
+  @Get(':boardId/files/:assetId/raw')
+  async boardFileRaw(@Req() req: any, @Param('boardId') boardId: string, @Param('assetId') assetId: string, @Res() res: Response) {
+    const f = await this.boards.getBoardFileBytes(this.orgId(req), this.caller(req), boardId, assetId);
+    res.setHeader('Content-Type', f.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${f.filename.replace(/[^\w.\-]+/g, '_')}"`);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.send(f.buffer);
   }
 
   /** Files (images/assets) shared on a board. */

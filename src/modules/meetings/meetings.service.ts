@@ -5,7 +5,9 @@ import { In, Repository } from 'typeorm';
 import { createHmac, randomBytes } from 'crypto';
 
 import { MeetingEntity, MeetingParticipant, MeetingStatus } from './entities/meeting.entity';
+import { MeetingNoticeEntity } from './entities/meeting-notice.entity';
 import { UserEntity } from '../auth/entities/user.entity';
+import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
 import { NotifierService } from '../notification/notifier.service';
 import { ActivityService } from '../activity/activity.service';
 import { CreateMeetingDto, InstantMeetingDto, UpdateMeetingDto } from './dto';
@@ -45,8 +47,12 @@ export class MeetingsService {
   constructor(
     @InjectRepository(MeetingEntity)
     private readonly meetings: Repository<MeetingEntity>,
+    @InjectRepository(MeetingNoticeEntity)
+    private readonly notices: Repository<MeetingNoticeEntity>,
     @InjectRepository(UserEntity)
     private readonly users: Repository<UserEntity>,
+    @InjectRepository(OrgMembershipEntity)
+    private readonly memberships: Repository<OrgMembershipEntity>,
     private readonly config: ConfigService,
     private readonly notifier: NotifierService,
     private readonly activity: ActivityService,
@@ -97,11 +103,53 @@ export class MeetingsService {
     return u ? `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email || 'Someone' : 'Someone';
   }
 
-  private async resolveParticipants(ids: string[]): Promise<MeetingParticipant[]> {
+  /**
+   * Turn requested user ids into participants — ONLY people who are active
+   * members of this org. Anything else (another company's user, a deactivated
+   * member, a made-up id) is dropped, not trusted: a participant is notified,
+   * pushed to, and shown the meeting and its join link, so accepting a raw user
+   * id from the client would leak meetings across organizations.
+   */
+  private async resolveParticipants(orgId: string, ids: string[]): Promise<MeetingParticipant[]> {
     const unique = [...new Set((ids ?? []).filter(Boolean))];
     if (!unique.length) return [];
-    const users = await this.users.find({ where: { id: In(unique) } });
+    const members = await this.memberships.find({
+      where: { organizationId: orgId, userId: In(unique), status: 'active' },
+    });
+    const allowed = members.map((m) => m.userId).filter((id): id is string => !!id);
+    if (!allowed.length) return [];
+    const users = await this.users.find({ where: { id: In(allowed) } });
     return users.map((u) => ({ userId: u.id, name: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email || 'Member' }));
+  }
+
+  /**
+   * Everyone the caller can invite to a meeting: the org's active members, minus
+   * the caller. Name, email and avatar only — the same people and fields chat's
+   * directory already shows every member. Deliberately NOT /org/members, which
+   * carries HR data (roles, phone, probation) and needs `employees:view`; that
+   * requirement is why non-admins used to see an empty invite list.
+   */
+  async invitable(orgId: string, meId: string) {
+    const members = await this.memberships.find({
+      where: { organizationId: orgId, status: 'active' },
+      order: { createdAt: 'ASC' },
+    });
+    const ids = members.map((m) => m.userId).filter((id): id is string => !!id && id !== meId);
+    if (!ids.length) return [];
+    const users = await this.users.find({ where: { id: In(ids) } });
+    const byId = new Map(users.map((u) => [u.id, u]));
+    return ids
+      .map((id) => {
+        const u = byId.get(id);
+        const m = members.find((x) => x.userId === id);
+        return {
+          userId: id,
+          firstName: u?.firstName ?? null,
+          lastName: u?.lastName ?? null,
+          email: u?.email ?? m?.email ?? null,
+          avatar: u?.avatar ?? null,
+        };
+      });
   }
 
   private canAccess(m: MeetingEntity, caller: MeetingCaller): boolean {
@@ -165,7 +213,7 @@ export class MeetingsService {
 
   async create(orgId: string, caller: MeetingCaller, dto: CreateMeetingDto) {
     const hostName = await this.userName(caller.userId);
-    const participants = await this.resolveParticipants(dto.participantIds ?? []);
+    const participants = await this.resolveParticipants(orgId, dto.participantIds ?? []);
     const m = await this.meetings.save(this.meetings.create({
       organizationId: orgId,
       title: dto.title.trim() || 'Meeting',
@@ -189,7 +237,7 @@ export class MeetingsService {
 
   async instant(orgId: string, caller: MeetingCaller, dto: InstantMeetingDto) {
     const hostName = await this.userName(caller.userId);
-    const participants = await this.resolveParticipants(dto.participantIds ?? []);
+    const participants = await this.resolveParticipants(orgId, dto.participantIds ?? []);
     const now = new Date();
     const m = await this.meetings.save(this.meetings.create({
       organizationId: orgId,
@@ -226,6 +274,12 @@ export class MeetingsService {
       take: 200,
     });
     const t = now.getTime();
+    // Meetings whose prompt this person already dealt with (joined or dismissed)
+    // never come back — on any device, after re-login, after clearing storage.
+    const handled = new Set(
+      (await this.notices.find({ where: { userId: caller.userId, organizationId: orgId }, select: { meetingId: true } }))
+        .map((n) => n.meetingId),
+    );
     const joinable = (m: MeetingEntity) => {
       if (m.status === 'live') return true;
       if (m.scheduledStart) {
@@ -236,9 +290,28 @@ export class MeetingsService {
       return t - (m.createdAt?.getTime() ?? 0) <= INCOMING_DEFAULT_LENGTH_MS;
     };
     return rows
+      .filter((m) => !handled.has(m.id))
       .filter((m) => m.hostId !== caller.userId && (m.participants ?? []).some((p) => p.userId === caller.userId))
       .filter(joinable)
       .map((m) => this.map(m, caller));
+  }
+
+  /**
+   * Remember that this person joined or dismissed the meeting's join prompt, so it
+   * is not shown to them again. Idempotent (one row per meeting+user).
+   */
+  async markNotice(orgId: string, caller: MeetingCaller, meetingId: string, action: 'joined' | 'dismissed'): Promise<{ success: true }> {
+    const existing = await this.notices.findOne({ where: { meetingId, userId: caller.userId } });
+    if (existing) {
+      // Joining is the stronger signal — never downgrade it to "dismissed".
+      if (existing.action !== 'joined' && action === 'joined') {
+        existing.action = action;
+        await this.notices.save(existing);
+      }
+      return { success: true };
+    }
+    await this.notices.save(this.notices.create({ organizationId: orgId, meetingId, userId: caller.userId, action }));
+    return { success: true };
   }
 
   async get(orgId: string, caller: MeetingCaller, id: string) {
@@ -254,7 +327,7 @@ export class MeetingsService {
     if (dto.scheduledStart !== undefined) m.scheduledStart = dto.scheduledStart ? new Date(dto.scheduledStart) : null;
     if (dto.scheduledEnd !== undefined) m.scheduledEnd = dto.scheduledEnd ? new Date(dto.scheduledEnd) : null;
     if (dto.lobbyEnabled !== undefined) m.lobbyEnabled = dto.lobbyEnabled;
-    if (dto.participantIds !== undefined) m.participants = await this.resolveParticipants(dto.participantIds);
+    if (dto.participantIds !== undefined) m.participants = await this.resolveParticipants(orgId, dto.participantIds);
     const saved = await this.meetings.save(m);
     await this.notifyParticipants(saved, caller.userId, 'meeting_updated', `Meeting updated: ${saved.title}`, `${await this.userName(caller.userId)} updated a meeting you're invited to.`);
     return this.map(saved, caller);
@@ -289,7 +362,7 @@ export class MeetingsService {
     present.add(m.hostId);
     const newIds = [...new Set((userIds ?? []).filter((uid) => uid && !present.has(uid)))];
     if (!newIds.length) return { meeting: this.map(m, caller), added: 0 };
-    const resolved = await this.resolveParticipants(newIds);
+    const resolved = await this.resolveParticipants(orgId, newIds);
     m.participants = [...(m.participants ?? []), ...resolved];
     const saved = await this.meetings.save(m);
     const hostName = await this.userName(caller.userId);
@@ -339,6 +412,7 @@ export class MeetingsService {
       await this.meetings.save(m);
       await this.notifyParticipants(m, caller.userId, 'meeting_started', `${name} started the meeting`, `"${m.title}" has started — join now.`);
     }
+    await this.markNotice(orgId, caller, m.id, 'joined').catch(() => undefined);
     await this.activity.record({ organizationId: orgId, actorId: caller.userId, actorName: name, action: 'meeting.joined', category: 'meetings', targetType: 'meeting', targetId: m.id, summary: `Joined meeting "${m.title}"` });
     return this.buildJoin(m, caller, name);
   }

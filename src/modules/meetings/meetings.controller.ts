@@ -34,6 +34,15 @@ export class MeetingsController {
     return { success: true, data: await this.meetings.create(this.orgId(req), this.caller(req), dto) };
   }
 
+  /**
+   * People the caller can invite — any member may schedule a meeting, so any
+   * member may see who they can add. Must stay above `@Get(':id')`.
+   */
+  @Get('invitable')
+  async invitable(@Req() req: any) {
+    return { success: true, data: await this.meetings.invitable(this.orgId(req), req.user?.userId) };
+  }
+
   /** Start a meeting now (returns join config). */
   @Post('instant')
   async instant(@Req() req: any, @Body() dto: InstantMeetingDto) {
@@ -50,6 +59,13 @@ export class MeetingsController {
   @Get('incoming')
   async incoming(@Req() req: any) {
     return { success: true, data: await this.meetings.incoming(this.orgId(req), this.caller(req)) };
+  }
+
+  /** Remember the join prompt was handled (joined / dismissed) for this user. */
+  @Post(':id/notice')
+  async notice(@Req() req: any, @Param('id') id: string, @Body() body: { action?: string }) {
+    const action = body?.action === 'joined' ? 'joined' : 'dismissed';
+    return { success: true, data: await this.meetings.markNotice(this.orgId(req), this.caller(req), id, action) };
   }
 
   @Get(':id')

@@ -95,4 +95,23 @@ describe('CalendarService (unit, no DB)', () => {
     expect(holiday?.title).toBe('Founders Day');
     expect(holiday?.allDay).toBe(true);
   });
+
+  it("shows a member only their own leave, and the team's to someone who manages leave", async () => {
+    const leaves = [
+      { id: 'l1', userId: 'u2', employeeName: null, leaveType: 'casual', startDate: new Date('2026-09-10'), endDate: new Date('2026-09-10'), halfDay: false },
+    ];
+    const people = [{ id: 'u2', firstName: 'Emp', lastName: 'Loyee', dob: null }];
+    const memberSvc = build({ people, leaves });
+    await memberSvc.getEvents('orgA', member, FROM, TO);
+    const memberWhere = ((memberSvc as any).leaves.find as jest.Mock).mock.calls[0][0].where;
+    expect(memberWhere.userId).toBe('u2');
+
+    const managerSvc = build({ people, leaves });
+    await managerSvc.getEvents('orgA', { userId: 'u9', isAdmin: false, canSeeTeamLeave: true }, FROM, TO);
+    expect(((managerSvc as any).leaves.find as jest.Mock).mock.calls[0][0].where.userId).toBeUndefined();
+
+    const adminSvc = build({ people, leaves });
+    await adminSvc.getEvents('orgA', admin, FROM, TO);
+    expect(((adminSvc as any).leaves.find as jest.Mock).mock.calls[0][0].where.userId).toBeUndefined();
+  });
 });

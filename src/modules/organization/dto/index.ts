@@ -239,6 +239,12 @@ export class UpdateMemberDto {
   @IsIn(['active', 'deactivated'])
   status?: 'active' | 'deactivated';
 
+  /** Job title in this org; blank clears it. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  title?: string;
+
   /**
    * Put the member on probation for N months (counted from their joining date),
    * or 0/null to end/remove probation. HR action — owners/admins.

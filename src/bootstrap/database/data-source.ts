@@ -19,11 +19,13 @@ import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
  */
 const url = process.env.DIRECT_URL || process.env.DATABASE_URL || '';
 const isLocal = url.includes('localhost') || url.includes('127.0.0.1');
+/** Self-hosted/containerised Postgres speaks no TLS: `DB_SSL=false` or `?sslmode=disable`. */
+const sslOff = String(process.env.DB_SSL ?? '').toLowerCase() === 'false' || /[?&]sslmode=disable/i.test(url);
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
   url,
-  ssl: url && !isLocal ? { rejectUnauthorized: false } : false,
+  ssl: url && !isLocal && !sslOff ? { rejectUnauthorized: false } : false,
   entities: ['src/modules/**/entities/*.entity.ts'],
   migrations: ['src/bootstrap/database/migrations/*.ts'],
   namingStrategy: new SnakeNamingStrategy(),

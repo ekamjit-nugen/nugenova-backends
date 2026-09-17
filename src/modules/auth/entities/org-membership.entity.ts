@@ -58,6 +58,14 @@ export class OrgMembershipEntity extends PgBaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   department: string | null;
 
+  /**
+   * Job title within THIS org ("Senior Engineer"). Set from the Directory by
+   * anyone with `employees:edit`; `users.jobTitle` remains the person's own,
+   * cross-org field and is used as the fallback when this is empty.
+   */
+  @Column({ type: 'varchar', length: 80, nullable: true, default: null })
+  title: string | null;
+
   @Index()
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   departmentId: string | null;

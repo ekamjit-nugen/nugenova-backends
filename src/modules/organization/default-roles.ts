@@ -31,40 +31,23 @@ export interface SystemRoleDef {
 
 const ALL = ['view', 'create', 'edit', 'delete', 'export', 'assign'];
 
-/** Every permission resource in the product (keep in sync with the frontend
- *  Roles matrix `SECTIONS` + `RESOURCE_LABELS`). */
-const ALL_RESOURCES = [
-  'dashboard', 'employees', 'departments', 'roles', 'attendance', 'leaves',
-  'payroll', 'policies', 'reports', 'settings', 'projects', 'tasks', 'invoices',
-  'expenses', 'clients', 'recruitment',
-];
-
-/** Full access — every resource × every action, so the Owner/Admin matrix shows
- *  fully-granted on the Roles page (their effective access is the org-admin gate;
- *  this matrix makes that access explicit and visible). */
-const FULL_ACCESS = ALL_RESOURCES.map((r) => ({ resource: r, actions: [...ALL] }));
-
 /**
- * The standard tiers as REAL, seeded role rows (one set per org). Previously
- * these lived only as an enum on the membership and never appeared on the Roles
- * page — now every member holds one of these (or a custom role) via `roleId`, so
- * roles are entirely data-driven and visible. Owner/Admin are full-access and
- * locked; Manager/Employee/Member/Viewer start empty (self-service) and are
- * editable so an org can grant them whatever it wants.
+ * There are no built-in tier roles.
+ *
+ * Every org used to be seeded with Owner, Admin, Manager, Employee, Member and
+ * Viewer rows, and a member with no custom role was attached to the one matching
+ * their tier. They were removed (migrations 1788490000000 and 1788500000000):
+ * none carried access of their own, so they were only clutter on the Roles page.
+ *
+ * What still decides access is unchanged:
+ *   • the membership's TIER (`org_memberships.role`: owner | admin | manager |
+ *     employee …). Owner and admin get full access from the tier itself — see
+ *     OrgAdminGuard and the token's `orgRole` — never from a role row.
+ *   • an optional CUSTOM role (`roleId`), whose permission matrix scopes a
+ *     non-admin member.
+ * A member without a custom role simply has `roleId = null`; the Directory shows
+ * that as "No custom role".
  */
-export const SYSTEM_ROLES: SystemRoleDef[] = [
-  { name: 'owner', displayName: 'Owner', description: 'Full access to everything in the organization.', tier: 'owner', permissions: FULL_ACCESS },
-  { name: 'admin', displayName: 'Admin', description: 'Full administrative access.', tier: 'admin', permissions: FULL_ACCESS },
-  { name: 'manager', displayName: 'Manager', description: 'Team lead — grant management permissions below as needed.', tier: 'manager', permissions: [] },
-  { name: 'employee', displayName: 'Employee', description: 'Standard team member — self-service access.', tier: 'employee', permissions: [] },
-  { name: 'member', displayName: 'Member', description: 'Basic member — self-service access.', tier: 'member', permissions: [] },
-  { name: 'viewer', displayName: 'Viewer', description: 'Read-only member.', tier: 'viewer', permissions: [] },
-];
-
-/** The set of system-role slugs (used to protect them from deletion). */
-export const SYSTEM_ROLE_NAMES = new Set(SYSTEM_ROLES.map((r) => r.name));
-/** Owner/Admin are full-access and locked from editing (would risk a lockout). */
-export const LOCKED_SYSTEM_ROLE_NAMES = new Set(['owner', 'admin']);
 
 export const DEFAULT_ROLES: DefaultRoleDef[] = [
   {

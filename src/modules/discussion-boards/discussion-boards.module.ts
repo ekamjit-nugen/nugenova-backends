@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
+import { DriveModule } from '../storage/drive.module';
 import { UserEntity } from '../auth/entities/user.entity';
 
 import { DiscussionBoardEntity } from './entities/discussion-board.entity';
@@ -23,6 +24,7 @@ import { DiscussionBoardAssetsController } from './discussion-board-assets.contr
   imports: [
     AuthModule,
     NotificationModule,
+    DriveModule,
     TypeOrmModule.forFeature([
       DiscussionBoardEntity,
       BoardNoteEntity,

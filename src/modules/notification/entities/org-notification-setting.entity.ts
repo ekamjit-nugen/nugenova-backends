@@ -37,4 +37,13 @@ export class OrgNotificationSettingEntity extends PgBaseEntity {
    */
   @Column({ type: 'jsonb', default: () => "'{}'" })
   employeeTypes: Record<string, { inApp?: boolean; email?: boolean }>;
+
+  /**
+   * Which ROLES receive which emails — `{ [emailKey]: { [audience]: boolean } }`.
+   * An audience is `role:<roleId>` (owners and admins always receive every email;
+   * older `tier:*` / `norole` keys are ignored). Only explicit choices are stored; see EmailRoutingService for the defaults. Set
+   * from the Roles & Permissions page.
+   */
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  emailRouting: Record<string, Record<string, boolean>>;
 }
