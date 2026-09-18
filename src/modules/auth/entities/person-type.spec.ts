@@ -24,9 +24,9 @@ import { MemberOnboardingEntity } from '../../onboarding/entities/member-onboard
  */
 describe('person-type / staffScope (unit, no DB)', () => {
   describe('constants', () => {
-    it("defaults staff to 'staff' and lists the person types (incl. client portal users)", () => {
+    it("defaults staff to 'staff' and lists the person types (incl. client and vendor portal users)", () => {
       expect(STAFF_PERSON_TYPE).toBe('staff');
-      expect([...PERSON_TYPES]).toEqual(['staff', 'student', 'guardian', 'client']);
+      expect([...PERSON_TYPES]).toEqual(['staff', 'student', 'guardian', 'client', 'vendor']);
     });
   });
 

@@ -70,6 +70,7 @@ export const DEFAULT_ROLES: DefaultRoleDef[] = [
       { resource: 'invoices', actions: ['view'] },
       { resource: 'expenses', actions: ['view'] },
       { resource: 'clients', actions: ['view'] },
+      { resource: 'vendors', actions: ['view'] },
       { resource: 'recruitment', actions: [...ALL] },
     ],
   },

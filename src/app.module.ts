@@ -31,6 +31,7 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 import { DiscussionBoardsModule } from './modules/discussion-boards/discussion-boards.module';
 import { ClientsModule } from './modules/clients/clients.module';
+import { VendorsModule } from './modules/vendors/vendors.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
@@ -106,6 +107,7 @@ function scheduledJobs() {
     AiChatModule,
     DiscussionBoardsModule,
     ClientsModule,
+    VendorsModule,
     SalesModule,
     ActivityModule,
     MeetingsModule,
