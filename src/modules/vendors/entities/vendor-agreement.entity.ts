@@ -62,7 +62,8 @@ export interface VendorAgreementField {
  *
  * `requiredForOnboarding` is copied from the template at creation: a vendor with
  * an unsigned required agreement is not cleared to supply people, which is what
- * `clearance()` and the vendor's `onboardingStatus` read.
+ * `clearance()` and the vendor's `onboardingStatus` read — unless it is waived,
+ * which clears the vendor without the signature and records who decided that.
  */
 @Entity('vendor_agreements')
 @Index('ix_vendor_agreements_org', ['organizationId'])
@@ -118,6 +119,23 @@ export class VendorAgreementEntity extends PgBaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
   signedAt: Date | null;
+
+  /**
+   * Waived: this required agreement no longer blocks the vendor. The reason and
+   * who waived it are the point — a waiver is a decision someone made, so it
+   * carries their name rather than quietly disappearing from the checklist.
+   */
+  @Column({ type: 'boolean', nullable: false, default: false })
+  waived: boolean;
+
+  @Column({ type: 'text', nullable: true, default: null })
+  waivedReason: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  waivedAt: Date | null;
+
+  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
+  waivedBy: string | null;
 
   /** Why the vendor declined, for the audit trail. */
   @Column({ type: 'text', nullable: true, default: null })

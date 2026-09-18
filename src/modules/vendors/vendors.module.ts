@@ -10,10 +10,12 @@ import { VendorEmployeeEntity } from './entities/vendor-employee.entity';
 import { VendorAgreementEntity } from './entities/vendor-agreement.entity';
 import { VendorAgreementTemplateEntity } from './entities/vendor-agreement-template.entity';
 import { VendorBillEntity } from './entities/vendor-bill.entity';
+import { VendorDocumentEntity } from './entities/vendor-document.entity';
 import { VendorsService } from './vendors.service';
 import { VendorAgreementsService } from './vendor-agreements.service';
 import { VendorBillsService } from './vendor-bills.service';
 import { VendorPortalService } from './vendor-portal.service';
+import { VendorDocumentsService } from './vendor-documents.service';
 import { VendorPortalController } from './vendor-portal.controller';
 import { VendorsController } from './vendors.controller';
 
@@ -33,12 +35,13 @@ import { VendorsController } from './vendors.controller';
       VendorAgreementEntity,
       VendorAgreementTemplateEntity,
       VendorBillEntity,
+      VendorDocumentEntity,
       OrgMembershipEntity,
       UserEntity,
     ]),
   ],
   controllers: [VendorsController, VendorPortalController],
-  providers: [VendorsService, VendorAgreementsService, VendorBillsService, VendorPortalService],
-  exports: [VendorsService, VendorAgreementsService, VendorBillsService, VendorPortalService],
+  providers: [VendorsService, VendorAgreementsService, VendorBillsService, VendorDocumentsService, VendorPortalService],
+  exports: [VendorsService, VendorAgreementsService, VendorBillsService, VendorDocumentsService, VendorPortalService],
 })
 export class VendorsModule {}

@@ -19,6 +19,7 @@ Ported from the legacy Nugenova `vendors` feature (Mongo `vendors`,
 | `vendor_agreement_templates` | the org's reusable paperwork (MSA, NDA, code of conduct): `required`, and `appliesToCategories` (empty = every vendor) |
 | `vendor_agreements` | the copy a vendor signs, with its signature audit record, expiry and `requiredForOnboarding` |
 | `vendor_bills` | what a vendor charged us: a line per contractor, the computed money, and the approve/pay trail |
+| `vendor_documents` | files we share with a vendor (purchase orders, rate cards, policy packs), with an opt-in "they must sign" tick |
 
 Everything is org-scoped and soft-deleted (`isDeleted`). Deleting a vendor
 cascades to its contacts and people, so a later vendor of the same name starts
@@ -118,6 +119,14 @@ line per item (`missing`, `draft`, `sent`, `signed`, `declined`, `expired`), and
 A required agreement raised ad hoc, or one whose template was later archived or
 made optional, still counts — it is binding on the vendor either way.
 
+**Waiving.** A required agreement a vendor will not sign can be waived
+(`POST /vendors/:id/agreements/:aid/waive`), which clears the vendor without
+that signature. The reason is mandatory and the record keeps who decided it —
+a waiver is somebody's decision, so it should say whose rather than the item
+quietly vanishing from the checklist. `DELETE` on the same path puts it back.
+Waived items read as `waived` in the clearance report and stop being asked of
+the vendor in their portal; an actual signature still outranks a waiver.
+
 Until the vendor portal ships a vendor cannot sign in the app, so an admin
 records the signature they received: `method: 'offline'` names the staff member
 who recorded it rather than pretending the vendor clicked something, and
@@ -167,6 +176,26 @@ bills count nowhere — they never were a cost.
 Bill numbers are `VB-00001` per org, allocated as count+1 (the house pattern)
 with a unique index on `(organization_id, bill_number)`; a concurrent raise
 fails on the index and simply takes the next number.
+
+## Documents
+
+Documents flow **one way**: we share, the vendor reads. A vendor has no upload,
+unlike a client — what they owe us is the agreements they sign.
+
+Signing is opt-in per document. `signatureRequired` is off unless an admin ticks
+it (`POST /vendors/:id/documents`, or toggled later with `PATCH`), and the tick
+can't be moved once the document is signed. A document signature never touches
+onboarding clearance — that is what agreements decide — so asking a vendor to
+sign a purchase order can't accidentally block them from supplying people.
+
+```
+GET    /vendors/:id/documents
+POST   /vendors/:id/documents            share (optionally ticking signatureRequired)
+PATCH  /vendors/:id/documents/:docId     rename, or move the tick
+DELETE /vendors/:id/documents/:docId
+GET    /vendor-portal/documents          what they can see
+POST   /vendor-portal/documents/:id/sign they sign one we asked for
+```
 
 ## The portal
 
@@ -239,7 +268,7 @@ pad serve both. Attaching the PDF itself and flattening a signed copy reuse
 - `features/vendor-bills.feature` — 9 scenarios: raising and totalling a bill,
   the rejected client-supplied amount, approve → pay, paying before approval,
   cancelling, the cost summary, the permission split, and cross-org isolation.
-- `vendor-agreements.service.spec.ts` — 22 unit tests: template copying, which
+- `vendor-agreements.service.spec.ts` — 29 unit tests: template copying, which
   templates apply, backdated/future signing dates, expiry, void vs delete, and
   the onboarding sync (including leaving a suspended vendor alone).
 - `features/vendor-agreements.feature` — 8 scenarios: issue-required, the copied

@@ -1,10 +1,10 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Ip, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { permMapAllows } from '../organization/guards/require-permission.decorator';
 import { ClientsCaller, ClientsService } from './clients.service';
 import {
-  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateTicketDto,
+  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, PortalUploadDocumentDto, ShareBoardDto, SignAgreementDto, SignDocumentDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateDocumentDto, UpdateTicketDto,
 } from './dto';
 
 /**
@@ -121,11 +121,25 @@ export class ClientsController {
     return { success: true, data: await this.clients.portalComment(c.orgId, c.userId, boardId, dto) };
   }
 
-  /** Portal: documents shared with the caller's client. */
+  /** Portal: the client's vault — what we shared, and what they sent us. */
   @Get('portal/documents')
   async portalDocuments(@Req() req: any) {
     const c = this.caller(req);
     return { success: true, data: await this.clients.portalDocuments(c.orgId, c.userId) };
+  }
+
+  /** Portal: the client sends US a document, optionally for us to sign. */
+  @Post('portal/documents')
+  async portalUploadDocument(@Req() req: any, @Body() dto: PortalUploadDocumentDto) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.portalUploadDocument(c.orgId, c.userId, dto) };
+  }
+
+  /** Portal: the client signs a document we asked them to sign. */
+  @Post('portal/documents/:docId/sign')
+  async portalSignDocument(@Req() req: any, @Param('docId') docId: string, @Body() dto: SignDocumentDto, @Ip() ip: string) {
+    const c = this.caller(req);
+    return { success: true, data: await this.clients.signDocumentAsClient(c.orgId, c.userId, docId, dto, ip, req.headers?.['user-agent']) };
   }
 
   // ── portal tickets ──
@@ -298,6 +312,12 @@ export class ClientsController {
   }
 
   // ── document vault (admin) ──
+  /** Documents clients have sent us that are waiting on our signature. */
+  @Get('documents/awaiting-signature')
+  async documentsAwaitingUs(@Req() req: any) {
+    return { success: true, data: await this.clients.documentsAwaitingUs(this.allowed(req, 'view').orgId) };
+  }
+
   @Get(':id/documents')
   async listDocuments(@Req() req: any, @Param('id') id: string) {
     return { success: true, data: await this.clients.listDocuments(this.allowed(req, 'view').orgId, id) };
@@ -306,6 +326,19 @@ export class ClientsController {
   @Post(':id/documents')
   async addDocument(@Req() req: any, @Param('id') id: string, @Body() dto: CreateDocumentDto) {
     return { success: true, data: await this.clients.addDocument(this.allowed(req, 'create'), id, dto) };
+  }
+
+  /** Turn the "client must sign this" tick on or off. */
+  @Patch(':id/documents/:docId')
+  async updateDocument(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string, @Body() dto: UpdateDocumentDto) {
+    return { success: true, data: await this.clients.updateDocument(this.allowed(req, 'edit').orgId, id, docId, dto) };
+  }
+
+  /** We sign a document the client sent us. */
+  @Post(':id/documents/:docId/sign')
+  async signDocument(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string, @Body() dto: SignDocumentDto, @Ip() ip: string) {
+    const caller = this.allowed(req, 'edit');
+    return { success: true, data: await this.clients.signDocumentAsOrg(caller, id, docId, dto, ip, req.headers?.['user-agent']) };
   }
 
   @Delete(':id/documents/:docId')

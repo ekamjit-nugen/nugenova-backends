@@ -9,7 +9,7 @@ import { ClientAssignmentEntity } from './entities/client-assignment.entity';
 import { BoardClientShareEntity } from './entities/board-client-share.entity';
 import { ClientAgreementEntity } from './entities/client-agreement.entity';
 import { ClientAgreementTemplateEntity } from './entities/client-agreement-template.entity';
-import { ClientDocumentEntity } from './entities/client-document.entity';
+import { ClientDocumentEntity, DocumentSignature } from './entities/client-document.entity';
 import { ClientTicketEntity } from './entities/client-ticket.entity';
 import { ClientTicketMessageEntity } from './entities/client-ticket-message.entity';
 import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
@@ -23,7 +23,7 @@ import { NotifierService } from '../notification/notifier.service';
 import { EMAIL_OVERRIDES } from '../notification/notification-catalog';
 import { clientPortalInviteEmail } from '../../bootstrap/mail/email-layout';
 import {
-  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, ShareBoardDto, SignAgreementDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateTicketDto,
+  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, PortalUploadDocumentDto, ShareBoardDto, SignAgreementDto, SignDocumentDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateDocumentDto, UpdateTicketDto,
 } from './dto';
 
 export interface ClientsCaller {
@@ -615,16 +615,119 @@ export class ClientsService {
     return rows.map((d) => this.documentView(d));
   }
 
+  /**
+   * Put a document in the client's vault. Normally that means WE are sharing it
+   * (and may tick `signatureRequired` to ask them to sign); `fromClient` records
+   * one they sent that arrived by email, so a document that came the other way
+   * still lands in the same place with an honest note of how it got here.
+   */
   async addDocument(caller: ClientsCaller, clientId: string, dto: CreateDocumentDto) {
     await this.require(caller.orgId, clientId);
+    const fromClient = !!dto.fromClient;
     const saved = await this.documents.save(this.documents.create({
       organizationId: caller.orgId, clientId,
       fileId: dto.fileId, fileName: dto.fileName,
       mimeType: dto.mimeType ?? null, size: dto.size ?? null,
       title: dto.title?.trim() || null, description: dto.description?.trim() || null,
+      origin: fromClient ? 'client' : 'org',
+      channel: fromClient ? 'email' : null,
+      uploadedByName: fromClient ? (dto.fromName?.trim() || null) : null,
+      // Only a document we share can carry a "please sign" for the client.
+      signatureRequired: !fromClient && !!dto.signatureRequired,
+      signatureRequestedFromUs: fromClient && !!dto.requestOurSignature,
+      signature: null, signedAt: null, signedFileId: null,
       createdBy: caller.userId, isDeleted: false,
     }));
     return this.documentView(saved);
+  }
+
+  /** Turn the "client must sign" tick on or off after the fact. */
+  async updateDocument(orgId: string, clientId: string, docId: string, dto: UpdateDocumentDto) {
+    const d = await this.requireDocument(orgId, clientId, docId);
+    if (dto.signatureRequired !== undefined) {
+      if (d.signature) throw new BadRequestException('This document has already been signed');
+      if (d.origin === 'client') throw new BadRequestException('This document came from the client — they cannot be asked to sign it');
+      d.signatureRequired = dto.signatureRequired;
+    }
+    if (dto.title !== undefined) d.title = dto.title?.trim() || null;
+    if (dto.description !== undefined) d.description = dto.description?.trim() || null;
+    return this.documentView(await this.documents.save(d));
+  }
+
+  /** Everything across the org waiting on OUR signature — the staff queue. */
+  async documentsAwaitingUs(orgId: string) {
+    const rows = await this.documents.find({
+      where: { organizationId: orgId, isDeleted: false, signatureRequestedFromUs: true },
+      order: { createdAt: 'DESC' },
+    });
+    const pending = rows.filter((d) => !d.signature);
+    const clients = pending.length
+      ? await this.clients.find({ where: { id: In([...new Set(pending.map((d) => d.clientId))]) } })
+      : [];
+    const byId = new Map(clients.map((c) => [c.id, c]));
+    return pending.map((d) => ({ ...this.documentView(d), clientName: byId.get(d.clientId)?.companyName ?? null }));
+  }
+
+  /** We sign a document the client sent us. */
+  async signDocumentAsOrg(caller: ClientsCaller, clientId: string, docId: string, dto: SignDocumentDto, ip?: string, ua?: string) {
+    const d = await this.requireDocument(caller.orgId, clientId, docId);
+    if (d.origin !== 'client') throw new BadRequestException('This is a document you shared — the client signs it, not you');
+    if (d.signature) throw new BadRequestException('This document has already been signed');
+    return this.documentView(await this.documents.save(this.applySignature(d, caller.userId, dto, ip, ua, dto.signedFileId)));
+  }
+
+  /** The client signs a document we asked them to sign (portal). */
+  async signDocumentAsClient(orgId: string, userId: string, docId: string, dto: SignDocumentDto, ip?: string, ua?: string) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const d = await this.documents.findOne({ where: { id: docId, clientId, organizationId: orgId, isDeleted: false } });
+    if (!d) throw new NotFoundException('Document not found');
+    if (!d.signatureRequired) throw new BadRequestException('This document does not need your signature');
+    if (d.signature) throw new BadRequestException('This document has already been signed');
+    return this.documentView(await this.documents.save(this.applySignature(d, userId, dto, ip, ua, dto.signedFileId)));
+  }
+
+  /** A client sends us a document from their portal, optionally to sign. */
+  async portalUploadDocument(orgId: string, userId: string, dto: PortalUploadDocumentDto) {
+    const clientId = await this.clientIdForUser(orgId, userId);
+    if (!clientId) throw new ForbiddenException('No client portal access');
+    const user = await this.users.findOne({ where: { id: userId } });
+    const saved = await this.documents.save(this.documents.create({
+      organizationId: orgId, clientId,
+      fileId: dto.fileId, fileName: dto.fileName,
+      mimeType: dto.mimeType ?? null, size: dto.size ?? null,
+      title: dto.title?.trim() || null, description: dto.description?.trim() || null,
+      origin: 'client', channel: 'portal', uploadedByName: nameOf(user),
+      signatureRequired: false,
+      signatureRequestedFromUs: !!dto.requestOurSignature,
+      signature: null, signedAt: null, signedFileId: null,
+      createdBy: userId, isDeleted: false,
+    }));
+    return this.documentView(saved);
+  }
+
+  private applySignature(d: ClientDocumentEntity, userId: string, dto: SignDocumentDto, ip?: string, ua?: string, signedFileId?: string) {
+    if (!dto.signerName?.trim()) throw new BadRequestException('A signer name is required to sign');
+    const now = new Date();
+    const signature: DocumentSignature = {
+      signerName: dto.signerName.trim(),
+      signerEmail: dto.signerEmail?.toLowerCase() ?? null,
+      signedByUserId: userId,
+      signedAt: now.toISOString(),
+      ipAddress: ip ?? null,
+      userAgent: ua ?? null,
+      method: dto.method || 'typed',
+    };
+    d.signature = signature;
+    d.signedAt = now;
+    if (signedFileId) d.signedFileId = signedFileId;
+    return d;
+  }
+
+  private async requireDocument(orgId: string, clientId: string, docId: string): Promise<ClientDocumentEntity> {
+    const d = await this.documents.findOne({ where: { id: docId, clientId, organizationId: orgId, isDeleted: false } });
+    if (!d) throw new NotFoundException('Document not found');
+    return d;
   }
 
   async removeDocument(orgId: string, clientId: string, docId: string): Promise<{ success: true }> {
@@ -649,6 +752,18 @@ export class ClientsService {
       name: d.title || d.fileName, fileName: d.fileName,
       mimeType: d.mimeType, size: d.size != null ? Number(d.size) : null,
       description: d.description, createdAt: d.createdAt,
+      origin: d.origin ?? 'org', channel: d.channel, uploadedByName: d.uploadedByName,
+      signatureRequired: !!d.signatureRequired,
+      signatureRequestedFromUs: !!d.signatureRequestedFromUs,
+      signature: d.signature, signedAt: d.signedAt, signedFileId: d.signedFileId,
+      // Derived so it can never go stale: what, if anything, this document is waiting for.
+      status: d.signature
+        ? 'signed'
+        : d.signatureRequired
+          ? 'awaiting_client'
+          : d.signatureRequestedFromUs
+            ? 'awaiting_us'
+            : 'shared',
     };
   }
 

@@ -9,6 +9,7 @@ import { VendorsCaller } from './vendors.service';
 import {
   CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, DeclineVendorAgreementDto,
   SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
+  WaiveVendorAgreementDto,
 } from './dto';
 
 /** One line of the clearance report: a required agreement and where it stands. */
@@ -16,7 +17,10 @@ export interface ClearanceItem {
   templateId: string | null;
   agreementId: string | null;
   title: string;
-  status: 'missing' | 'draft' | 'sent' | 'signed' | 'declined' | 'void' | 'expired';
+  /** Set when the item is waived — why, and who decided it. */
+  waivedReason?: string | null;
+  waivedBy?: string | null;
+  status: 'missing' | 'draft' | 'sent' | 'signed' | 'declined' | 'void' | 'expired' | 'waived';
   signedAt: Date | null;
   expiresAt: Date | null;
 }
@@ -144,6 +148,7 @@ export class VendorAgreementsService {
       sentAt: null,
       signedAt: null,
       declineReason: null,
+      waived: false, waivedReason: null, waivedAt: null, waivedBy: null,
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       createdBy: caller.userId,
       isDeleted: false,
@@ -248,6 +253,37 @@ export class VendorAgreementsService {
     return saved;
   }
 
+  /**
+   * Waive a required agreement: the vendor is cleared without this signature.
+   * The reason is mandatory — a waiver is somebody's decision, and the record
+   * should say whose and why rather than the item quietly vanishing.
+   */
+  async waive(caller: VendorsCaller, vendorId: string, id: string, dto: WaiveVendorAgreementDto) {
+    const a = await this.requireAgreement(caller.orgId, vendorId, id);
+    if (a.status === 'signed') throw new BadRequestException('This agreement is already signed — there is nothing to waive');
+    if (!dto.reason?.trim()) throw new BadRequestException('Give a reason for waiving this agreement');
+    a.waived = true;
+    a.waivedReason = dto.reason.trim();
+    a.waivedAt = new Date();
+    a.waivedBy = caller.userId;
+    const saved = await this.agreements.save(a);
+    await this.syncOnboarding(caller.orgId, vendorId);
+    return saved;
+  }
+
+  /** Put a waived agreement back on the checklist. */
+  async unwaive(orgId: string, vendorId: string, id: string) {
+    const a = await this.requireAgreement(orgId, vendorId, id);
+    if (!a.waived) throw new BadRequestException('This agreement is not waived');
+    a.waived = false;
+    a.waivedReason = null;
+    a.waivedAt = null;
+    a.waivedBy = null;
+    const saved = await this.agreements.save(a);
+    await this.syncOnboarding(orgId, vendorId);
+    return saved;
+  }
+
   /** Withdraw an unsigned agreement (draft/sent → void). */
   async void(orgId: string, vendorId: string, id: string) {
     const a = await this.requireAgreement(orgId, vendorId, id);
@@ -292,6 +328,8 @@ export class VendorAgreementsService {
         agreementId: live?.id ?? null,
         title: live?.title ?? t.title ?? t.name,
         status: live ? this.effectiveStatus(live, now) : 'missing',
+        waivedReason: live?.waivedReason ?? null,
+        waivedBy: live?.waivedBy ?? null,
         signedAt: live?.signedAt ?? null,
         expiresAt: live?.expiresAt ?? null,
       });
@@ -306,12 +344,15 @@ export class VendorAgreementsService {
         agreementId: a.id,
         title: a.title,
         status: this.effectiveStatus(a, now),
+        waivedReason: a.waivedReason,
+        waivedBy: a.waivedBy,
         signedAt: a.signedAt,
         expiresAt: a.expiresAt,
       });
     }
 
-    const outstanding = items.filter((i) => i.status !== 'signed').length;
+    // Waived counts as settled: the vendor is cleared without the signature.
+    const outstanding = items.filter((i) => i.status !== 'signed' && i.status !== 'waived').length;
     return { cleared: outstanding === 0, items, outstanding };
   }
 
@@ -331,9 +372,15 @@ export class VendorAgreementsService {
     await this.vendors.save(vendor);
   }
 
-  /** A signed agreement past its expiry no longer clears the vendor. */
+  /**
+   * A waiver outranks everything except an actual signature; a signed agreement
+   * past its expiry no longer clears the vendor.
+   */
   private effectiveStatus(a: VendorAgreementEntity, now: Date): ClearanceItem['status'] {
-    if (a.status === 'signed' && a.expiresAt && a.expiresAt.getTime() <= now.getTime()) return 'expired';
+    if (a.status === 'signed') {
+      return a.expiresAt && a.expiresAt.getTime() <= now.getTime() ? 'expired' : 'signed';
+    }
+    if (a.waived) return 'waived';
     return a.status;
   }
 

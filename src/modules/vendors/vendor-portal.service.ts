@@ -14,9 +14,10 @@ import { VendorAgreementEntity } from './entities/vendor-agreement.entity';
 import { VendorBillEntity } from './entities/vendor-bill.entity';
 import { VendorAgreementsService } from './vendor-agreements.service';
 import { VendorBillsService } from './vendor-bills.service';
+import { VendorDocumentsService } from './vendor-documents.service';
 import { VendorsCaller } from './vendors.service';
 import {
-  CreateVendorEmployeeDto, InviteVendorContactDto, PortalSignAgreementDto, UpdateVendorEmployeeDto,
+  CreateVendorEmployeeDto, InviteVendorContactDto, PortalSignAgreementDto, SignVendorDocumentDto, UpdateVendorEmployeeDto,
 } from './dto';
 
 /**
@@ -48,6 +49,7 @@ export class VendorPortalService {
     @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
     private readonly agreements: VendorAgreementsService,
     private readonly bills: VendorBillsService,
+    private readonly documents: VendorDocumentsService,
     @Optional() private readonly mail?: MailService,
   ) {}
 
@@ -242,6 +244,17 @@ export class VendorPortalService {
       }));
   }
 
+  /** Documents we shared with them; they can read and sign, never send. */
+  async documentsForCaller(orgId: string, userId: string) {
+    const vendor = await this.callerVendor(orgId, userId);
+    return this.documents.forVendor(orgId, vendor.id);
+  }
+
+  async signDocument(orgId: string, userId: string, docId: string, dto: SignVendorDocumentDto, ip?: string, ua?: string) {
+    const vendor = await this.callerVendor(orgId, userId);
+    return this.documents.signAsVendor(orgId, vendor.id, userId, docId, dto, ip, ua);
+  }
+
   /** The people they supply us — their roster to keep current. */
   async peopleForCaller(orgId: string, userId: string) {
     const vendor = await this.callerVendor(orgId, userId);
@@ -332,6 +345,9 @@ export class VendorPortalService {
       signedFileId: a.signedFileId,
       status: a.status,
       required: a.requiredForOnboarding,
+      // A waived agreement is no longer asked of them — the portal stops
+      // showing a Sign button for it.
+      waived: !!a.waived,
       signature: a.signature,
       sentAt: a.sentAt,
       signedAt: a.signedAt,
