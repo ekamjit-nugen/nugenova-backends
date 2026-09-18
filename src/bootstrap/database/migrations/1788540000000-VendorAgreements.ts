@@ -6,12 +6,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * must be signed before the vendor is cleared to supply people, which is what
  * `vendors.onboarding_status` follows.
  */
-export class VendorAgreements1788510000000 implements MigrationInterface {
-  name = 'VendorAgreements1788510000000';
+export class VendorAgreements1788540000000 implements MigrationInterface {
+  name = 'VendorAgreements1788540000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "vendor_agreement_templates" (
+      CREATE TABLE IF NOT EXISTS "vendor_agreement_templates" (
         "id" character varying(24) NOT NULL,
         "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -30,10 +30,10 @@ export class VendorAgreements1788510000000 implements MigrationInterface {
         CONSTRAINT "pk_vendor_agreement_templates" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_agreement_templates_org" ON "vendor_agreement_templates" ("organization_id")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_agreement_templates_org" ON "vendor_agreement_templates" ("organization_id")`);
 
     await queryRunner.query(`
-      CREATE TABLE "vendor_agreements" (
+      CREATE TABLE IF NOT EXISTS "vendor_agreements" (
         "id" character varying(24) NOT NULL,
         "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -59,8 +59,8 @@ export class VendorAgreements1788510000000 implements MigrationInterface {
         CONSTRAINT "pk_vendor_agreements" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_agreements_org" ON "vendor_agreements" ("organization_id")`);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_agreements_vendor" ON "vendor_agreements" ("vendor_id")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_agreements_org" ON "vendor_agreements" ("organization_id")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_agreements_vendor" ON "vendor_agreements" ("vendor_id")`);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

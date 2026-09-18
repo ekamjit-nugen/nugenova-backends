@@ -7,12 +7,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * numbers are allocated as count+1 (the house pattern), so the index is what
  * makes two concurrent raises fail loudly instead of silently sharing a number.
  */
-export class VendorBills1788520000000 implements MigrationInterface {
-  name = 'VendorBills1788520000000';
+export class VendorBills1788550000000 implements MigrationInterface {
+  name = 'VendorBills1788550000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "vendor_bills" (
+      CREATE TABLE IF NOT EXISTS "vendor_bills" (
         "id" character varying(24) NOT NULL,
         "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -44,9 +44,9 @@ export class VendorBills1788520000000 implements MigrationInterface {
         CONSTRAINT "pk_vendor_bills" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_bills_org_status" ON "vendor_bills" ("organization_id", "status")`);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_bills_vendor" ON "vendor_bills" ("vendor_id")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX "ux_vendor_bills_org_number" ON "vendor_bills" ("organization_id", "bill_number")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_bills_org_status" ON "vendor_bills" ("organization_id", "status")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_bills_vendor" ON "vendor_bills" ("vendor_id")`);
+    await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS "ux_vendor_bills_org_number" ON "vendor_bills" ("organization_id", "bill_number")`);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

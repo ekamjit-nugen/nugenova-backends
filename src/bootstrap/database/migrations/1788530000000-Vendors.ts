@@ -9,12 +9,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * actually exist. No FK is added: those columns predate the tables and may hold
  * ids from the legacy system, so a constraint would fail on existing rows.
  */
-export class Vendors1788500000000 implements MigrationInterface {
-  name = 'Vendors1788500000000';
+export class Vendors1788530000000 implements MigrationInterface {
+  name = 'Vendors1788530000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE TABLE "vendors" (
+      CREATE TABLE IF NOT EXISTS "vendors" (
         "id" character varying(24) NOT NULL,
         "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -39,11 +39,11 @@ export class Vendors1788500000000 implements MigrationInterface {
         CONSTRAINT "pk_vendors" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "ix_vendors_org_status" ON "vendors" ("organization_id", "status")`);
-    await queryRunner.query(`CREATE INDEX "ix_vendors_org_deleted" ON "vendors" ("organization_id", "is_deleted")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendors_org_status" ON "vendors" ("organization_id", "status")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendors_org_deleted" ON "vendors" ("organization_id", "is_deleted")`);
 
     await queryRunner.query(`
-      CREATE TABLE "vendor_contacts" (
+      CREATE TABLE IF NOT EXISTS "vendor_contacts" (
         "id" character varying(24) NOT NULL,
         "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -59,11 +59,11 @@ export class Vendors1788500000000 implements MigrationInterface {
         CONSTRAINT "pk_vendor_contacts" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_contacts_vendor" ON "vendor_contacts" ("vendor_id")`);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_contacts_org" ON "vendor_contacts" ("organization_id")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_contacts_vendor" ON "vendor_contacts" ("vendor_id")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_contacts_org" ON "vendor_contacts" ("organization_id")`);
 
     await queryRunner.query(`
-      CREATE TABLE "vendor_employees" (
+      CREATE TABLE IF NOT EXISTS "vendor_employees" (
         "id" character varying(24) NOT NULL,
         "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -85,8 +85,8 @@ export class Vendors1788500000000 implements MigrationInterface {
         CONSTRAINT "pk_vendor_employees" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_employees_vendor" ON "vendor_employees" ("vendor_id")`);
-    await queryRunner.query(`CREATE INDEX "ix_vendor_employees_org_status" ON "vendor_employees" ("organization_id", "status")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_employees_vendor" ON "vendor_employees" ("vendor_id")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "ix_vendor_employees_org_status" ON "vendor_employees" ("organization_id", "status")`);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
