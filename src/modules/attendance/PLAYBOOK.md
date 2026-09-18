@@ -250,6 +250,54 @@ dependency is met by active org memberships. Covered by `attendance-cron.feature
   existing day row have no optimistic lock (the unique index only guards new-row
   creation). Matches the monolith; needs one user firing concurrent requests.
 
+## Shifts that cross midnight
+
+A 16:30–01:30 shift opens a session on one calendar day and closes it on the
+next. Every clock action used to resolve the org-local day of `now` and look
+only there, so clock-out never found the running session: it answered "No active
+clock-in found for today. Please clock in first." The employee complied, which
+stranded the real session and opened a second record whose clock-in and
+clock-out were seconds apart. The stranded session was then auto-closed by the
+reconcile cron at `checkIn + minWorkingHours + break` — an invented time. On the
+one real account this affected, 14 of 17 night shifts carry a fabricated
+clock-out.
+
+`findOpenSessionRecord` is now what clock-in, clock-out and today-status all
+resolve through: today's open session if there is one, otherwise — **for a night
+shift only** — the previous org-day's, while `isSessionStillRunning` says it is
+plausibly still running.
+
+- **Night shift is read from the policy**, via `workTiming.isNightShift` or a
+  wrapping `startTime`/`endTime` (`detectNightShiftWindow`).
+- **A day shift is deliberately unchanged.** There an open session from
+  yesterday is a forgotten checkout; closing it at today's time would bank a
+  ~24h day, so the cron keeps it.
+- **One staleness constant** (`util/session-window.ts`, 18h) is the handover
+  between the employee's clock-out and the cron. Two numbers would leave a gap
+  where neither owns the session, or an overlap where both write it.
+- **Clock-in refuses** while last night's session is open, which is what stops
+  the phantom record at the source.
+- `GET /attendance/today` returns `carriedOver` so the UI can say "since
+  yesterday" rather than implying the running total started this morning.
+
+### Which policy a record is judged by
+
+`resolveForEmployee` filtered policies by effectiveness at **`now`**, and
+`appliedShiftPolicyId` — a column that exists and is read back — was never
+written. So a record was re-scored by whatever policy is current whenever it was
+recomputed. This really happened: a 17:21 clock-in was scored against the
+09:00 org default, then silently re-scored against a 16:30 night policy created
+two hours later, when the cron auto-closed it the next morning.
+
+Clock-in now stamps the governing `appliedShiftPolicyId`, and
+`resolveForEmployee` takes `{ at, policyId }` — the moment the answer is *for*,
+not the moment it is asked. `recomputeWorkedFields` passes the record's own
+stamp and date, so settled days stop moving under later policy edits.
+
+Note this cuts both ways: a policy created today with `effectiveFrom` today does
+not reach back over days the employee already worked that shift. Backdating
+`effectiveFrom` is the fix for that, and it is a data decision, not a code one.
+
 ## Scenarios & tests
 
 Gherkin scenarios live in `src/modules/attendance/features/*.feature`, bound to
