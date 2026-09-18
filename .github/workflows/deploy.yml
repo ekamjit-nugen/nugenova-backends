@@ -62,6 +62,11 @@ jobs:
             git fetch --all --prune
             git reset --hard origin/main
 
+            # The commit we are deploying: baked into the container's environment
+            # so /api/v1/health can prove which build is actually serving.
+            export APP_GIT_SHA="$(git rev-parse HEAD)"
+            echo "→ Deploying $APP_GIT_SHA"
+
             echo "→ Building the image"
             docker compose build
 
@@ -75,6 +80,38 @@ jobs:
 
             echo "→ Starting/replacing the API container"
             docker compose up -d
+
+            # Migrations have already run, so an old container left serving would
+            # answer every request with "relation ... does not exist" while looking
+            # alive. Prove the swap took before calling this a deploy: health must
+            # report the commit we just built and a schema that matches it.
+            echo "→ Verifying the running container"
+            PORT="$(grep -E '^PORT=' .env | head -1 | cut -d= -f2 | tr -d '\r\"' || true)"
+            HEALTH="http://127.0.0.1:${PORT:-4100}/api/v1/health"
+            ok=false
+            for attempt in $(seq 1 30); do
+              body="$(curl -fsS --max-time 5 "$HEALTH" || true)"
+              case "$body" in
+                *'"version":"'"$APP_GIT_SHA"'"'*)
+                  case "$body" in
+                    *'"status":"ok"'*) ok=true; break ;;
+                    *) echo "   attempt $attempt: running the right build but not healthy — $body" ;;
+                  esac
+                  ;;
+                '') echo "   attempt $attempt: no answer yet" ;;
+                *) echo "   attempt $attempt: still the old build — $body" ;;
+              esac
+              sleep 4
+            done
+
+            if [ "$ok" != true ]; then
+              echo "::error::Deploy did NOT take: $HEALTH never reported status=ok for $APP_GIT_SHA."
+              echo "The database is already migrated, so the container that is serving is out of date — fix it now."
+              docker compose ps || true
+              docker compose logs --tail=120 api || true
+              exit 1
+            fi
+            echo "   healthy on $APP_GIT_SHA"
 
             echo "→ Pruning dangling images"
             docker image prune -f

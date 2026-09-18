@@ -155,8 +155,21 @@ docker compose ps                       # status + health
 docker compose logs -f --tail=100 api   # live logs
 docker compose restart api              # restart
 docker compose up -d --build            # manual redeploy from local checkout
-git log -1 --oneline                    # what's currently deployed
+git log -1 --oneline                    # what the CHECKOUT is at
+curl -fsS http://127.0.0.1:4100/api/v1/health   # what is actually SERVING
 ```
+
+`/api/v1/health` answers `{ status, db, schema, version, ts }`. `version` is the
+commit the running container was built from (`APP_GIT_SHA`, set by the deploy;
+`unknown` for a hand-rolled `up -d`), and `schema` compares this build's
+migrations with the ones the database has applied:
+
+| `schema`  | Means | Do |
+| --------- | ----- | -- |
+| `match`   | code and database agree | nothing |
+| `behind`  | the database is ahead — **the container is stale** | redeploy now |
+| `ahead`   | migrations have not been applied | check the entrypoint's migration log |
+| `unknown` | could not compare | check the database connection |
 
 **Rollback:** `git reset --hard <good-sha> && docker compose up -d --build`
 (re-run migrations only if the rollback changes the schema).
@@ -174,6 +187,15 @@ git log -1 --oneline                    # what's currently deployed
   containerised Postgres; Supabase and any other remote database keep SSL by default.
 - **Migrations run as a one-off container before the swap** — a failed migration
   fails the deploy and the currently-running container keeps serving.
+- **The deploy proves the swap took.** After `docker compose up -d` it polls
+  `/api/v1/health` (up to 2 minutes) and only passes when the answer carries the
+  commit it just built *and* `status: "ok"`. Because migrations run first, a swap
+  that silently fails leaves old code on a new schema — every request then dies
+  with `relation "…" does not exist` while the process looks perfectly alive.
+  That is what took Client leads and the Clients dashboard down on 2026-09-18;
+  the job now fails loudly instead, printing `docker compose ps` and the API log.
+  Fix it by re-running **Actions → Deploy → Run workflow**, or on the box:
+  `git fetch --all && git reset --hard origin/main && docker compose up -d --build`.
 - **The image carries `ts-node` + `src/`** on purpose: the TypeORM CLI runs the
   `.ts` migrations (`typeorm-ts-node-commonjs -d src/bootstrap/database/data-source.ts`).
 - **bcrypt** is a native addon → the image builds it with `python3 make g++` in a
