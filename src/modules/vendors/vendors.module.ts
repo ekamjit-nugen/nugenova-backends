@@ -7,14 +7,16 @@ import { VendorContactEntity } from './entities/vendor-contact.entity';
 import { VendorEmployeeEntity } from './entities/vendor-employee.entity';
 import { VendorAgreementEntity } from './entities/vendor-agreement.entity';
 import { VendorAgreementTemplateEntity } from './entities/vendor-agreement-template.entity';
+import { VendorBillEntity } from './entities/vendor-bill.entity';
 import { VendorsService } from './vendors.service';
 import { VendorAgreementsService } from './vendor-agreements.service';
+import { VendorBillsService } from './vendor-bills.service';
 import { VendorsController } from './vendors.controller';
 
 /**
  * Vendors — supplier companies, the people they supply, our contacts there, and
- * the agreements they sign (with the clearance those agreements decide). The buy
- * side of Clients. Bills and the vendor portal follow in later phases.
+ * the agreements they sign (with the clearance those agreements decide), and the
+ * bills they raise. The buy side of Clients; the vendor portal follows.
  */
 @Module({
   imports: [
@@ -25,10 +27,11 @@ import { VendorsController } from './vendors.controller';
       VendorEmployeeEntity,
       VendorAgreementEntity,
       VendorAgreementTemplateEntity,
+      VendorBillEntity,
     ]),
   ],
   controllers: [VendorsController],
-  providers: [VendorsService, VendorAgreementsService],
-  exports: [VendorsService, VendorAgreementsService],
+  providers: [VendorsService, VendorAgreementsService, VendorBillsService],
+  exports: [VendorsService, VendorAgreementsService, VendorBillsService],
 })
 export class VendorsModule {}
