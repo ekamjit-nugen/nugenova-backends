@@ -342,3 +342,29 @@ export class CancelVendorBillDto {
   @IsOptional() @IsString() @MaxLength(1000)
   reason?: string;
 }
+
+// ── portal ───────────────────────────────────────────────────────────────────
+
+export class InviteVendorContactDto {
+  @IsOptional() @IsString() @MaxLength(120)
+  firstName?: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  lastName?: string;
+}
+
+/** A vendor signing for themselves in the portal (never `offline`). */
+export class PortalSignAgreementDto {
+  @IsString() @MaxLength(200)
+  signerName: string;
+
+  @IsOptional() @IsEmail()
+  signerEmail?: string;
+
+  /** DocumentFile id of a drawn signature; typed signing leaves it out. */
+  @IsOptional() @IsString() @MaxLength(24)
+  signatureFileId?: string;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VendorAgreementFieldValueDto)
+  fieldValues?: VendorAgreementFieldValueDto[];
+}

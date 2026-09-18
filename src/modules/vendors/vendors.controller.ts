@@ -5,10 +5,11 @@ import { permMapAllows } from '../organization/guards/require-permission.decorat
 import { VendorsCaller, VendorsService } from './vendors.service';
 import { VendorAgreementsService } from './vendor-agreements.service';
 import { VendorBillsService } from './vendor-bills.service';
+import { VendorPortalService } from './vendor-portal.service';
 import {
   CancelVendorBillDto, CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, CreateVendorBillDto,
   CreateVendorContactDto, CreateVendorDto, CreateVendorEmployeeDto, DeclineVendorAgreementDto,
-  MarkVendorBillPaidDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
+  InviteVendorContactDto, MarkVendorBillPaidDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
   UpdateVendorBillDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
 } from './dto';
 
@@ -31,6 +32,7 @@ export class VendorsController {
     private readonly vendors: VendorsService,
     private readonly agreements: VendorAgreementsService,
     private readonly billing: VendorBillsService,
+    private readonly portal: VendorPortalService,
   ) {}
 
   private caller(req: any): VendorsCaller {
@@ -169,6 +171,24 @@ export class VendorsController {
   @Delete(':id/contacts/:contactId')
   async removeContact(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string) {
     return { success: true, data: await this.vendors.removeContact(this.allowed(req, 'delete').orgId, id, contactId) };
+  }
+
+  // ── portal access for a vendor's contacts ──
+  @Get(':id/portal-users')
+  async portalUsers(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.portal.portalUsers(this.allowed(req, 'view').orgId, id) };
+  }
+
+  /** Give a contact a login to the vendor portal. */
+  @Post(':id/contacts/:contactId/invite')
+  async invitePortalUser(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string, @Body() dto: InviteVendorContactDto) {
+    return { success: true, data: await this.portal.invite(this.allowed(req, 'create'), id, contactId, dto) };
+  }
+
+  /** Take that login away again, keeping the contact record. */
+  @Delete(':id/contacts/:contactId/invite')
+  async revokePortalUser(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string) {
+    return { success: true, data: await this.portal.revoke(this.allowed(req, 'edit').orgId, id, contactId) };
   }
 
   // ── vendor employees (the contractors they supply) ──

@@ -652,6 +652,18 @@ export function activityBackupEmail(params: {
 }
 
 /** Invitation for a client's contact to the client portal. Values are escaped. */
+export function vendorPortalInviteEmail(params: {
+  contactName: string;
+  companyName: string;
+}): { subject: string; html: string } {
+  return {
+    subject: `You've been given access to ${params.companyName}'s vendor portal`,
+    html:
+      `<p>Hello ${esc(params.contactName)},</p>` +
+      `<p>You can now sign in to the vendor portal to see the agreements we need signed, the people you supply us, and the bills we have received. Sign in with this email address to get started.</p>`,
+  };
+}
+
 export function clientPortalInviteEmail(params: {
   contactName: string;
   companyName: string;

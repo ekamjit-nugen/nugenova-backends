@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
+import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { UserEntity } from '../auth/entities/user.entity';
 import { VendorEntity } from './entities/vendor.entity';
 import { VendorContactEntity } from './entities/vendor-contact.entity';
 import { VendorEmployeeEntity } from './entities/vendor-employee.entity';
@@ -11,12 +13,15 @@ import { VendorBillEntity } from './entities/vendor-bill.entity';
 import { VendorsService } from './vendors.service';
 import { VendorAgreementsService } from './vendor-agreements.service';
 import { VendorBillsService } from './vendor-bills.service';
+import { VendorPortalService } from './vendor-portal.service';
+import { VendorPortalController } from './vendor-portal.controller';
 import { VendorsController } from './vendors.controller';
 
 /**
  * Vendors — supplier companies, the people they supply, our contacts there, and
  * the agreements they sign (with the clearance those agreements decide), and the
- * bills they raise. The buy side of Clients; the vendor portal follows.
+ * bills they raise, and the portal their own people sign in to. The buy side of
+ * Clients. The global MailModule supplies the portal invite mail.
  */
 @Module({
   imports: [
@@ -28,10 +33,12 @@ import { VendorsController } from './vendors.controller';
       VendorAgreementEntity,
       VendorAgreementTemplateEntity,
       VendorBillEntity,
+      OrgMembershipEntity,
+      UserEntity,
     ]),
   ],
-  controllers: [VendorsController],
-  providers: [VendorsService, VendorAgreementsService, VendorBillsService],
-  exports: [VendorsService, VendorAgreementsService, VendorBillsService],
+  controllers: [VendorsController, VendorPortalController],
+  providers: [VendorsService, VendorAgreementsService, VendorBillsService, VendorPortalService],
+  exports: [VendorsService, VendorAgreementsService, VendorBillsService, VendorPortalService],
 })
 export class VendorsModule {}

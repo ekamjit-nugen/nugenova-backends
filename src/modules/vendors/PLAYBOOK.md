@@ -168,13 +168,54 @@ Bill numbers are `VB-00001` per org, allocated as count+1 (the house pattern)
 with a unique index on `(organization_id, bill_number)`; a concurrent raise
 fails on the index and simply takes the next number.
 
+## The portal
+
+`/api/v1/vendor-portal` — its own path, not `vendors/portal/*`, so these routes
+can never be shadowed by the staff controller's `:id` routes.
+
+A portal user is an OrgMembership with `role='vendor'`, `personType='vendor'`
+and a `vendorId` — the vendor mirror of a client portal login. `personType` is
+what keeps them out of `staffScope()`: payroll, the attendance roster, headcount
+and the Directory never see them. Staff give access with
+`POST /vendors/:id/contacts/:contactId/invite` (the contact needs an email; they
+sign in with the normal OTP flow, so no password is ever set) and take it away
+with the matching `DELETE`, which deactivates the membership but keeps the
+contact record.
+
+**No route here takes a vendor id.** The caller's own membership decides what
+loads, so there is nothing to tamper with, and a vendor can only ever reach
+their own rows.
+
+```
+GET    /vendor-portal/me                      their company, clearance, what we owe
+GET    /vendor-portal/agreements               everything sent to them
+POST   /vendor-portal/agreements/:aid/sign     they sign it themselves
+GET    /vendor-portal/bills                    bills we have agreed
+GET    /vendor-portal/people                   their roster
+POST   /vendor-portal/people
+PATCH  /vendor-portal/people/:eid
+DELETE /vendor-portal/people/:eid
+```
+
+Three deliberate limits:
+
+- **Drafts are ours.** A draft agreement or bill is our working copy, so it is
+  filtered out of every portal list — and signing a draft returns 404, because
+  as far as the vendor is concerned it doesn't exist.
+- **Rates are not theirs to set.** A vendor can add and edit their own people,
+  but `rateAmount` / `rateCurrency` / `rateUnit` are stripped on the way in: the
+  rate is a commercial term agreed with us.
+- **Signing in the portal is never `offline`.** That method means a staff member
+  recorded a signature on the vendor's behalf; when the vendor signs here the
+  method is `typed` (or `drawn`) and the signer is the person signed in.
+
+`auth.service.ts` routes an all-vendor member to `/vendor-portal` at login, and
+the frontend now knows that route (`KNOWN_ROUTES` in `login/page.tsx`,
+`BARE_ROUTES` in `app-frame.tsx`) — before this phase such a login landed in the
+staff app.
+
 ## Not here yet (phases)
 
-4. **Vendor portal** — `role='vendor'` logins. `auth.service.ts` already routes an
-   all-vendor member to `/vendor-portal`, but the frontend has no such route
-   (`KNOWN_ROUTES` in `login/page.tsx`, `BARE_ROUTES` in `app-frame.tsx`), so a
-   vendor login currently lands in the staff app. Fix those two arrays with the
-   portal.
 5. **Assignments** — linking a contractor to a project or requirement. Bills are
    raised by hand today; with assignments they can be drafted from who worked
    where, and project cost attribution becomes possible.
@@ -186,6 +227,12 @@ pad serve both. Attaching the PDF itself and flattening a signed copy reuse
 
 ## Tests
 
+- `features/vendor-portal.feature` — 9 scenarios covering the portal end to end,
+  including the security ones: a staff email can't become a vendor login, a
+  portal user holds no staff access, reaches nothing of another vendor, sees no
+  drafts, can't set a rate, and loses the portal when access is revoked. The
+  portal service is covered by these rather than by unit tests — its whole job
+  is the scoping, which only a real request exercises.
 - `vendor-bills.service.spec.ts` — 21 unit tests: computed totals and rounding,
   the number collision retry, cross-vendor lines, state guards, payment dates,
   and the cost-summary maths.
