@@ -23,7 +23,8 @@ describe('VendorAgreementsService', () => {
   const agreement = (over: Record<string, unknown> = {}) => ({
     id: 'a1', organizationId: 'orgA', vendorId: 'v1', templateId: 't1', title: 'MSA',
     bodyHtml: '<p>terms</p>', sourceFileId: null, status: 'sent', requiredForOnboarding: true,
-    signature: null, sentAt: new Date(), signedAt: null, expiresAt: null, isDeleted: false, ...over,
+    signature: null, sentAt: new Date(), signedAt: null, expiresAt: null, isDeleted: false,
+    waived: false, waivedReason: null, waivedAt: null, waivedBy: null, ...over,
   });
 
   beforeEach(() => {
@@ -187,6 +188,52 @@ describe('VendorAgreementsService', () => {
       templates.find.mockResolvedValue([]);
       agreements.find.mockResolvedValue([agreement({ requiredForOnboarding: true, status: 'void' })]);
       expect(await service.clearance('orgA', 'v1')).toMatchObject({ cleared: true, outstanding: 0 });
+    });
+  });
+
+  describe('waiving a required agreement', () => {
+    it('records the reason and who decided it', async () => {
+      agreements.findOne.mockResolvedValue(agreement());
+      const out = await service.waive(admin, 'v1', 'a1', { reason: 'Vendor signs their own MSA only' } as any);
+      expect(out).toMatchObject({ waived: true, waivedReason: 'Vendor signs their own MSA only', waivedBy: 'owner1' });
+      expect(out.waivedAt).toBeInstanceOf(Date);
+    });
+
+    it('insists on a reason', async () => {
+      agreements.findOne.mockResolvedValue(agreement());
+      await expect(service.waive(admin, 'v1', 'a1', { reason: '   ' } as any)).rejects.toThrow(/reason/);
+    });
+
+    it('will not waive something already signed', async () => {
+      agreements.findOne.mockResolvedValue(agreement({ status: 'signed' }));
+      await expect(service.waive(admin, 'v1', 'a1', { reason: 'no need' } as any)).rejects.toThrow(/already signed/);
+    });
+
+    it('clears the vendor without the signature', async () => {
+      templates.find.mockResolvedValue([template()]);
+      agreements.find.mockResolvedValue([agreement({ waived: true, waivedReason: 'Signed on paper years ago' })]);
+      const out = await service.clearance('orgA', 'v1');
+      expect(out).toMatchObject({ cleared: true, outstanding: 0 });
+      expect(out.items[0]).toMatchObject({ status: 'waived', waivedReason: 'Signed on paper years ago' });
+    });
+
+    it('puts it back on the checklist when un-waived', async () => {
+      agreements.findOne.mockResolvedValue(agreement({ waived: true, waivedReason: 'was fine' }));
+      templates.find.mockResolvedValue([template()]);
+      agreements.find.mockResolvedValue([agreement()]);
+      const out = await service.unwaive('orgA', 'v1', 'a1');
+      expect(out).toMatchObject({ waived: false, waivedReason: null, waivedBy: null });
+    });
+
+    it('refuses to un-waive one that was never waived', async () => {
+      agreements.findOne.mockResolvedValue(agreement());
+      await expect(service.unwaive('orgA', 'v1', 'a1')).rejects.toThrow(/not waived/);
+    });
+
+    it('a signature still outranks a waiver in the report', async () => {
+      templates.find.mockResolvedValue([template()]);
+      agreements.find.mockResolvedValue([agreement({ status: 'signed', waived: true })]);
+      expect((await service.clearance('orgA', 'v1')).items[0].status).toBe('signed');
     });
   });
 

@@ -217,6 +217,46 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('waiving a required agreement clears the vendor without it', ({ given, and, when, then }) => {
+    given('an organization with a vendor "Acme Contractors"', async () => {
+      org = await newOrg();
+      vendorId = await addVendor(org);
+    });
+    and('a required agreement template "Master Services Agreement"', async () => {
+      templateId = await addTemplate(org);
+    });
+    and('that template has been issued to the vendor', async () => {
+      const issued = await as(org.ownerToken).post(`/vendors/${vendorId}/agreements/issue-required`).expect(201);
+      agreementId = issued.body.data.agreements[0].id;
+    });
+    when('the owner waives it because "They only sign their own paperwork"', async () => {
+      res = await as(org.ownerToken)
+        .post(`/vendors/${vendorId}/agreements/${agreementId}/waive`, { reason: 'They only sign their own paperwork' })
+        .expect(201);
+    });
+    then('the vendor is cleared', async () => {
+      const clearance = await as(org.ownerToken).get(`/vendors/${vendorId}/clearance`).expect(200);
+      expect(clearance.body.data).toMatchObject({ cleared: true, outstanding: 0 });
+      const vendor = await as(org.ownerToken).get(`/vendors/${vendorId}`).expect(200);
+      expect(vendor.body.data.onboardingStatus).toBe('active');
+    });
+    and('the clearance shows it as waived, with the reason', async () => {
+      const clearance = await as(org.ownerToken).get(`/vendors/${vendorId}/clearance`).expect(200);
+      expect(clearance.body.data.items[0]).toMatchObject({
+        status: 'waived', waivedReason: 'They only sign their own paperwork', waivedBy: org.ownerId,
+      });
+    });
+    when('the owner puts it back on the checklist', async () => {
+      await h.api().delete(`${API}/vendors/${vendorId}/agreements/${agreementId}/waive`).set('Authorization', `Bearer ${org.ownerToken}`).expect(200);
+    });
+    then('the vendor is not cleared again', async () => {
+      const clearance = await as(org.ownerToken).get(`/vendors/${vendorId}/clearance`).expect(200);
+      expect(clearance.body.data).toMatchObject({ cleared: false, outstanding: 1 });
+      const vendor = await as(org.ownerToken).get(`/vendors/${vendorId}`).expect(200);
+      expect(vendor.body.data.onboardingStatus).toBe('agreements_pending');
+    });
+  });
+
   test('a member with only vendors:view cannot author templates', ({ given, when, then, but }) => {
     let viewer: string;
 

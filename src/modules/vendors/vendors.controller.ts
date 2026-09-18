@@ -13,6 +13,7 @@ import {
   CreateVendorContactDto, CreateVendorDto, CreateVendorEmployeeDto, DeclineVendorAgreementDto,
   InviteVendorContactDto, MarkVendorBillPaidDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
   UpdateVendorBillDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
+  WaiveVendorAgreementDto,
 } from './dto';
 
 /**
@@ -270,6 +271,18 @@ export class VendorsController {
   @Post(':id/agreements/:agreementId/decline')
   async declineAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string, @Body() dto: DeclineVendorAgreementDto) {
     return { success: true, data: await this.agreements.decline(this.allowed(req, 'edit').orgId, id, agreementId, dto) };
+  }
+
+  /** Clear the vendor without this signature — the reason is recorded. */
+  @Post(':id/agreements/:agreementId/waive')
+  async waiveAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string, @Body() dto: WaiveVendorAgreementDto) {
+    return { success: true, data: await this.agreements.waive(this.allowed(req, 'edit'), id, agreementId, dto) };
+  }
+
+  /** Put a waived agreement back on the checklist. */
+  @Delete(':id/agreements/:agreementId/waive')
+  async unwaiveAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
+    return { success: true, data: await this.agreements.unwaive(this.allowed(req, 'edit').orgId, id, agreementId) };
   }
 
   @Post(':id/agreements/:agreementId/void')

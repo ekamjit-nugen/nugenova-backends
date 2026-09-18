@@ -119,6 +119,14 @@ line per item (`missing`, `draft`, `sent`, `signed`, `declined`, `expired`), and
 A required agreement raised ad hoc, or one whose template was later archived or
 made optional, still counts — it is binding on the vendor either way.
 
+**Waiving.** A required agreement a vendor will not sign can be waived
+(`POST /vendors/:id/agreements/:aid/waive`), which clears the vendor without
+that signature. The reason is mandatory and the record keeps who decided it —
+a waiver is somebody's decision, so it should say whose rather than the item
+quietly vanishing from the checklist. `DELETE` on the same path puts it back.
+Waived items read as `waived` in the clearance report and stop being asked of
+the vendor in their portal; an actual signature still outranks a waiver.
+
 Until the vendor portal ships a vendor cannot sign in the app, so an admin
 records the signature they received: `method: 'offline'` names the staff member
 who recorded it rather than pretending the vendor clicked something, and
@@ -260,7 +268,7 @@ pad serve both. Attaching the PDF itself and flattening a signed copy reuse
 - `features/vendor-bills.feature` — 9 scenarios: raising and totalling a bill,
   the rejected client-supplied amount, approve → pay, paying before approval,
   cancelling, the cost summary, the permission split, and cross-org isolation.
-- `vendor-agreements.service.spec.ts` — 22 unit tests: template copying, which
+- `vendor-agreements.service.spec.ts` — 29 unit tests: template copying, which
   templates apply, backdated/future signing dates, expiry, void vs delete, and
   the onboarding sync (including leaving a suspended vendor alone).
 - `features/vendor-agreements.feature` — 8 scenarios: issue-required, the copied

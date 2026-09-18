@@ -345,6 +345,9 @@ export class VendorPortalService {
       signedFileId: a.signedFileId,
       status: a.status,
       required: a.requiredForOnboarding,
+      // A waived agreement is no longer asked of them — the portal stops
+      // showing a Sign button for it.
+      waived: !!a.waived,
       signature: a.signature,
       sentAt: a.sentAt,
       signedAt: a.signedAt,

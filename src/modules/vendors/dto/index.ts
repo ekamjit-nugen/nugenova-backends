@@ -263,6 +263,12 @@ export class SignVendorAgreementDto {
   signedAt?: string;
 }
 
+/** Waiving a required agreement — the reason is the whole point of the record. */
+export class WaiveVendorAgreementDto {
+  @IsString() @MaxLength(1000)
+  reason: string;
+}
+
 export class DeclineVendorAgreementDto {
   @IsOptional() @IsString() @MaxLength(1000)
   reason?: string;

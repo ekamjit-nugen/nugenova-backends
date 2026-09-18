@@ -48,6 +48,16 @@ Feature: Vendor agreements — what a vendor signs before they supply people
     Then the vendor is not cleared
     And the agreement is listed as "expired"
 
+  Scenario: waiving a required agreement clears the vendor without it
+    Given an organization with a vendor "Acme Contractors"
+    And a required agreement template "Master Services Agreement"
+    And that template has been issued to the vendor
+    When the owner waives it because "They only sign their own paperwork"
+    Then the vendor is cleared
+    And the clearance shows it as waived, with the reason
+    When the owner puts it back on the checklist
+    Then the vendor is not cleared again
+
   @security
   Scenario: a member with only vendors:view cannot author templates
     Given an organization and a member whose role grants "vendors:view"
