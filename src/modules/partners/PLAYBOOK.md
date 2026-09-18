@@ -106,14 +106,34 @@ Two rules worth keeping:
 `DELETE` on the same path takes them back out — the membership goes inactive and
 their record at the vendor is untouched.
 
+## The UI
+
+`/partners` is the one list (category filter, search, status) and `/partners/:id`
+the one detail page: it reads the partner, then renders the side its category
+carries. The old routes redirect rather than 404 — `/clients/:id` and
+`/vendors/:id` to `/partners/:id`, `/clients` and `/vendors` to the filtered
+list — and the sidebar's Clients and Vendors items open that filtered list, so
+both familiar entry points survive.
+
+The two detail bodies moved verbatim into `ClientDetail` and `VendorDetail`
+components. That was deliberate: they carry the PDF field designer, ticket
+threads, bill approval and the signing flows, and rewriting them for a cosmetic
+merge would have risked all of it. Their shared parts can be hoisted into the
+partner shell piece by piece now that there is one entry point.
+
+The `_premerge` tables are gone (`DropPremergeTables1788610000000`), after the
+merge was verified field by field. That migration refuses to run if any
+pre-merge row is missing from `partners`.
+
 ## Still to come
 
 1. Documents, agreements and the portal move onto partner ids in name as well as
-   value.
-2. A partner detail page rendering the shared tabs plus the category-specific
-   ones, replacing the two detail pages.
-3. Retire `/clients` and `/vendors` once the UI is on partners, and drop the
-   `_premerge` tables.
+   value — `partner_contacts` still carries both `client_id` and `vendor_id`
+   while the services use the old names.
+2. The `/clients` and `/vendors` API routes stay: they serve everything
+   category-specific (bills, tickets, agreements, the portals) and the merged UI
+   calls them. Moving those endpoints under `/partners` is churn with no
+   user-visible gain, so it waits until the shared parts are hoisted.
 
 ## Tests
 
