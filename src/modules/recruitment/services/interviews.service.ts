@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
+import { Between, In, IsNull, MoreThan, Repository } from 'typeorm';
 
 import { MeetingsService } from '../../meetings/meetings.service';
 import { LeadEntity } from '../../sales/entities/lead.entity';
@@ -15,6 +15,9 @@ import { SubmissionsService } from './submissions.service';
 import { RecruitmentCaller, assertCan, can, toNum } from './recruitment-caller';
 
 const RECOMMENDATION_LABEL: Record<string, string> = { strong_yes: 'Strong yes', yes: 'Yes', no: 'No', strong_no: 'Strong no' };
+
+/** How far back “feedback due” looks — must match the interviews page's LOOKBACK_DAYS. */
+const FEEDBACK_WINDOW_DAYS = 180;
 
 /**
  * Interview rounds + scorecard feedback. Scheduling needs `recruitment:edit`;
@@ -96,7 +99,7 @@ export class InterviewsService {
         const lead = lById.get(sById.get(r.submissionId)?.leadId ?? '');
         out.set(r.id, { title: `Client: ${lead ? lead.company || lead.name : 'lead'}`, leadId: lead?.id ?? null });
       } else {
-        out.set(r.id, { title: (r.openingId && oById.get(r.openingId)?.title) || 'Opening', leadId: null });
+        out.set(r.id, { title: (r.openingId && oById.get(r.openingId)?.title) || 'Category', leadId: null });
       }
     }
     return out;
@@ -131,7 +134,7 @@ export class InterviewsService {
         ...i,
         endsAt: this.endOf(i),
         candidate: c ? { id: c.id, fullName: c.fullName, currentDesignation: c.currentDesignation, currentCompany: c.currentCompany, totalExpMonths: c.totalExpMonths } : null,
-        openingTitle: labels.get(i.id)?.title ?? 'Opening',
+        openingTitle: labels.get(i.id)?.title ?? 'Category',
         leadId: labels.get(i.id)?.leadId ?? null,
         interviewers: i.interviewerIds.map((uid) => ({ id: uid, name: names.get(uid) ?? 'Member', submitted: mine.some((f) => f.interviewerId === uid) })),
         feedbackCount: mine.length,
@@ -157,7 +160,7 @@ export class InterviewsService {
         id: candidate.id, fullName: candidate.fullName, email: candidate.email, phone: candidate.phone, currentLocation: candidate.currentLocation,
         currentCompany: candidate.currentCompany, currentDesignation: candidate.currentDesignation, totalExpMonths: candidate.totalExpMonths,
         noticePeriodDays: candidate.noticePeriodDays, noticeStatus: candidate.noticeStatus, skills: candidate.skills, highestQualification: candidate.highestQualification,
-        linkedinUrl: candidate.linkedinUrl, githubUrl: candidate.githubUrl, aiSummary: candidate.aiSummary,
+        linkedinUrl: candidate.linkedinUrl, githubUrl: candidate.githubUrl,
       } : null,
       resume: resume ? { id: resume.id, fileId: resume.fileId, fileName: resume.fileName, mimeType: resume.mimeType } : null,
       myFeedback: mine ? { ...mine, overallRating: toNum(mine.overallRating) } : null,
@@ -169,7 +172,7 @@ export class InterviewsService {
   // ── write ──────────────────────────────────────────────────────────────────────
 
   async create(caller: RecruitmentCaller, dto: CreateInterviewDto) {
-    if (!dto.applicationId === !dto.submissionId) throw new BadRequestException('Choose either an opening application or a client submission');
+    if (!dto.applicationId === !dto.submissionId) throw new BadRequestException('Choose either a category application or a client submission');
     const app = dto.applicationId ? await this.pipeline.requireApplication(caller.orgId, dto.applicationId) : null;
     const sub = dto.submissionId ? await this.submissionsService.requireSubmission(caller.orgId, dto.submissionId) : null;
     if (sub && ['onboarded', 'client_rejected', 'withdrawn'].includes(sub.status)) {
@@ -245,18 +248,22 @@ export class InterviewsService {
     if (dto.criteria !== undefined) i.criteria = [...new Set(dto.criteria.map((c) => c.trim()).filter(Boolean))];
     if (dto.notes !== undefined) i.notes = dto.notes?.trim() || null;
     if (dto.status !== undefined) i.status = dto.status as InterviewEntity['status'];
+    // Back on the calendar: let the overdue-feedback nudge fire again for the new round.
+    if (before.status === 'cancelled' && i.status !== 'cancelled') i.feedbackRemindedAt = null;
     const saved = await this.interviews.save(i);
 
     const candidate = await this.candidates.findOne({ where: { id: i.candidateId } });
     const rescheduled = new Date(saved.scheduledAt).getTime() !== before.scheduledAt;
     const cancelled = saved.status === 'cancelled' && before.status !== 'cancelled';
+    // Put back on the calendar after a cancellation — the panel has to hear about it.
+    const reopened = before.status === 'cancelled' && saved.status !== 'cancelled';
     const when = new Date(saved.scheduledAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
 
     if (saved.meetingId && this.meetings) {
       const meetingCaller = { userId: caller.userId, isAdmin: true };
       try {
         if (cancelled) await this.meetings.cancel(caller.orgId, meetingCaller, saved.meetingId);
-        else if (rescheduled || dto.interviewerIds !== undefined) {
+        else if (reopened || rescheduled || dto.interviewerIds !== undefined) {
           await this.meetings.update(caller.orgId, meetingCaller, saved.meetingId, {
             scheduledStart: new Date(saved.scheduledAt).toISOString(), scheduledEnd: this.endOf(saved).toISOString(), participantIds: saved.interviewerIds,
           } as any);
@@ -266,21 +273,26 @@ export class InterviewsService {
       }
     }
 
-    if (candidate && (cancelled || rescheduled)) {
+    if (candidate && (cancelled || reopened || rescheduled)) {
       await this.pipeline.logActivity(caller.orgId, candidate.id, 'interview',
-        cancelled ? `Cancelled ${saved.roundName}` : `Rescheduled ${saved.roundName} to ${when} IST`,
+        cancelled ? `Cancelled ${saved.roundName}`
+          : reopened ? `Reopened ${saved.roundName} for ${when} IST`
+            : `Rescheduled ${saved.roundName} to ${when} IST`,
         { applicationId: saved.applicationId, actorId: caller.userId, meta: { interviewId: saved.id } });
       for (const uid of saved.interviewerIds) {
         this.pipeline.notify({
-          organizationId: caller.orgId, userId: uid, actorId: caller.userId, type: RECRUITMENT_NOTIFICATIONS.INTERVIEW_CANCELLED,
-          title: cancelled ? `Interview cancelled: ${candidate.fullName}` : `Interview rescheduled: ${candidate.fullName}`,
-          body: cancelled ? saved.roundName : `${saved.roundName} · now ${when} IST`,
+          organizationId: caller.orgId, userId: uid, actorId: caller.userId,
+          type: reopened ? RECRUITMENT_NOTIFICATIONS.INTERVIEW_SCHEDULED : RECRUITMENT_NOTIFICATIONS.INTERVIEW_CANCELLED,
+          title: cancelled ? `Interview cancelled: ${candidate.fullName}`
+            : reopened ? `Interview back on: ${candidate.fullName}`
+              : `Interview rescheduled: ${candidate.fullName}`,
+          body: cancelled ? saved.roundName : `${saved.roundName} · ${reopened ? '' : 'now '}${when} IST`,
           data: { actionUrl: `/recruitment/interviews/${saved.id}`, interviewId: saved.id },
         });
       }
     }
     const added = saved.interviewerIds.filter((uid) => !before.interviewerIds.includes(uid));
-    if (candidate && added.length && saved.status === 'scheduled') {
+    if (candidate && added.length && !reopened && saved.status === 'scheduled') {
       for (const uid of added) {
         this.pipeline.notify({
           organizationId: caller.orgId, userId: uid, actorId: caller.userId, type: RECRUITMENT_NOTIFICATIONS.INTERVIEW_SCHEDULED,
@@ -405,10 +417,19 @@ export class InterviewsService {
   }
 
   /** Interviews that ended without all feedback (dashboard helper). */
+  /**
+   * Interviews still waiting on a scorecard — the dashboard's "Feedback due" tile.
+   * Counts interviews (not interviewer slots) over the same window the interviews
+   * page lists, so the tile and the "Feedback due" tab always show the same number.
+   */
   async pendingFeedbackCount(orgId: string) {
-    const rows = await this.interviews.find({ where: { organizationId: orgId, isDeleted: false, status: In(['scheduled', 'completed']), scheduledAt: LessThan(new Date()) }, take: 1000 });
+    const since = new Date(Date.now() - FEEDBACK_WINDOW_DAYS * 86_400_000);
+    const rows = await this.interviews.find({
+      where: { organizationId: orgId, isDeleted: false, status: In(['scheduled', 'completed']), scheduledAt: Between(since, new Date()) },
+      take: 1000,
+    });
     if (!rows.length) return 0;
     const fb = await this.feedback.find({ where: { organizationId: orgId, interviewId: In(rows.map((r) => r.id)) } });
-    return rows.reduce((n, i) => n + i.interviewerIds.filter((uid) => !fb.some((f) => f.interviewId === i.id && f.interviewerId === uid)).length, 0);
+    return rows.filter((i) => i.interviewerIds.some((uid) => !fb.some((f) => f.interviewId === i.id && f.interviewerId === uid))).length;
   }
 }

@@ -61,6 +61,8 @@ describe('ErrorReporterService', () => {
       );
       expect(recorded().metadata.stack).toContain('leave.service.ts');
       expect(recorded().metadata.reference).toBe('abc12345');
+      // Filed under the part of the app it came from (/api/v1/leaves → Leave).
+      expect(recorded().metadata.area).toBe('leave');
     });
 
     it('files a 4xx as a client error and does not email', async () => {

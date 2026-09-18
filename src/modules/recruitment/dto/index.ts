@@ -62,7 +62,6 @@ export class CandidateFieldsDto {
   @IsOptional() @IsString() @MaxLength(1000) externalResumeUrl?: string | null;
   @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
   @IsOptional() @IsInt() @Min(0) @Max(5) rating?: number | null;
-  @IsOptional() @IsString() @MaxLength(2000) aiSummary?: string | null;
   @IsOptional() @IsString() @MaxLength(24) ownerId?: string | null;
   @IsOptional() @IsIn(list(CANDIDATE_STATUSES)) status?: string;
   @IsOptional() @IsBoolean() consent?: boolean;
@@ -86,7 +85,7 @@ export class SubmitTargetDto {
   @IsOptional() @IsString() @MaxLength(24) requirementId?: string;
 }
 
-/** Create from a parsed CV — or attach the CV to an existing candidate. */
+/** Create a candidate with their CV file — or attach the CV to an existing candidate. Details are typed in, never read from the file. */
 export class CandidateFromCvDto {
   @IsString() @MaxLength(24) fileId: string;
   @ValidateNested() @Type(() => CandidateFieldsDto) data: CandidateFieldsDto;
@@ -96,15 +95,8 @@ export class CandidateFromCvDto {
   @IsOptional() @IsBoolean() overwrite?: boolean;
   @IsOptional() @IsString() @MaxLength(24) openingId?: string;
   @IsOptional() @IsString() @MaxLength(24) stageId?: string;
-  @IsOptional() @IsObject() parsedJson?: Record<string, unknown>;
   /** Shortlist straight against a client lead (optionally a requirement). */
   @IsOptional() @ValidateNested() @Type(() => SubmitTargetDto) submitTo?: SubmitTargetDto;
-}
-
-export class ParseCvDto {
-  @IsString() @MaxLength(24) fileId: string;
-  /** Skip the LLM and only run text extraction + regex (cheap). */
-  @IsOptional() @IsBoolean() skipAi?: boolean;
 }
 
 export class MergeCandidatesDto {

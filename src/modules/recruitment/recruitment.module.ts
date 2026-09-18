@@ -4,7 +4,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { ActivityModule } from '../activity/activity.module';
-import { AiModule } from '../ai/ai.module';
 import { MeetingsModule } from '../meetings/meetings.module';
 import { SalesModule } from '../sales/sales.module';
 import { LeadEntity } from '../sales/entities/lead.entity';
@@ -17,7 +16,7 @@ import { OrganizationEntity } from '../organization/entities/organization.entity
 import { RECRUITMENT_ENTITIES } from './entities';
 import { RecruitmentAccessGuard } from './guards/recruitment-access.guard';
 import { PipelineService } from './services/pipeline.service';
-import { CvParseService } from './services/cv-parse.service';
+import { CandidateFilesService } from './services/candidate-files.service';
 import { CandidatesService } from './services/candidates.service';
 import { OpeningsService } from './services/openings.service';
 import { InterviewsService } from './services/interviews.service';
@@ -45,7 +44,6 @@ import { ImportJobsService } from './services/import-jobs.service';
     AuthModule,
     NotificationModule,
     ActivityModule,
-    AiModule,
     MeetingsModule,
     SalesModule,
     TypeOrmModule.forFeature([
@@ -57,7 +55,7 @@ import { ImportJobsService } from './services/import-jobs.service';
     RecruitmentAccessGuard,
     ImportJobsService,
     PipelineService,
-    CvParseService,
+    CandidateFilesService,
     CandidatesService,
     OpeningsService,
     InterviewsService,

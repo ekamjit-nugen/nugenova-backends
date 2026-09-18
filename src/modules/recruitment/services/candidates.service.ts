@@ -14,7 +14,7 @@ import {
   AddDocumentDto, BulkCandidateActionDto, CandidateFieldsDto, CandidateFromCvDto, CreateCandidateActivityDto,
   CreateCandidateDto, MergeCandidatesDto, UpdateCandidateDto,
 } from '../dto';
-import { CvParseService } from './cv-parse.service';
+import { CandidateFilesService, isWordDocument } from './candidate-files.service';
 import { MatchingService } from './matching.service';
 import { SubmissionsService } from './submissions.service';
 import { PipelineService } from './pipeline.service';
@@ -59,7 +59,7 @@ const PROFILE_FIELDS = [
   'fullName', 'currentLocation', 'preferredLocations', 'willingToRelocate', 'totalExpMonths', 'relevantExpMonths',
   'currentCompany', 'currentDesignation', 'currency', 'noticePeriodDays', 'noticeStatus', 'lastWorkingDay',
   'highestQualification', 'education', 'workHistory', 'skills', 'linkedinUrl', 'githubUrl', 'portfolioUrl', 'source',
-  'sourceDetail', 'referredBy', 'externalResumeUrl', 'tags', 'rating', 'aiSummary', 'status', 'altPhone',
+  'sourceDetail', 'referredBy', 'externalResumeUrl', 'tags', 'rating', 'status', 'altPhone',
 ] as const;
 
 const isBlank = (v: unknown) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -85,7 +85,7 @@ export class CandidatesService {
     @InjectRepository(InterviewFeedbackEntity) private readonly feedback: Repository<InterviewFeedbackEntity>,
     @InjectRepository(CandidateOfferEntity) private readonly offers: Repository<CandidateOfferEntity>,
     private readonly pipeline: PipelineService,
-    private readonly cv: CvParseService,
+    private readonly cv: CandidateFilesService,
     private readonly submissions: SubmissionsService,
     private readonly matching: MatchingService,
     @Optional() private readonly domainEvents?: DomainEventsService,
@@ -95,7 +95,7 @@ export class CandidatesService {
 
   view(c: CandidateEntity, caller: RecruitmentCaller) {
     const showCtc = can(caller, 'edit');
-    const { resumeText: _t, emailNorm: _e, ...rest } = c as CandidateEntity & { resumeText?: string };
+    const { resumeText: _t, emailNorm: _e, aiSummary: _s, ...rest } = c as CandidateEntity & { resumeText?: string };
     return {
       ...rest,
       currentCtc: showCtc ? toNum(c.currentCtc) : null,
@@ -236,7 +236,7 @@ export class CandidatesService {
       ownerName: c.ownerId ? names.get(c.ownerId) ?? null : null,
       primaryResume: docByCandidate.has(c.id) ? this.docView(docByCandidate.get(c.id)!) : null,
       applications: apps.filter((a) => a.candidateId === c.id).map((a) => ({
-        id: a.id, openingId: a.openingId, openingTitle: openingById.get(a.openingId)?.title ?? 'Opening',
+        id: a.id, openingId: a.openingId, openingTitle: openingById.get(a.openingId)?.title ?? 'Category',
         stageId: a.stageId, stageName: stageById.get(a.stageId)?.name ?? '—', stageColor: stageById.get(a.stageId)?.color ?? null,
         stageKind: stageById.get(a.stageId)?.kind ?? 'active', status: a.status, stageChangedAt: a.stageChangedAt,
       })),
@@ -299,7 +299,7 @@ export class CandidatesService {
         const o = openingById.get(a.openingId);
         return {
           ...a,
-          openingTitle: o?.title ?? 'Opening', openingStatus: o?.status ?? null,
+          openingTitle: o?.title ?? 'Category', openingStatus: o?.status ?? null,
           stageName: stageById.get(a.stageId)?.name ?? '—', stageKind: stageById.get(a.stageId)?.kind ?? 'active', stageColor: stageById.get(a.stageId)?.color ?? null,
           ownerName: a.ownerId ? names.get(a.ownerId) ?? null : null,
           events: full ? events.filter((e) => e.applicationId === a.id).map((e) => ({
@@ -314,12 +314,12 @@ export class CandidatesService {
         const canSeeAll = full || !!mine;
         return {
           ...i,
-          openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Opening'),
+          openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Category'),
           interviewers: i.interviewerIds.map((uid) => ({ id: uid, name: names.get(uid) ?? 'Member', submitted: fb.some((f) => f.interviewerId === uid) })),
           feedback: (canSeeAll ? fb : []).map((f) => ({ ...f, overallRating: toNum(f.overallRating), interviewerName: names.get(f.interviewerId) ?? 'Member' })),
         };
       }),
-      offers: offers.map((o) => ({ ...o, offeredCtc: showCtc ? toNum(o.offeredCtc) : null, openingTitle: openingById.get(o.openingId)?.title ?? 'Opening' })),
+      offers: offers.map((o) => ({ ...o, offeredCtc: showCtc ? toNum(o.offeredCtc) : null, openingTitle: openingById.get(o.openingId)?.title ?? 'Category' })),
       activities,
       duplicates: full ? (await this.cv.findDuplicates(caller.orgId, { name: c.fullName, excludeId: c.id })) : [],
       submissions: full ? await this.submissions.list(caller, { candidateId: c.id }) : [],
@@ -489,7 +489,7 @@ export class CandidatesService {
       candidateId = res.id;
       created = true;
     }
-    await this.addDocument(caller, candidateId, { fileId: file.id, kind: 'resume', makePrimary: true }, { parsedJson: dto.parsedJson ?? null, skipPermission: created });
+    await this.addDocument(caller, candidateId, { fileId: file.id, kind: 'resume', makePrimary: true }, { skipPermission: created });
     if (dto.openingId) {
       const exists = await this.applications.findOne({ where: { organizationId: caller.orgId, candidateId, openingId: dto.openingId, isDeleted: false } });
       if (!exists) await this.pipeline.createApplication(caller, { candidateId, openingId: dto.openingId, stageId: dto.stageId });
@@ -574,7 +574,7 @@ export class CandidatesService {
     const errors: { id: string; error: string }[] = [];
 
     if (dto.action === 'add_to_opening') {
-      if (!dto.openingId) throw new BadRequestException('Choose an opening');
+      if (!dto.openingId) throw new BadRequestException('Choose a category');
       await this.pipeline.requireOpening(caller.orgId, dto.openingId);
       for (const c of rows) {
         try { await this.pipeline.createApplication(caller, { candidateId: c.id, openingId: dto.openingId }); done++; } catch (e) { errors.push({ id: c.id, error: (e as Error).message }); }
@@ -613,7 +613,7 @@ export class CandidatesService {
 
   async addDocument(
     caller: RecruitmentCaller, candidateId: string, dto: AddDocumentDto,
-    opts: { parsedJson?: Record<string, unknown> | null; skipPermission?: boolean } = {},
+    opts: { skipPermission?: boolean } = {},
   ) {
     if (!opts.skipPermission) assertCan(caller, 'edit');
     const c = await this.pipeline.requireCandidate(caller.orgId, candidateId);
@@ -624,22 +624,15 @@ export class CandidatesService {
 
     const siblings = await this.documents.find({ where: { organizationId: caller.orgId, candidateId, kind, isDeleted: false } });
     const makePrimary = kind === 'resume' && (dto.makePrimary !== false || !siblings.some((d) => d.isPrimary));
-    let extractedText: string | null = null;
-    let parseStatus: CandidateDocumentEntity['parseStatus'] = opts.parsedJson ? 'parsed' : 'pending';
-    if (kind === 'resume') {
-      const t = await this.cv.textOf(file);
-      extractedText = t.text || null;
-      if (!t.text) parseStatus = t.status === 'error' ? 'failed' : 'no_text';
-    }
     if (makePrimary) {
       for (const s of siblings.filter((d) => d.isPrimary)) { s.isPrimary = false; await this.documents.save(s); }
     }
     const doc = await this.documents.save(this.documents.create({
       organizationId: caller.orgId, candidateId, fileId: file.id, kind, fileName: file.originalName, mimeType: file.mimeType,
       size: file.size != null ? String(file.size) : null, isPrimary: makePrimary, version: siblings.length + 1,
-      extractedText, parseStatus, parsedJson: opts.parsedJson ?? null, createdBy: caller.userId, isDeleted: false,
+      // Stored as-is for viewing in the portal: nothing is read out of the file.
+      extractedText: null, parseStatus: 'pending', parsedJson: null, createdBy: caller.userId, isDeleted: false,
     }));
-    if (makePrimary) await this.candidates.update({ id: c.id }, { resumeText: extractedText });
     await this.pipeline.logActivity(caller.orgId, candidateId, 'document',
       `${kind === 'resume' ? (siblings.length ? `Uploaded CV v${siblings.length + 1}` : 'Uploaded CV') : `Uploaded ${kind.replace('_', ' ')}`}: ${file.originalName}`,
       { actorId: caller.userId, meta: { documentId: doc.id } });
@@ -686,6 +679,32 @@ export class CandidatesService {
     const c = await this.pipeline.requireCandidate(caller.orgId, candidateId);
     this.pipeline.audit(caller, 'recruitment.document_viewed', `Opened ${doc.fileName} for ${c.fullName}`, { type: 'candidate', id: candidateId }, { documentId: doc.id });
     return this.docView(doc);
+  }
+
+  /** The document's file for the in-portal viewer — same access rules as {@link accessDocument}, audited. */
+  async documentFile(caller: RecruitmentCaller, candidateId: string, docId: string) {
+    await this.accessDocument(caller, candidateId, docId);
+    const doc = await this.documents.findOneOrFail({ where: { id: docId, candidateId, organizationId: caller.orgId, isDeleted: false } });
+    const file = await this.cv.requireOrgFile(caller.orgId, doc.fileId);
+    return { file, bytes: await this.cv.bytes(file) };
+  }
+
+  /** Preview an uploaded file that isn't attached to a candidate yet (the Upload CVs review screen). */
+  async filePreview(caller: RecruitmentCaller, fileId: string) {
+    assertCan(caller, 'create');
+    const file = await this.cv.requireOrgFile(caller.orgId, fileId);
+    if (!isWordDocument(file)) return { kind: 'file' as const, html: null };
+    return { kind: 'html' as const, html: await this.cv.previewHtml(file) };
+  }
+
+  /** A Word CV rendered as HTML for the viewer (PDFs and images are shown directly). */
+  async documentPreview(caller: RecruitmentCaller, candidateId: string, docId: string) {
+    const level = await this.accessLevel(caller, candidateId);
+    const doc = await this.documents.findOne({ where: { id: docId, candidateId, organizationId: caller.orgId, isDeleted: false } });
+    if (!doc || (level === 'interviewer' && doc.kind !== 'resume')) throw new NotFoundException('Document not found');
+    const file = await this.cv.requireOrgFile(caller.orgId, doc.fileId);
+    if (!isWordDocument(file)) return { kind: 'file' as const, html: null };
+    return { kind: 'html' as const, html: await this.cv.previewHtml(file) };
   }
 
   // ── timeline ───────────────────────────────────────────────────────────────────

@@ -20,6 +20,9 @@ services:
       # Bind all interfaces INSIDE the container so the port mapping works; the
       # mapping below still only exposes it on the host's loopback.
       HOST: 0.0.0.0
+      # The commit this container is serving, reported by /api/v1/health so a
+      # deploy can prove the swap took (empty for a hand-rolled `up -d`).
+      APP_GIT_SHA: ${APP_GIT_SHA:-}
     ports:
       - "127.0.0.1:${PORT:-4100}:${PORT:-4100}"
     healthcheck:

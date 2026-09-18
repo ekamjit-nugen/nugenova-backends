@@ -72,7 +72,8 @@ defineFeature(feature, (test) => {
     let job: any;
     const u = uniq();
     given('an organization', async () => { org = await newOrg(); });
-    when(/^the owner starts importing "(.*)" with 3 valid rows, a repeated row, a total line, a row without contact details and a row with only an invalid email$/, async (file: string) => {
+    when(/^the owner starts importing "(.*)" with 12 valid rows, a repeated row, a total line, a row without contact details and a row with an invalid email$/, async (file: string) => {
+      const extra = Array.from({ length: 9 }, (_, i) => ({ sheet: 'Data', rowNumber: 9 + i, fullName: `Extra Person ${i}`, email: `extra${i}.${u}@example.com` }));
       res = await start(org, {
         fileName: file,
         rows: [
@@ -83,6 +84,7 @@ defineFeature(feature, (test) => {
           { sheet: 'Data', rowNumber: 6, fullName: 'Total candidates in this sheet: 4' },
           { sheet: 'Data', rowNumber: 7, fullName: 'Rohit Nair', experience: '5 years' },
           { sheet: 'Data', rowNumber: 8, fullName: 'Pooja Shah', email: 'not-an-email', resumeUrl: '..\\\\Resume_Library\\\\pooja.pdf' },
+          ...extra,
         ],
       });
     });
@@ -90,7 +92,7 @@ defineFeature(feature, (test) => {
       expect(res.status).toBe(202);
       job = res.body.data;
       expect(['queued', 'processing', 'completed']).toContain(job.status);
-      expect(job.totalRows).toBe(7);
+      expect(job.totalRows).toBe(16);
       expect(res.body.duplicate).toBe(false);
     });
     and(/^the import finishes with (\d+) new, (\d+) merged, (\d+) ignored and (\d+) errors out of (\d+) rows$/, async (n: string, m: string, s: string, e: string, total: string) => {
@@ -101,8 +103,8 @@ defineFeature(feature, (test) => {
       expect(job.counts.merged).toBe(Number(m));
       expect(job.counts.skipped).toBe(Number(s));
       expect(job.counts.errors).toBe(Number(e));
-      expect(job.counts.talentPool).toBe(3);
-      expect(await candidateCount(org)).toBe(3);
+      expect(job.counts.talentPool).toBe(12);
+      expect(await candidateCount(org)).toBe(12);
     });
     and(/^the import list shows "(.*)" at 100 percent$/, async (file: string) => {
       const list = (await api().get(`${API}/imports`).set(auth(org.ownerToken)).expect(200)).body.data;
@@ -116,9 +118,8 @@ defineFeature(feature, (test) => {
       expect(rows.total).toBe(3);
       const byRow = Object.fromEntries(rows.items.map((r: any) => [r.rowNumber, r.messages.join(' | ')]));
       expect(byRow[6]).toMatch(/sheet note/i);
-      expect(byRow[7]).toMatch(/no valid email, phone/i);
-      expect(byRow[8]).toMatch(/Invalid email/i);
-      expect(byRow[8]).toMatch(/not a web link/i);
+      expect(byRow[7]).toMatch(/no email, phone, CV link or LinkedIn/i);
+      expect(byRow[8]).toMatch(/not a valid email address/i);
     });
   });
 
@@ -245,6 +246,33 @@ defineFeature(feature, (test) => {
       await api().post(`${API}/imports/${jobId}/cancel`).set(auth(token)).expect(403);
       await api().post(`${API}/imports/${jobId}/retry`).set(auth(token)).expect(403);
       await waitDone(org, jobId);
+    });
+  });
+
+  test('a file full of wrong data is refused instead of half-imported', ({ given, when, then, and }) => {
+    let org: CreatedOrg;
+    let res: request.Response;
+    given('an organization', async () => { org = await newOrg(); });
+    when('the owner tries to import a file where most rows have a broken email or no contact details', async () => {
+      const u = uniq();
+      res = await start(org, {
+        rows: [
+          { sheet: 'S', rowNumber: 2, fullName: 'Good Person', email: `good.${u}@example.com` },
+          { sheet: 'S', rowNumber: 3, fullName: 'Broken Email', email: 'bad@@example' },
+          { sheet: 'S', rowNumber: 4, fullName: 'No Contact' },
+          { sheet: 'S', rowNumber: 5, fullName: 'Bad Link', resumeUrl: 'C:/resumes/x.pdf' },
+        ],
+      });
+    });
+    then('the import is rejected, naming the rows to fix', () => {
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/3 of 4 rows carry wrong or missing data/i);
+      expect(res.body.message).toMatch(/row 3: .*not a valid email address/i);
+      expect(res.body.message).toMatch(/Fix the file/i);
+    });
+    and('no candidates were created and no import was started', async () => {
+      expect(await candidateCount(org)).toBe(0);
+      expect((await api().get(`${API}/imports`).set(auth(org.ownerToken)).expect(200)).body.data).toHaveLength(0);
     });
   });
 

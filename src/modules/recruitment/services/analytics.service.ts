@@ -193,7 +193,7 @@ export class RecruitmentAnalyticsService {
       .sort((x, y) => y.idleDays - x.idleDays)
       .slice(0, 10)
       .map(({ a, c, idleDays }) => ({
-        applicationId: a.id, candidateId: c!.id, candidateName: c!.fullName, openingTitle: openingById.get(a.openingId)?.title ?? 'Opening',
+        applicationId: a.id, candidateId: c!.id, candidateName: c!.fullName, openingTitle: openingById.get(a.openingId)?.title ?? 'Category',
         stageName: stageById.get(a.stageId)?.name ?? '—', idleDays,
       }));
 
@@ -238,7 +238,7 @@ export class RecruitmentAnalyticsService {
       stale,
       upcomingInterviews: upcoming.slice(0, 10).map((i) => ({
         id: i.id, roundName: i.roundName, scheduledAt: i.scheduledAt, candidateId: i.candidateId,
-        candidateName: upcomingNames.get(i.candidateId) ?? 'Candidate', openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Opening'),
+        candidateName: upcomingNames.get(i.candidateId) ?? 'Candidate', openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Category'),
       })),
     };
   }

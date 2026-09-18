@@ -6,7 +6,7 @@ import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { CandidateEntity, CandidateOfferEntity, RecruitmentOpeningEntity } from '../entities';
 import { OfferStatus, RECRUITMENT_NOTIFICATIONS } from '../recruitment.constants';
 import { CreateOfferDto, OfferHandoffDto, OfferStatusDto, UpdateOfferDto } from '../dto';
-import { CvParseService } from './cv-parse.service';
+import { CandidateFilesService } from './candidate-files.service';
 import { PipelineService } from './pipeline.service';
 import { RecruitmentCaller, can, toNum } from './recruitment-caller';
 
@@ -35,7 +35,7 @@ export class OffersService {
     @InjectRepository(RecruitmentOpeningEntity) private readonly openings: Repository<RecruitmentOpeningEntity>,
     @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
     private readonly pipeline: PipelineService,
-    private readonly cv: CvParseService,
+    private readonly cv: CandidateFilesService,
   ) {}
 
   private view(o: CandidateOfferEntity, caller: RecruitmentCaller) {
@@ -65,7 +65,7 @@ export class OffersService {
       ...this.view(o, caller),
       candidateName: cById.get(o.candidateId)?.fullName ?? 'Candidate',
       candidateEmail: cById.get(o.candidateId)?.email ?? null,
-      openingTitle: oById.get(o.openingId)?.title ?? 'Opening',
+      openingTitle: oById.get(o.openingId)?.title ?? 'Category',
     }));
   }
 

@@ -228,7 +228,7 @@ export class PipelineService {
 
   async requireOpening(orgId: string, id: string): Promise<RecruitmentOpeningEntity> {
     const o = await this.openings.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
-    if (!o) throw new NotFoundException('Opening not found');
+    if (!o) throw new NotFoundException('Category not found');
     return o;
   }
 
@@ -359,7 +359,7 @@ export class PipelineService {
     app.isDeleted = true;
     await this.applications.save(app);
     const opening = await this.openings.findOne({ where: { id: app.openingId } });
-    await this.logActivity(caller.orgId, app.candidateId, 'system', `Removed from "${opening?.title ?? 'opening'}"`, { applicationId: app.id, actorId: caller.userId });
+    await this.logActivity(caller.orgId, app.candidateId, 'system', `Removed from "${opening?.title ?? 'category'}"`, { applicationId: app.id, actorId: caller.userId });
     return { success: true as const };
   }
 

@@ -81,27 +81,37 @@ defineFeature(feature, (test) => {
   const workspace = async (ctx: Ctx, token = ctx.org.ownerToken) =>
     (await api().get(`${API}/leads/${ctx.leadId}`).set(auth(token)).expect(200)).body.data;
 
-  test('the downloadable sample CVs parse', ({ given, when, then }) => {
+  test('the downloadable sample CVs can be viewed in the portal', ({ given, when, then, and }) => {
     let org: CreatedOrg;
-    const parsed: any[] = [];
+    let candidateId: string;
+    const docs: Record<string, string> = {};
     given('an organization', async () => { org = await newOrg(); });
-    when('the owner uploads the sample CV as PDF and as DOCX and parses them without AI', async () => {
+    when('the owner attaches the sample CV as PDF and as DOCX to a candidate', async () => {
+      candidateId = (await api().post(`${API}/candidates`).set(auth(org.ownerToken)).send({ fullName: 'Aarav Sharma' }).expect(201)).body.data.id;
       for (const [file, type] of [
         ['nugenova-sample-cv.pdf', 'application/pdf'],
         ['nugenova-sample-cv.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
       ]) {
         const up = await api().post('/api/v1/media/upload').set(auth(org.ownerToken))
           .attach('file', fs.readFileSync(path.join(FIXTURES, file)), { filename: file, contentType: type }).expect(201);
-        parsed.push((await api().post(`${API}/candidates/parse`).set(auth(org.ownerToken)).send({ fileId: up.body.data.id, skipAi: true }).expect(201)).body.data);
+        const doc = (await api().post(`${API}/candidates/${candidateId}/documents`).set(auth(org.ownerToken)).send({ fileId: up.body.data.id, kind: 'resume' }).expect(201)).body.data;
+        docs[file.split('.').pop()!] = doc.id;
       }
     });
-    then(/^both parses extract the sample email, phone and (\d+) months experience$/, (months: string) => {
-      for (const p of parsed) {
-        expect(p.parseStatus).not.toBe('no_text');
-        expect(p.extracted.email).toBe('aarav.sharma.sample@example.com');
-        expect(p.extracted.phone).toBe('+919876501234');
-        expect(p.extracted.totalExpMonths).toBe(Number(months));
-      }
+    then('the PDF opens inline as a PDF', async () => {
+      const res = await api().get(`${API}/candidates/${candidateId}/documents/${docs.pdf}/file`).set(auth(org.ownerToken)).expect(200);
+      expect(res.headers['content-type']).toMatch(/application\/pdf/);
+      expect(res.headers['content-disposition']).toMatch(/^inline/);
+      expect(Number(res.headers['content-length'])).toBe(fs.statSync(path.join(FIXTURES, 'nugenova-sample-cv.pdf')).size);
+      const preview = (await api().get(`${API}/candidates/${candidateId}/documents/${docs.pdf}/preview`).set(auth(org.ownerToken)).expect(200)).body.data;
+      expect(preview).toEqual({ kind: 'file', html: null });
+    });
+    and(/^the DOCX opens as a readable preview showing "(.*)"$/, async (name: string) => {
+      const preview = (await api().get(`${API}/candidates/${candidateId}/documents/${docs.docx}/preview`).set(auth(org.ownerToken)).expect(200)).body.data;
+      expect(preview.kind).toBe('html');
+      expect(preview.html).toContain(name);
+      const candidate = (await api().get(`${API}/candidates/${candidateId}`).set(auth(org.ownerToken)).expect(200)).body.data.candidate;
+      expect(candidate.email).toBeNull();
     });
   });
 

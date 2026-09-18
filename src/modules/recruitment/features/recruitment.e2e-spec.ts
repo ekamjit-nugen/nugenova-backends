@@ -228,6 +228,73 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('a cancelled round can be put back on the calendar', ({ given, and, when, then }) => {
+    let ctx: Awaited<ReturnType<typeof withCandidateInOpening>>;
+    let panellist: { userId: string; token: string };
+    let interview: any;
+    const ratings = () => Object.fromEntries(interview.criteria.map((c: string) => [c, 4]));
+    given(/^an organization with candidate "(.*)" in opening "(.*)"$/, async (name: string, title: string) => {
+      ctx = await withCandidateInOpening(name, title);
+    });
+    and(/^an interview "(.*)" that the owner cancelled$/, async (round: string) => {
+      panellist = await h.createEmployeeMember(ctx.org);
+      interview = (await api().post(`${API}/interviews`).set(auth(ctx.org.ownerToken)).send({
+        applicationId: ctx.applicationId, roundName: round, type: 'technical', scheduledAt: new Date(Date.now() - 3_600_000).toISOString(),
+        durationMin: 60, interviewerIds: [panellist.userId],
+      }).expect(201)).body.data;
+      await api().patch(`${API}/interviews/${interview.id}`).set(auth(ctx.org.ownerToken)).send({ status: 'cancelled' }).expect(200);
+    });
+    then('the panellist cannot submit a scorecard while it is cancelled', async () => {
+      await api().post(`${API}/interviews/${interview.id}/feedback`).set(auth(panellist.token))
+        .send({ ratings: ratings(), recommendation: 'yes' }).expect(400);
+    });
+    and('it is left out of feedback due', async () => {
+      const totals = (await api().get(`${API}/analytics`).set(auth(ctx.org.ownerToken)).expect(200)).body.data.totals;
+      expect(totals.pendingFeedback).toBe(0);
+      const rows = (await api().get(`${API}/interviews`).query({ scope: 'all', pendingFeedback: '1' }).set(auth(ctx.org.ownerToken)).expect(200)).body.data;
+      expect(rows).toEqual([]);
+    });
+    when('the owner reopens it at a new time', async () => {
+      await api().patch(`${API}/interviews/${interview.id}`).set(auth(ctx.org.ownerToken))
+        .send({ scheduledAt: new Date(Date.now() - 1_800_000).toISOString(), status: 'scheduled' }).expect(200);
+    });
+    then('the round is scheduled again and the panellist can submit their scorecard', async () => {
+      const again = (await api().get(`${API}/interviews/${interview.id}`).set(auth(ctx.org.ownerToken)).expect(200)).body.data;
+      expect(again.status).toBe('scheduled');
+      await api().post(`${API}/interviews/${interview.id}/feedback`).set(auth(panellist.token))
+        .send({ ratings: ratings(), recommendation: 'yes' }).expect(201);
+    });
+  });
+
+  test("the dashboard's feedback-due count is the list you land on", ({ given, and, when, then }) => {
+    let ctx: Awaited<ReturnType<typeof withCandidateInOpening>>;
+    let interview: any;
+    let totals: any;
+    given(/^an organization with candidate "(.*)" in opening "(.*)"$/, async (name: string, title: string) => {
+      ctx = await withCandidateInOpening(name, title);
+    });
+    and('a finished interview with two panellists and no scorecards yet', async () => {
+      const a = await h.createEmployeeMember(ctx.org);
+      const b = await h.createEmployeeMember(ctx.org);
+      interview = (await api().post(`${API}/interviews`).set(auth(ctx.org.ownerToken)).send({
+        applicationId: ctx.applicationId, roundName: 'Panel Round', type: 'technical', scheduledAt: new Date(Date.now() - 7_200_000).toISOString(),
+        durationMin: 45, interviewerIds: [a.userId, b.userId],
+      }).expect(201)).body.data;
+    });
+    when('the owner opens the dashboard', async () => {
+      totals = (await api().get(`${API}/analytics`).set(auth(ctx.org.ownerToken)).expect(200)).body.data.totals;
+    });
+    then(/^feedback due counts (\d+) interview$/, (n: string) => {
+      // Interviews, not interviewer slots — two panellists owe a scorecard, but it is one row to open.
+      expect(totals.pendingFeedback).toBe(Number(n));
+    });
+    and('opening the feedback-due list returns that same interview', async () => {
+      const rows = (await api().get(`${API}/interviews`).query({ scope: 'all', pendingFeedback: '1' }).set(auth(ctx.org.ownerToken)).expect(200)).body.data;
+      expect(rows).toHaveLength(totals.pendingFeedback);
+      expect(rows[0].id).toBe(interview.id);
+    });
+  });
+
   test('importing the legacy spreadsheet merges people across sheets', ({ given, when, then, and }) => {
     let org: CreatedOrg;
     const rows = [
@@ -280,45 +347,56 @@ defineFeature(feature, (test) => {
     });
   });
 
-  test('a CV upload is parsed and creates a searchable candidate', ({ given, when, then }) => {
+  test('a CV is uploaded with typed-in details and shown as stored', ({ given, when, then, and }) => {
     let org: CreatedOrg;
     let opening: any;
     let fileId: string;
-    let parsed: any;
     let candidateId: string;
+    const cvText = 'Sagar Yadav\nSenior Power BI Developer\nsagaryadav1108@gmail.com | +91 7509869971\n5+ years of experience building Kusto dashboards.';
     given(/^an organization with an opening "(.*)"$/, async (title: string) => {
       org = await newOrg();
       opening = await createOpening(org, title);
     });
-    when('the owner uploads a text CV and parses it without AI', async () => {
-      const cvText = 'Sagar Yadav\nSenior Power BI Developer\nsagaryadav1108@gmail.com | +91 7509869971\nlinkedin.com/in/sagar-yadav\n5+ years of experience building Kusto dashboards at Yash Technologies.';
+    when('the owner uploads a text CV', async () => {
       const up = await api().post('/api/v1/media/upload').set(auth(org.ownerToken))
         .attach('file', Buffer.from(cvText), { filename: 'Cutshort-SagarYadav-Power-BI-Developer.txt', contentType: 'text/plain' }).expect(201);
       fileId = up.body.data.id;
-      parsed = (await api().post(`${API}/candidates/parse`).set(auth(org.ownerToken)).send({ fileId, skipAi: true }).expect(201)).body.data;
     });
-    then('the parse extracts the email and phone', () => {
-      expect(parsed.extracted.email).toBe('sagaryadav1108@gmail.com');
-      expect(parsed.extracted.phone).toBe('+917509869971');
-      expect(parsed.extracted.totalExpMonths).toBe(60);
-      expect(parsed.source).toBe('cutshort');
-      expect(parsed.duplicates).toEqual([]);
+    then('the CV-reading endpoint no longer exists', async () => {
+      await api().post(`${API}/candidates/parse`).set(auth(org.ownerToken)).send({ fileId }).expect(404);
     });
     when('the owner saves the candidate from the CV into the opening', async () => {
       const res = await api().post(`${API}/candidates/from-cv`).set(auth(org.ownerToken))
-        .send({ fileId, openingId: opening.id, data: { ...parsed.extracted, fullName: 'Sagar Yadav', source: 'cutshort' } }).expect(201);
+        .send({ fileId, openingId: opening.id, data: { fullName: 'Sagar Yadav', phone: '7509869971' } }).expect(201);
       expect(res.body.data.created).toBe(true);
       candidateId = res.body.data.candidate.id;
     });
-    then('the candidate has a primary CV and is found by a word from the CV', async () => {
+    then('the candidate has the CV as primary, with only the typed-in details', async () => {
       const detail = (await api().get(`${API}/candidates/${candidateId}`).set(auth(org.ownerToken)).expect(200)).body.data;
       expect(detail.documents).toHaveLength(1);
       expect(detail.documents[0].isPrimary).toBe(true);
       expect(detail.applications[0].openingTitle).toBe('BI Developer');
-      const res = await api().get(`${API}/candidates`).query({ q: 'kusto' }).set(auth(org.ownerToken)).expect(200);
-      expect(res.body.data.items.map((i: any) => i.id)).toEqual([candidateId]);
+      expect(detail.candidate.source).toBe('cutshort');
+      // Nothing is read out of the file: the email in the CV was not filled in.
+      expect(detail.candidate.email).toBeNull();
+      expect(detail.candidate.phone).toBe('+917509869971');
+      expect(detail.candidate).not.toHaveProperty('aiSummary');
       await api().post(`${API}/candidates/from-cv`).set(auth(org.ownerToken))
-        .send({ fileId, data: { fullName: 'Sagar Y', email: 'sagaryadav1108@gmail.com' } }).expect(409);
+        .send({ fileId, data: { fullName: 'Sagar Y', phone: '7509869971' } }).expect(409);
+    });
+    and('the CV can be opened in the portal exactly as uploaded', async () => {
+      const detail = (await api().get(`${API}/candidates/${candidateId}`).set(auth(org.ownerToken)).expect(200)).body.data;
+      const doc = detail.documents[0];
+      const file = await api().get(`${API}/candidates/${candidateId}/documents/${doc.id}/file`).set(auth(org.ownerToken)).buffer(true).parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      }).expect(200);
+      expect(file.headers['content-type']).toMatch(/text\/plain/);
+      expect(file.headers['content-disposition']).toMatch(/^inline/);
+      expect((file.body as Buffer).toString()).toBe(cvText);
+      const preview = (await api().get(`${API}/candidates/${candidateId}/documents/${doc.id}/preview`).set(auth(org.ownerToken)).expect(200)).body.data;
+      expect(preview.kind).toBe('file');
     });
   });
 

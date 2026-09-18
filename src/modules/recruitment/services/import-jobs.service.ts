@@ -8,6 +8,7 @@ import { DataSource, In, Repository } from 'typeorm';
 
 import { newObjectId } from '../../../bootstrap/database/object-id';
 import { CreateImportJobDto, ImportRowDto } from '../dto';
+import { CandidateSource } from '../recruitment.constants';
 import { RecruitmentImportJobEntity, RecruitmentImportRowEntity } from '../entities';
 import type { ImportJobStatus, ImportRowStatus } from '../entities';
 import { RECRUITMENT_NOTIFICATIONS } from '../recruitment.constants';
@@ -25,8 +26,16 @@ const MAX_JOB_ATTEMPTS = 5;
 const MAX_ROW_ATTEMPTS = 3;
 const POLL_MS = Number(process.env.RECRUITMENT_IMPORT_POLL_MS || 5000);
 const INSERT_CHUNK = 500;
+/** A file with at least this share of unusable rows is refused outright — it is the wrong file or badly mapped. */
+const BAD_FILE_RATIO = 0.25;
 
 type RowFilter = 'issues' | 'error' | 'skipped' | 'flagged' | 'all';
+
+/** The first few row problems, e.g. 'row 4: … is not a valid email address'. */
+function describeIssues(issues: { row: ImportRowDto; issue: string }[]): string {
+  const shown = issues.slice(0, 3).map((x) => `row ${x.row.rowNumber ?? '?'}: ${x.issue.replace(/^Ignored — /, '')}`);
+  return shown.join('; ') + (issues.length > shown.length ? ` (+${issues.length - shown.length} more)` : '');
+}
 
 /** TypeORM returns `[rows, affected]` for UPDATE … RETURNING on Postgres, and plain rows for SELECT. */
 function returningRows<T>(out: unknown): T[] {
@@ -92,8 +101,19 @@ export class ImportJobsService implements OnModuleInit, OnModuleDestroy {
       const existing = await this.jobs.findOne({ where: { organizationId: caller.orgId, idempotencyKey: key } });
       if (existing) return { job: await this.view(existing), duplicate: true };
     }
-    const named = dto.rows.filter((r) => typeof r.fullName === 'string' && r.fullName.trim());
-    if (!named.length) throw new BadRequestException('None of the rows has a candidate name — map the name column and try again');
+    // Pre-flight: never import a file whose rows carry wrong data.
+    const issues = dto.rows.map((r) => ({ row: r, issue: this.importer.rowIssue(r, (dto.defaultSource ?? 'import') as CandidateSource) }))
+      .filter((x): x is { row: ImportRowDto; issue: string } => !!x.issue);
+    const usable = dto.rows.length - issues.length;
+    if (!usable) {
+      throw new BadRequestException(`Nothing in this file can be imported — ${describeIssues(issues)}. Fix the file and preview it again.`);
+    }
+    if (issues.length / dto.rows.length >= BAD_FILE_RATIO) {
+      throw new BadRequestException(
+        `${issues.length} of ${dto.rows.length} rows carry wrong or missing data, so the file was not imported — ${describeIssues(issues)}. `
+        + 'Fix the file (or map the right columns) and preview it again.',
+      );
+    }
 
     const jobId = newObjectId();
     try {
