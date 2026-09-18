@@ -178,6 +178,72 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('a supplied contractor can be made a secondary member of the org', ({ given, and, when, then, but }) => {
+    let org2: CreatedOrg;
+    let vendorId2: string;
+    let personId: string;
+
+    given('an organization with a vendor "Acme Contractors"', async () => {
+      org2 = await newOrg();
+      vendorId2 = (await createVendor(org2, 'Acme Contractors').expect(201)).body.data.id;
+    });
+    and('the contractor "Amit Sharma" with an email, supplied by that vendor', async () => {
+      personId = (await as(org2.ownerToken)
+        .post(`/vendors/${vendorId2}/employees`, { name: 'Amit Sharma', email: randomEmail('contractor') })
+        .expect(201)).body.data.id;
+    });
+    when('the owner makes them a secondary member', async () => {
+      const res = await as(org2.ownerToken).post(`/vendors/${vendorId2}/employees/${personId}/promote`).expect(201);
+      expect(res.body.data.suppliedBy).toMatchObject({ vendorId: vendorId2, companyName: 'Acme Contractors' });
+      h.trackUser(res.body.data.userId);
+    });
+    then('they appear in the directory badged as supplied by "Acme Contractors"', async () => {
+      const dir = await as(org2.ownerToken).get('/org/members?includeSecondary=true').expect(200);
+      const them = dir.body.data.find((m: { email: string | null }) => m.email?.startsWith('contractor+'));
+      expect(them).toMatchObject({ personType: 'vendor' });
+      expect(them.suppliedBy).toMatchObject({ companyName: 'Acme Contractors' });
+    });
+    but('the staff directory does not include them', async () => {
+      // staffScope is what keeps them out of payroll, the roster and seat counts.
+      const staff = await as(org2.ownerToken).get('/org/members').expect(200);
+      expect(staff.body.data.some((m: { email: string | null }) => m.email?.startsWith('contractor+'))).toBe(false);
+    });
+    when('the owner takes them back out', async () => {
+      await as(org2.ownerToken).del(`/vendors/${vendorId2}/employees/${personId}/promote`).expect(200);
+    });
+    then('they are gone from the directory again', async () => {
+      const dir = await as(org2.ownerToken).get('/org/members?includeSecondary=true').expect(200);
+      const them = dir.body.data.find((m: { email: string | null }) => m.email?.startsWith('contractor+'));
+      expect(them?.status ?? 'inactive').toBe('inactive');
+    });
+    and('their record at the vendor is still there', async () => {
+      const people = await as(org2.ownerToken).get(`/vendors/${vendorId2}/employees`).expect(200);
+      expect(people.body.data.map((p: { name: string }) => p.name)).toContain('Amit Sharma');
+    });
+  });
+
+  test('someone with no email cannot be a secondary member', ({ given, and, when, then }) => {
+    let org3: CreatedOrg;
+    let vendorId3: string;
+    let personId: string;
+    let res: request.Response;
+
+    given('an organization with a vendor "Acme Contractors"', async () => {
+      org3 = await newOrg();
+      vendorId3 = (await createVendor(org3, 'Acme Contractors').expect(201)).body.data.id;
+    });
+    and('the contractor "Amit Sharma" already supplied by that vendor', async () => {
+      personId = (await as(org3.ownerToken).post(`/vendors/${vendorId3}/employees`, { name: 'Amit Sharma' }).expect(201)).body.data.id;
+    });
+    when('the owner makes them a secondary member', async () => {
+      res = await as(org3.ownerToken).post(`/vendors/${vendorId3}/employees/${personId}/promote`);
+    });
+    then('the request is rejected, asking for an email', () => {
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(/email/i);
+    });
+  });
+
   test('the same contractor cannot be added twice to one vendor', ({ given, and, when, then }) => {
     let org: CreatedOrg;
     let vendorId: string;

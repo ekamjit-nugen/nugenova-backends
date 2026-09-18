@@ -218,6 +218,18 @@ export class VendorsController {
     return { success: true, data: await this.vendors.addEmployee(this.allowed(req, 'create').orgId, id, dto) };
   }
 
+  /** Make a supplied person a secondary member of the org. */
+  @Post(':id/employees/:employeeId/promote')
+  async promoteEmployee(@Req() req: any, @Param('id') id: string, @Param('employeeId') employeeId: string) {
+    return { success: true, data: await this.vendors.promoteEmployee(this.allowed(req, 'edit'), id, employeeId) };
+  }
+
+  /** Take them back out of the org; their record at the vendor stays. */
+  @Delete(':id/employees/:employeeId/promote')
+  async demoteEmployee(@Req() req: any, @Param('id') id: string, @Param('employeeId') employeeId: string) {
+    return { success: true, data: await this.vendors.demoteEmployee(this.allowed(req, 'edit').orgId, id, employeeId) };
+  }
+
   @Patch(':id/employees/:employeeId')
   async updateEmployee(@Req() req: any, @Param('id') id: string, @Param('employeeId') employeeId: string, @Body() dto: UpdateVendorEmployeeDto) {
     return { success: true, data: await this.vendors.updateEmployee(this.allowed(req, 'edit').orgId, id, employeeId, dto) };

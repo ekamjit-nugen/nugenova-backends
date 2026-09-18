@@ -283,6 +283,27 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('a supplied contractor cannot use the vendor portal', ({ given, and, when, then }) => {
+    let contractorToken: string;
+
+    given('an organization with a vendor "Acme Contractors" and a portal user', givenVendorWithPortalUser);
+    and('a contractor supplied by that vendor, made a secondary member', async () => {
+      const email = randomEmail('contractor');
+      const person = await as(org.ownerToken).post(`/vendors/${vendorId}/employees`, { name: 'Amit Sharma', email }).expect(201);
+      const promoted = await as(org.ownerToken).post(`/vendors/${vendorId}/employees/${person.body.data.id}/promote`).expect(201);
+      h.trackUser(promoted.body.data.userId);
+      contractorToken = await h.mintToken(email);
+    });
+    when('that contractor tries to open the vendor portal', async () => {
+      res = await as(contractorToken).get('/vendor-portal/me');
+    });
+    then('the portal is closed to them', () => {
+      // The portal is the vendor's own office — a contractor we host would see
+      // the vendor's bills and agreements there.
+      expect(res.status).toBe(403);
+    });
+  });
+
   test('a portal user holds no staff access', ({ given, when, then, and }) => {
     given('an organization with a vendor "Acme Contractors" and a portal user', givenVendorWithPortalUser);
     when('the portal user tries to read the vendor list', async () => {

@@ -349,10 +349,17 @@ export class VendorPortalService {
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
-  /** The vendorId a portal user belongs to (from their vendor-role membership). */
+  /**
+   * The vendorId a portal user belongs to (from their vendor-role membership).
+   *
+   * A membership carrying `vendorEmployeeId` is a contractor the vendor supplies
+   * — a secondary member of OUR org, not the vendor's office. They must never
+   * reach the portal, where they would see the vendor's bills and agreements.
+   */
   async vendorIdForUser(orgId: string, userId: string): Promise<string | null> {
     const m = await this.memberships.findOne({ where: { organizationId: orgId, userId, role: 'vendor', status: 'active' } });
-    return m?.vendorId ?? null;
+    if (!m || m.vendorEmployeeId) return null;
+    return m.vendorId ?? null;
   }
 
   /** The caller's own vendor, or 403. Every portal read starts here. */

@@ -59,6 +59,13 @@ Feature: Vendor portal — the vendor's own view of us
     And the rate stays ours to set
 
   @security
+  Scenario: a supplied contractor cannot use the vendor portal
+    Given an organization with a vendor "Acme Contractors" and a portal user
+    And a contractor supplied by that vendor, made a secondary member
+    When that contractor tries to open the vendor portal
+    Then the portal is closed to them
+
+  @security
   Scenario: a portal user holds no staff access
     Given an organization with a vendor "Acme Contractors" and a portal user
     When the portal user tries to read the vendor list

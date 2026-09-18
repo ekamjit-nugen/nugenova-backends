@@ -10,6 +10,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -173,10 +174,14 @@ export class OrgSetupController {
     return { success: true, data };
   }
 
+  /**
+   * The org directory. `?includeSecondary=true` also returns the contractors
+   * vendors supply — people who work here without being employed here.
+   */
   @Get('members')
   @RequirePermission('employees', 'view')
-  async listMembers(@Req() req: any) {
-    const data = await this.members.list(this.orgId(req));
+  async listMembers(@Req() req: any, @Query('includeSecondary') includeSecondary?: string) {
+    const data = await this.members.list(this.orgId(req), { includeSecondary: includeSecondary === 'true' });
     return { success: true, data };
   }
 

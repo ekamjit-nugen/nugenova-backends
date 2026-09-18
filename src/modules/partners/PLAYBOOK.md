@@ -81,17 +81,38 @@ reads — the partner list counts contacts through it without caring which side 
 company is on. When the services move to the shared name, the two columns
 collapse into that one.
 
+## Secondary members
+
+A contractor a vendor supplies can be brought into the org:
+`POST /vendors/:id/employees/:employeeId/promote` creates a membership with
+`personType = 'vendor'`, `vendorId` and `vendorEmployeeId`. They then appear in
+the Directory (`GET /org/members?includeSecondary=true`) badged "Supplied by
+<vendor>", so everyone can see who is working here.
+
+`personType` is what makes this safe: payroll, the attendance roster, seat
+counts, leave and the notifier all run through `staffScope()`, which is
+`personType = 'staff'` — so a secondary member is invisible to every one of them
+by construction rather than by remembering to filter. The plain
+`GET /org/members` is unchanged and still staff-only.
+
+Two rules worth keeping:
+
+- **An email is required.** A membership hangs off a user record; without one
+  there is nobody to be a member.
+- **A contractor is not a portal user.** `vendorIdForUser` refuses a membership
+  carrying `vendorEmployeeId`: the vendor portal is the vendor's own office, and
+  a contractor we host would otherwise see their bills and agreements. Tested.
+
+`DELETE` on the same path takes them back out — the membership goes inactive and
+their record at the vendor is untouched.
+
 ## Still to come
 
 1. Documents, agreements and the portal move onto partner ids in name as well as
    value.
-2. One Partners UI: a list with a category filter, and a detail page rendering
-   the shared tabs plus the category-specific ones.
-4. **Secondary members** — promoting a vendor's supplied person into the org as a
-   membership with `personType = 'vendor'`, shown in the Directory with a
-   "Supplied by <vendor>" badge and a filter, and kept out of payroll, the
-   attendance roster, seat counts and leave by `staffScope()`.
-5. Retire `/clients` and `/vendors` once the UI is on partners, and drop the
+2. A partner detail page rendering the shared tabs plus the category-specific
+   ones, replacing the two detail pages.
+3. Retire `/clients` and `/vendors` once the UI is on partners, and drop the
    `_premerge` tables.
 
 ## Tests

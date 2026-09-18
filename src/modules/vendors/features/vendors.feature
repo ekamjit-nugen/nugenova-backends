@@ -33,6 +33,22 @@ Feature: Vendors — supplier companies and the people they supply
     Then the vendor's people list includes "Amit Sharma" with rate 8000 per "day"
     And the contractor is not a member of the organization
 
+  Scenario: a supplied contractor can be made a secondary member of the org
+    Given an organization with a vendor "Acme Contractors"
+    And the contractor "Amit Sharma" with an email, supplied by that vendor
+    When the owner makes them a secondary member
+    Then they appear in the directory badged as supplied by "Acme Contractors"
+    But the staff directory does not include them
+    When the owner takes them back out
+    Then they are gone from the directory again
+    And their record at the vendor is still there
+
+  Scenario: someone with no email cannot be a secondary member
+    Given an organization with a vendor "Acme Contractors"
+    And the contractor "Amit Sharma" already supplied by that vendor
+    When the owner makes them a secondary member
+    Then the request is rejected, asking for an email
+
   Scenario: the same contractor cannot be added twice to one vendor
     Given an organization with a vendor "Acme Contractors"
     And the contractor "Amit Sharma" already supplied by that vendor
