@@ -85,7 +85,7 @@ collapse into that one.
 
 1. Documents, agreements and the portal move onto partner ids in name as well as
    value.
-3. One Partners UI: a list with a category filter, and a detail page rendering
+2. One Partners UI: a list with a category filter, and a detail page rendering
    the shared tabs plus the category-specific ones.
 4. **Secondary members** — promoting a vendor's supplied person into the org as a
    membership with `personType = 'vendor'`, shown in the Directory with a
@@ -96,10 +96,11 @@ collapse into that one.
 
 ## Tests
 
-`features/partners.feature` — 7 scenarios: adding either side, the category
+`features/partners.feature` — 8 scenarios: adding either side, the category
 filter, the category being fixed for life, the same name allowed on both sides
-but not twice on one, one `sector` field covering both wordings, a role granted
+but not twice on one, one `sector` field covering both wordings, contacts counted
+from the merged table and still invisible across the two sides, a role granted
 one side seeing only that side, and cross-org isolation.
 
 The existing client and vendor suites (75 scenarios) pass unchanged against the
-merged table — that is the check that matters for this phase.
+merged tables — that is the check that matters for these phases.
