@@ -236,7 +236,7 @@ export class CandidatesService {
       ownerName: c.ownerId ? names.get(c.ownerId) ?? null : null,
       primaryResume: docByCandidate.has(c.id) ? this.docView(docByCandidate.get(c.id)!) : null,
       applications: apps.filter((a) => a.candidateId === c.id).map((a) => ({
-        id: a.id, openingId: a.openingId, openingTitle: openingById.get(a.openingId)?.title ?? 'Opening',
+        id: a.id, openingId: a.openingId, openingTitle: openingById.get(a.openingId)?.title ?? 'Category',
         stageId: a.stageId, stageName: stageById.get(a.stageId)?.name ?? '—', stageColor: stageById.get(a.stageId)?.color ?? null,
         stageKind: stageById.get(a.stageId)?.kind ?? 'active', status: a.status, stageChangedAt: a.stageChangedAt,
       })),
@@ -299,7 +299,7 @@ export class CandidatesService {
         const o = openingById.get(a.openingId);
         return {
           ...a,
-          openingTitle: o?.title ?? 'Opening', openingStatus: o?.status ?? null,
+          openingTitle: o?.title ?? 'Category', openingStatus: o?.status ?? null,
           stageName: stageById.get(a.stageId)?.name ?? '—', stageKind: stageById.get(a.stageId)?.kind ?? 'active', stageColor: stageById.get(a.stageId)?.color ?? null,
           ownerName: a.ownerId ? names.get(a.ownerId) ?? null : null,
           events: full ? events.filter((e) => e.applicationId === a.id).map((e) => ({
@@ -314,12 +314,12 @@ export class CandidatesService {
         const canSeeAll = full || !!mine;
         return {
           ...i,
-          openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Opening'),
+          openingTitle: (i.openingId && openingById.get(i.openingId)?.title) || (i.kind === 'client' ? 'Client round' : 'Category'),
           interviewers: i.interviewerIds.map((uid) => ({ id: uid, name: names.get(uid) ?? 'Member', submitted: fb.some((f) => f.interviewerId === uid) })),
           feedback: (canSeeAll ? fb : []).map((f) => ({ ...f, overallRating: toNum(f.overallRating), interviewerName: names.get(f.interviewerId) ?? 'Member' })),
         };
       }),
-      offers: offers.map((o) => ({ ...o, offeredCtc: showCtc ? toNum(o.offeredCtc) : null, openingTitle: openingById.get(o.openingId)?.title ?? 'Opening' })),
+      offers: offers.map((o) => ({ ...o, offeredCtc: showCtc ? toNum(o.offeredCtc) : null, openingTitle: openingById.get(o.openingId)?.title ?? 'Category' })),
       activities,
       duplicates: full ? (await this.cv.findDuplicates(caller.orgId, { name: c.fullName, excludeId: c.id })) : [],
       submissions: full ? await this.submissions.list(caller, { candidateId: c.id }) : [],
@@ -574,7 +574,7 @@ export class CandidatesService {
     const errors: { id: string; error: string }[] = [];
 
     if (dto.action === 'add_to_opening') {
-      if (!dto.openingId) throw new BadRequestException('Choose an opening');
+      if (!dto.openingId) throw new BadRequestException('Choose a category');
       await this.pipeline.requireOpening(caller.orgId, dto.openingId);
       for (const c of rows) {
         try { await this.pipeline.createApplication(caller, { candidateId: c.id, openingId: dto.openingId }); done++; } catch (e) { errors.push({ id: c.id, error: (e as Error).message }); }

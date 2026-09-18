@@ -90,7 +90,7 @@ export class OpeningsService {
         const clash = await this.openings.createQueryBuilder('o')
           .where('o.organization_id = :orgId AND o.is_deleted = false AND lower(o.code) = lower(:code)', { orgId: caller.orgId, code })
           .andWhere(o.id ? 'o.id <> :id' : '1=1', { id: o.id }).getCount();
-        if (clash) throw new ConflictException(`Another opening already uses the code "${code}"`);
+        if (clash) throw new ConflictException(`Another category already uses the code "${code}"`);
       }
       o.code = code;
     }
@@ -128,7 +128,7 @@ export class OpeningsService {
     await this.applyFields(caller, o, dto);
     if (o.status === 'draft') o.openedAt = null;
     const saved = await this.openings.save(o);
-    this.pipeline.audit(caller, 'recruitment.opening_created', `Created opening "${saved.title}"`, { type: 'opening', id: saved.id });
+    this.pipeline.audit(caller, 'recruitment.opening_created', `Created category "${saved.title}"`, { type: 'opening', id: saved.id });
     return this.view(saved, caller);
   }
 
@@ -160,7 +160,7 @@ export class OpeningsService {
       }));
       return { id: saved.id, title: saved.title, created: true };
     });
-    if (result.created) this.pipeline.audit(caller, 'recruitment.opening_created', `Created opening "${result.title}" from an import`, { type: 'opening', id: result.id });
+    if (result.created) this.pipeline.audit(caller, 'recruitment.opening_created', `Created category "${result.title}" from an import`, { type: 'opening', id: result.id });
     return result;
   }
 
@@ -174,11 +174,11 @@ export class OpeningsService {
   async remove(caller: RecruitmentCaller, id: string) {
     const o = await this.pipeline.requireOpening(caller.orgId, id);
     const active = await this.applications.count({ where: { organizationId: caller.orgId, openingId: id, status: 'active', isDeleted: false } });
-    if (active) throw new BadRequestException(`This opening has ${active} active candidate(s). Close it instead, or move them out first.`);
+    if (active) throw new BadRequestException(`This category has ${active} active candidate(s). Close it instead, or move them out first.`);
     o.isDeleted = true;
     await this.openings.save(o);
     await this.applications.update({ organizationId: caller.orgId, openingId: id, isDeleted: false }, { isDeleted: true });
-    this.pipeline.audit(caller, 'recruitment.opening_deleted', `Deleted opening "${o.title}"`, { type: 'opening', id });
+    this.pipeline.audit(caller, 'recruitment.opening_deleted', `Deleted category "${o.title}"`, { type: 'opening', id });
     return { success: true as const };
   }
 
@@ -239,7 +239,7 @@ export class OpeningsService {
   /** Lookup used by other services. */
   async requireOpening(orgId: string, id: string) {
     const o = await this.openings.findOne({ where: { id, organizationId: orgId, isDeleted: false } });
-    if (!o) throw new NotFoundException('Opening not found');
+    if (!o) throw new NotFoundException('Category not found');
     return o;
   }
 }

@@ -65,7 +65,7 @@ export class OffersService {
       ...this.view(o, caller),
       candidateName: cById.get(o.candidateId)?.fullName ?? 'Candidate',
       candidateEmail: cById.get(o.candidateId)?.email ?? null,
-      openingTitle: oById.get(o.openingId)?.title ?? 'Opening',
+      openingTitle: oById.get(o.openingId)?.title ?? 'Category',
     }));
   }
 

@@ -96,7 +96,7 @@ export class InterviewsService {
         const lead = lById.get(sById.get(r.submissionId)?.leadId ?? '');
         out.set(r.id, { title: `Client: ${lead ? lead.company || lead.name : 'lead'}`, leadId: lead?.id ?? null });
       } else {
-        out.set(r.id, { title: (r.openingId && oById.get(r.openingId)?.title) || 'Opening', leadId: null });
+        out.set(r.id, { title: (r.openingId && oById.get(r.openingId)?.title) || 'Category', leadId: null });
       }
     }
     return out;
@@ -131,7 +131,7 @@ export class InterviewsService {
         ...i,
         endsAt: this.endOf(i),
         candidate: c ? { id: c.id, fullName: c.fullName, currentDesignation: c.currentDesignation, currentCompany: c.currentCompany, totalExpMonths: c.totalExpMonths } : null,
-        openingTitle: labels.get(i.id)?.title ?? 'Opening',
+        openingTitle: labels.get(i.id)?.title ?? 'Category',
         leadId: labels.get(i.id)?.leadId ?? null,
         interviewers: i.interviewerIds.map((uid) => ({ id: uid, name: names.get(uid) ?? 'Member', submitted: mine.some((f) => f.interviewerId === uid) })),
         feedbackCount: mine.length,
@@ -169,7 +169,7 @@ export class InterviewsService {
   // ── write ──────────────────────────────────────────────────────────────────────
 
   async create(caller: RecruitmentCaller, dto: CreateInterviewDto) {
-    if (!dto.applicationId === !dto.submissionId) throw new BadRequestException('Choose either an opening application or a client submission');
+    if (!dto.applicationId === !dto.submissionId) throw new BadRequestException('Choose either a category application or a client submission');
     const app = dto.applicationId ? await this.pipeline.requireApplication(caller.orgId, dto.applicationId) : null;
     const sub = dto.submissionId ? await this.submissionsService.requireSubmission(caller.orgId, dto.submissionId) : null;
     if (sub && ['onboarded', 'client_rejected', 'withdrawn'].includes(sub.status)) {
