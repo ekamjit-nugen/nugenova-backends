@@ -1,0 +1,96 @@
+# Partners
+
+The companies an org works with, on either side of the delivery relationship:
+
+- **client** — we supply people *to* them;
+- **vendor** — they supply people *to* us.
+
+Everything else the two need is the same — profile, contacts, portal access,
+documents, agreements — so they are one table with a `category`, not two tables
+that drift apart. The category is chosen when the partner is added and never
+changes: it decides which way people flow, and the children are built on it.
+
+## How the merge works
+
+`partners` is a single table with TypeORM **single-table inheritance**:
+
+```
+PartnerEntity        @Entity('partners') + @TableInheritance('category')
+  ClientEntity       @ChildEntity('client')   — adds `industry`
+  VendorEntity       @ChildEntity('vendor')   — adds serviceCategory, taxId,
+                                                currency, onboardingStatus,
+                                                onboardedAt, timeTrackingEnabled,
+                                                billingAddress
+```
+
+That is what made the merge cheap: a child repository adds `category = '…'` to
+every query on its own, so `ClientsService` and `VendorsService` kept working
+unchanged — a client repository can never return a vendor, and vice versa. Reads
+across both go through the base `PartnerEntity` repository.
+
+**Writes must go through a child repository** — that is what sets the
+discriminator. `PartnersService.repoFor(category)` does this; saving a new row
+through the base repository would leave `category` null.
+
+The migration (`1788590000000-Partners`) copies `clients` and `vendors` into
+`partners` keeping their ids, so every child row — documents, agreements, bills,
+tickets, board shares, assignments, contacts — still resolves untouched. It
+refuses to run if an id exists in both tables, and renames the old tables to
+`clients_premerge` / `vendors_premerge` rather than dropping them, so there is a
+way back while the merged code settles.
+
+## Routes
+
+```
+GET   /partners                 both sides (?category=client|vendor, status, q, tag)
+GET   /partners/stats           totals: clients, vendors, active, portals open
+GET   /partners/:id
+POST  /partners                 category chosen here, once
+PATCH /partners/:id             the shared profile fields
+```
+
+`/clients/*` and `/vendors/*` are unchanged and still the place for what differs:
+bills and supplied people on a vendor; tickets, shared boards and the delivery
+team on a client.
+
+## Permissions
+
+There is no `partners` resource. A client row needs `clients:<action>`, a vendor
+row needs `vendors:<action>` — so an existing role keeps exactly the access it
+had. Listing needs either, and a role granted only one side sees only that side
+(tested). It also means the two sides can stay on separate permissions for orgs
+that want that.
+
+## Shared vs category-specific
+
+| | Client | Vendor |
+|---|---|---|
+| Profile, contacts, portal, documents, agreements | shared | shared |
+| Direction of people | delivery team we assign (`client_assignments`) | contractors they supply (`vendor_employees`) |
+| Extras | tickets, shared boards | bills, onboarding clearance |
+| Sector wording | `industry` | `serviceCategory` — both read as `sector` in the partner view |
+
+## Still to come
+
+1. Contacts merge into one `partner_contacts` table (they are two today, keyed by
+   `clientId` / `vendorId` on the same ids).
+2. Documents, agreements and the portal move onto partner ids in name as well as
+   value.
+3. One Partners UI: a list with a category filter, and a detail page rendering
+   the shared tabs plus the category-specific ones.
+4. **Secondary members** — promoting a vendor's supplied person into the org as a
+   membership with `personType = 'vendor'`, shown in the Directory with a
+   "Supplied by <vendor>" badge and a filter, and kept out of payroll, the
+   attendance roster, seat counts and leave by `staffScope()`.
+5. Retire `/clients` and `/vendors` once the UI is on partners, and drop the
+   `_premerge` tables.
+
+## Tests
+
+`features/partners.feature` — 7 scenarios: adding either side, the category
+filter, the category being fixed for life, the same name allowed on both sides
+but not twice on one, one `sector` field covering both wordings, a role granted
+one side seeing only that side, and cross-org isolation.
+
+The existing client and vendor suites (75 scenarios) pass unchanged against the
+merged table — that is the check that matters for this phase.

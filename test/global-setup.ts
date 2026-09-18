@@ -79,6 +79,7 @@ import { VendorBills1788550000000 } from '../src/bootstrap/database/migrations/1
 import { DocumentSignatures1788560000000 } from '../src/bootstrap/database/migrations/1788560000000-DocumentSignatures';
 import { VendorAgreementWaivers1788570000000 } from '../src/bootstrap/database/migrations/1788570000000-VendorAgreementWaivers';
 import { PortalAccessSwitch1788580000000 } from '../src/bootstrap/database/migrations/1788580000000-PortalAccessSwitch';
+import { Partners1788590000000 } from '../src/bootstrap/database/migrations/1788590000000-Partners';
 import { ClientAgreements1788310000000 } from '../src/bootstrap/database/migrations/1788310000000-ClientAgreements';
 import { ClientAgreementFields1788320000000 } from '../src/bootstrap/database/migrations/1788320000000-ClientAgreementFields';
 import { ClientDocuments1788330000000 } from '../src/bootstrap/database/migrations/1788330000000-ClientDocuments';
@@ -107,6 +108,7 @@ import { DiscussionBoardEntity } from '../src/modules/discussion-boards/entities
 import { BoardNoteEntity } from '../src/modules/discussion-boards/entities/board-note.entity';
 import { BoardNodeEntity } from '../src/modules/discussion-boards/entities/board-node.entity';
 import { BoardCommentEntity } from '../src/modules/discussion-boards/entities/board-comment.entity';
+import { PartnerEntity } from '../src/modules/partners/entities/partner.entity';
 import { ClientEntity } from '../src/modules/clients/entities/client.entity';
 import { VendorEntity } from '../src/modules/vendors/entities/vendor.entity';
 import { VendorContactEntity } from '../src/modules/vendors/entities/vendor-contact.entity';
@@ -269,6 +271,7 @@ module.exports = async function globalSetup(): Promise<void> {
       BoardNoteEntity,
       BoardNodeEntity,
       BoardCommentEntity,
+      PartnerEntity,
       ClientEntity,
       VendorEntity,
       VendorContactEntity,
@@ -361,6 +364,7 @@ module.exports = async function globalSetup(): Promise<void> {
       DocumentSignatures1788560000000,
       VendorAgreementWaivers1788570000000,
       PortalAccessSwitch1788580000000,
+      Partners1788590000000,
       ClientAgreements1788310000000,
       ClientAgreementFields1788320000000,
       ClientDocuments1788330000000,
