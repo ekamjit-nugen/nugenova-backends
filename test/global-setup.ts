@@ -78,6 +78,7 @@ import { VendorAgreements1788540000000 } from '../src/bootstrap/database/migrati
 import { VendorBills1788550000000 } from '../src/bootstrap/database/migrations/1788550000000-VendorBills';
 import { DocumentSignatures1788560000000 } from '../src/bootstrap/database/migrations/1788560000000-DocumentSignatures';
 import { VendorAgreementWaivers1788570000000 } from '../src/bootstrap/database/migrations/1788570000000-VendorAgreementWaivers';
+import { PortalAccessSwitch1788580000000 } from '../src/bootstrap/database/migrations/1788580000000-PortalAccessSwitch';
 import { ClientAgreements1788310000000 } from '../src/bootstrap/database/migrations/1788310000000-ClientAgreements';
 import { ClientAgreementFields1788320000000 } from '../src/bootstrap/database/migrations/1788320000000-ClientAgreementFields';
 import { ClientDocuments1788330000000 } from '../src/bootstrap/database/migrations/1788330000000-ClientDocuments';
@@ -359,6 +360,7 @@ module.exports = async function globalSetup(): Promise<void> {
       VendorBills1788550000000,
       DocumentSignatures1788560000000,
       VendorAgreementWaivers1788570000000,
+      PortalAccessSwitch1788580000000,
       ClientAgreements1788310000000,
       ClientAgreementFields1788320000000,
       ClientDocuments1788330000000,

@@ -47,6 +47,10 @@ export class CreateVendorDto {
   @IsOptional() @IsBoolean()
   timeTrackingEnabled?: boolean;
 
+  /** Let this vendor sign in to the portal. Turning it on invites their contacts. */
+  @IsOptional() @IsBoolean()
+  portalEnabled?: boolean;
+
   @IsOptional()
   billingAddress?: VendorBillingAddressDto;
 
@@ -350,6 +354,12 @@ export class CancelVendorBillDto {
 }
 
 // ── portal ───────────────────────────────────────────────────────────────────
+
+/** The portal master switch for a vendor. */
+export class SetPortalEnabledDto {
+  @IsBoolean()
+  enabled: boolean;
+}
 
 export class InviteVendorContactDto {
   @IsOptional() @IsString() @MaxLength(120)

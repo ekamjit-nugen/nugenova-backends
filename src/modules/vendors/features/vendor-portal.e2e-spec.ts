@@ -73,6 +73,8 @@ defineFeature(feature, (test) => {
   const invitePortalUser = async (o: CreatedOrg, vendorId: string) => {
     const email = randomEmail('vendorportal');
     const contactId = await addContact(o, vendorId, email);
+    // The portal is closed until someone opens it for this vendor.
+    await as(o.ownerToken).patch(`/vendors/${vendorId}/portal`, { enabled: true }).expect(200);
     const invited = await as(o.ownerToken).post(`/vendors/${vendorId}/contacts/${contactId}/invite`, {}).expect(201);
     h.trackUser(invited.body.data.userId);
     return { email, contactId, userId: invited.body.data.userId as string, token: await h.mintToken(email) };
@@ -99,6 +101,56 @@ defineFeature(feature, (test) => {
     portal = await invitePortalUser(org, vendorId);
   };
 
+  test('the portal is closed until someone opens it', ({ given, when, then }) => {
+    let firstContactId: string;
+    let emails: string[];
+
+    given('an organization with a vendor "Acme Contractors" and two contacts with emails', async () => {
+      org = await newOrg();
+      vendorId = await addVendor(org);
+      emails = [randomEmail('vendorone'), randomEmail('vendortwo')];
+      firstContactId = await addContact(org, vendorId, emails[0], 'Riya Verma');
+      await addContact(org, vendorId, emails[1], 'Neha Shah');
+    });
+    when('the owner tries to invite a contact', async () => {
+      res = await as(org.ownerToken).post(`/vendors/${vendorId}/contacts/${firstContactId}/invite`, {});
+    });
+    then('the invite is refused because the portal is off', () => {
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(/Turn on portal access/);
+    });
+    when('the owner turns the portal on', async () => {
+      res = await as(org.ownerToken).patch(`/vendors/${vendorId}/portal`, { enabled: true }).expect(200);
+    });
+    then('both contacts are invited and emailed', async () => {
+      expect(res.body.data).toMatchObject({ portalEnabled: true, invited: 2, skipped: 0 });
+      const users = await as(org.ownerToken).get(`/vendors/${vendorId}/portal-users`).expect(200);
+      expect(users.body.data.map((u: { email: string }) => u.email).sort()).toEqual([...emails].sort());
+      users.body.data.forEach((u: { userId: string }) => h.trackUser(u.userId));
+    });
+  });
+
+  test('turning the portal off locks the vendor out without deleting their login', ({ given, when, then }) => {
+    given('an organization with a vendor "Acme Contractors" and a portal user', givenVendorWithPortalUser);
+    when('the owner turns the portal off', async () => {
+      await as(org.ownerToken).patch(`/vendors/${vendorId}/portal`, { enabled: false }).expect(200);
+    });
+    then('the portal is closed to them', async () => {
+      res = await as(portal.token).get('/vendor-portal/me');
+      expect(res.status).toBe(403);
+      // Their login is untouched — only the switch is off.
+      const m = await memberships.findOne({ where: { organizationId: org.orgId, userId: portal.userId } });
+      expect(m?.status).toBe('active');
+    });
+    when('the owner turns it back on', async () => {
+      await as(org.ownerToken).patch(`/vendors/${vendorId}/portal`, { enabled: true }).expect(200);
+    });
+    then('they can use the portal again', async () => {
+      const me = await as(portal.token).get('/vendor-portal/me').expect(200);
+      expect(me.body.data.vendor.id).toBe(vendorId);
+    });
+  });
+
   test('inviting a contact gives them a vendor login, not a staff one', ({ given, when, then, and }) => {
     let email: string;
     let contactId: string;
@@ -108,6 +160,7 @@ defineFeature(feature, (test) => {
       vendorId = await addVendor(org);
       email = randomEmail('vendorcontact');
       contactId = await addContact(org, vendorId, email);
+      await as(org.ownerToken).patch(`/vendors/${vendorId}/portal`, { enabled: true }).expect(200);
     });
     when('the owner invites that contact to the portal', async () => {
       res = await as(org.ownerToken).post(`/vendors/${vendorId}/contacts/${contactId}/invite`, {}).expect(201);
@@ -135,6 +188,9 @@ defineFeature(feature, (test) => {
     and("a vendor contact carrying that employee's email", async () => {
       const member = await h.createEmployeeMember(org);
       contactId = await addContact(org, vendorId, member.email, 'Staff Person');
+      // Opening the portal skips the contact it can't invite rather than failing.
+      const opened = await as(org.ownerToken).patch(`/vendors/${vendorId}/portal`, { enabled: true }).expect(200);
+      expect(opened.body.data).toMatchObject({ portalEnabled: true, invited: 0, skipped: 1 });
     });
     when('the owner invites that contact to the portal', async () => {
       res = await as(org.ownerToken).post(`/vendors/${vendorId}/contacts/${contactId}/invite`, {});

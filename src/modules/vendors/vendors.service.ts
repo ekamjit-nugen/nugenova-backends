@@ -51,6 +51,9 @@ export class VendorsService {
       onboardingStatus: 'invited',
       onboardedAt: null,
       timeTrackingEnabled: dto.timeTrackingEnabled ?? false,
+      // The portal starts closed: giving an outside company a login is a
+      // deliberate act, not a side effect of adding them.
+      portalEnabled: false,
       billingAddress: dto.billingAddress ?? null,
       primaryContact: dto.primaryContact ?? null,
       tags: dto.tags ?? [],
@@ -108,6 +111,8 @@ export class VendorsService {
     if (dto.taxId !== undefined) vendor.taxId = dto.taxId ?? null;
     if (dto.currency !== undefined) vendor.currency = dto.currency?.toUpperCase() || vendor.currency;
     if (dto.timeTrackingEnabled !== undefined) vendor.timeTrackingEnabled = dto.timeTrackingEnabled;
+    // `portalEnabled` is handled by VendorPortalService.setPortalEnabled, which
+    // also sends the invitations — set it there, not here.
     if (dto.billingAddress !== undefined) vendor.billingAddress = dto.billingAddress ?? null;
     if (dto.primaryContact !== undefined) vendor.primaryContact = dto.primaryContact ?? null;
     if (dto.tags !== undefined) vendor.tags = dto.tags ?? [];

@@ -48,6 +48,14 @@ export class ClientEntity extends PgBaseEntity {
   @Column({ type: 'jsonb', nullable: true, default: null })
   primaryContact: ClientPrimaryContact | null;
 
+  /**
+   * The master switch for this client's portal. Off means nobody at the client
+   * can sign in, even someone invited earlier — checked on every portal read,
+   * so turning it off locks the door immediately without deleting logins.
+   */
+  @Column({ type: 'boolean', nullable: false, default: false })
+  portalEnabled: boolean;
+
   @Column({ type: 'varchar', length: 24, nullable: true, default: null })
   createdBy: string | null;
 

@@ -76,6 +76,15 @@ export class VendorEntity extends PgBaseEntity {
   @Column({ type: 'boolean', nullable: false, default: false })
   timeTrackingEnabled: boolean;
 
+  /**
+   * The master switch for this vendor's portal. Off means nobody at the vendor
+   * can sign in, even someone invited earlier — the check is on every portal
+   * read, not just on invite, so turning it off locks the door immediately
+   * without deleting anyone's login.
+   */
+  @Column({ type: 'boolean', nullable: false, default: false })
+  portalEnabled: boolean;
+
   @Column({ type: 'jsonb', nullable: true, default: null })
   billingAddress: VendorBillingAddress | null;
 

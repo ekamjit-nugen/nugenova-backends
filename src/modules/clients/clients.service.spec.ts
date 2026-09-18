@@ -19,6 +19,19 @@ describe('ClientsService', () => {
     service = new ClientsService(clients, contacts, assignments, shares, agreements, agreementTemplates, documents, tickets, ticketMessages, memberships, users, boards, notes, nodes, comments, mail, notifier);
   });
 
+  /**
+   * Portal paths now read the client's master switch, so every portal test needs
+   * a client whose portal is open — the default below. Tests that care about a
+   * missing client or a duplicate name override `clients.findOne` themselves;
+   * the switch itself is covered by the e2e scenarios.
+   */
+  const portalOpenClient = (over: Record<string, unknown> = {}) =>
+    ({ id: 'c1', organizationId: 'orgA', isDeleted: false, status: 'active', companyName: 'Acme', portalEnabled: true, ...over });
+
+  beforeEach(() => {
+    clients.findOne.mockResolvedValue(portalOpenClient());
+  });
+
   describe('create', () => {
     it('creates a client when the name is unique', async () => {
       clients.findOne.mockResolvedValue(null);
@@ -38,7 +51,7 @@ describe('ClientsService', () => {
 
   describe('shareBoard access gate', () => {
     it('admin can share any org board', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       boards.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', createdBy: 'someone', participants: [] });
       shares.findOne.mockResolvedValue(null);
       const out = await service.shareBoard(admin, 'c1', { boardId: 'b1', permission: 'view' } as any);
@@ -48,13 +61,13 @@ describe('ClientsService', () => {
 
     it('a non-admin who is neither creator nor participant cannot share', async () => {
       const staff = { userId: 'emp1', orgId: 'orgA', isAdmin: false };
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       boards.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', createdBy: 'other', participants: [{ userId: 'other' }] });
       await expect(service.shareBoard(staff, 'c1', { boardId: 'b1' } as any)).rejects.toThrow(/only share boards you have access to/);
     });
 
     it('updates the permission when the board is already shared', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       boards.findOne.mockResolvedValue({ id: 'b1', organizationId: 'orgA', createdBy: 'owner1', participants: [] });
       shares.findOne.mockResolvedValue({ id: 's1', boardId: 'b1', clientId: 'c1', permission: 'view' });
       const out = await service.shareBoard(admin, 'c1', { boardId: 'b1', permission: 'comment' } as any);
@@ -64,19 +77,19 @@ describe('ClientsService', () => {
 
   describe('assignEmployee', () => {
     it('refuses to assign a client-role user', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       memberships.findOne.mockResolvedValue({ userId: 'p1', role: 'client' });
       await expect(service.assignEmployee(admin, 'c1', { userId: 'p1' } as any)).rejects.toThrow(/active staff member/);
     });
 
     it('refuses to assign a non-member', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       memberships.findOne.mockResolvedValue(null);
       await expect(service.assignEmployee(admin, 'c1', { userId: 'ghost' } as any)).rejects.toThrow(/active staff member/);
     });
 
     it('is idempotent — re-assigning updates the role instead of duplicating', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       memberships.findOne.mockResolvedValue({ userId: 'emp1', role: 'employee' });
       assignments.findOne.mockResolvedValue({ id: 'a1', clientId: 'c1', userId: 'emp1', assignmentRole: 'Dev' });
       const out = await service.assignEmployee(admin, 'c1', { userId: 'emp1', assignmentRole: 'Lead' } as any);
@@ -87,13 +100,13 @@ describe('ClientsService', () => {
 
   describe('inviteContact', () => {
     it('requires the contact to have an email', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false, companyName: 'Acme' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       contacts.findOne.mockResolvedValue({ id: 'ct1', clientId: 'c1', email: null, name: 'Jane' });
       await expect(service.inviteContact(admin, 'c1', 'ct1', {} as any)).rejects.toThrow(/email/);
     });
 
     it('refuses to promote someone who is already a staff member', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false, companyName: 'Acme' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       contacts.findOne.mockResolvedValue({ id: 'ct1', clientId: 'c1', email: 'jane@acme.com', name: 'Jane Doe' });
       users.findOne.mockResolvedValue({ id: 'u1', email: 'jane@acme.com', organizations: [] });
       memberships.findOne.mockResolvedValue({ userId: 'u1', role: 'employee' });
@@ -101,7 +114,7 @@ describe('ClientsService', () => {
     });
 
     it('creates a client-role membership + links the contact for a fresh email', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false, companyName: 'Acme' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       contacts.findOne.mockResolvedValue({ id: 'ct1', clientId: 'c1', email: 'jane@acme.com', name: 'Jane Doe' });
       users.findOne.mockResolvedValue(null);
       users.save.mockImplementation((u: any) => Promise.resolve({ id: 'u1', ...u }));
@@ -145,7 +158,7 @@ describe('ClientsService', () => {
 
   describe('archive', () => {
     it('marks the client archived and deactivates its portal logins', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false, status: 'active' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       const out = await service.archive('orgA', 'c1');
       expect(out.status).toBe('archived');
       expect(memberships.update).toHaveBeenCalledWith(
@@ -174,12 +187,12 @@ describe('ClientsService', () => {
 
   describe('createAgreement', () => {
     it('requires either body text or an attached PDF', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       await expect(service.createAgreement(admin, 'c1', { title: 'NDA' } as any)).rejects.toThrow(/text or attach a PDF/);
     });
 
     it('creates a draft agreement from body text', async () => {
-      clients.findOne.mockResolvedValue({ id: 'c1', organizationId: 'orgA', isDeleted: false });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       const out = await service.createAgreement(admin, 'c1', { title: '  NDA  ', bodyHtml: '<p>terms</p>' } as any);
       expect(out.title).toBe('NDA');
       expect(out.status).toBe('draft');
@@ -262,7 +275,7 @@ describe('ClientsService', () => {
     });
     it('notifies the client portal users and stamps the reminder', async () => {
       agreements.findOne.mockResolvedValue({ id: 'a1', clientId: 'c1', organizationId: 'orgA', isDeleted: false, status: 'sent', title: 'NDA', reminderCount: 0 });
-      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       memberships.find.mockResolvedValue([{ userId: 'p1' }]);
       const out = await service.remindAgreement('orgA', 'c1', 'a1');
       expect(notifier.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'client_agreement_reminder', userId: 'p1' }));
@@ -275,7 +288,7 @@ describe('ClientsService', () => {
     const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
     it('reminds a sent agreement past the threshold and stamps it', async () => {
       agreements.find.mockResolvedValue([{ id: 'a1', clientId: 'c1', organizationId: 'orgA', title: 'NDA', status: 'sent', isDeleted: false, sentAt: daysAgo(5), lastReminderAt: null, reminderCount: 0 }]);
-      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       memberships.find.mockResolvedValue([{ userId: 'p1' }]);
       const r = await service.runAgreementReminders(new Date());
       expect(r.notified).toBe(1);
@@ -307,7 +320,7 @@ describe('ClientsService', () => {
       memberships.findOne.mockResolvedValue(portalMember);
       users.findOne.mockResolvedValue({ firstName: 'Jane', lastName: 'Doe' });
       assignments.find.mockResolvedValue([{ userId: 'emp1' }]); // delivery team
-      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       const out = await service.portalCreateTicket('orgA', 'p1', { subject: 'Need help', description: 'x' } as any);
       expect(out.status).toBe('open');
       expect(out.createdByRole).toBe('client');
@@ -328,7 +341,7 @@ describe('ClientsService', () => {
       tickets.findOne.mockResolvedValue({ id: 't1', clientId: 'c1', organizationId: 'orgA', isDeleted: false, status: 'resolved', subject: 'Help', assignedToUserId: 'emp1' });
       users.findOne.mockResolvedValue({ firstName: 'Jane' });
       assignments.find.mockResolvedValue([{ userId: 'emp1' }]);
-      clients.findOne.mockResolvedValue({ id: 'c1', companyName: 'Acme' });
+      clients.findOne.mockResolvedValue(portalOpenClient());
       await service.portalReply('orgA', 'p1', 't1', { body: 'Still broken' } as any);
       expect(tickets.save).toHaveBeenCalledWith(expect.objectContaining({ status: 'open' }));
     });

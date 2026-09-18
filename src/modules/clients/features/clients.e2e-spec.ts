@@ -109,6 +109,8 @@ defineFeature(feature, (test) => {
         .send({ name: 'Jane Doe', email: `jane+${c.id}@portal.test` })
         .expect(201)
     ).body.data;
+    // The portal is closed until someone opens it for this client.
+    await h.api().patch(`${API}/clients/${c.id}/portal`).set(auth(o.ownerToken)).send({ enabled: true }).expect(200);
     const invited = (
       await h
         .api()
@@ -195,6 +197,7 @@ defineFeature(feature, (test) => {
       contactId = res.body.data.id;
     });
     and('the owner invites that contact to the portal', async () => {
+      await h.api().patch(`${API}/clients/${clientId}/portal`).set(auth(o.ownerToken)).send({ enabled: true }).expect(200);
       const res = await h
         .api()
         .post(`${API}/clients/${clientId}/contacts/${contactId}/invite`)

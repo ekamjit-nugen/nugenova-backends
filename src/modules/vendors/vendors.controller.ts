@@ -11,7 +11,7 @@ import {
   CancelVendorBillDto, CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, CreateVendorBillDto,
   CreateVendorDocumentDto, SignVendorDocumentDto, UpdateVendorDocumentDto,
   CreateVendorContactDto, CreateVendorDto, CreateVendorEmployeeDto, DeclineVendorAgreementDto,
-  InviteVendorContactDto, MarkVendorBillPaidDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
+  InviteVendorContactDto, MarkVendorBillPaidDto, SetPortalEnabledDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
   UpdateVendorBillDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
   WaiveVendorAgreementDto,
 } from './dto';
@@ -181,6 +181,12 @@ export class VendorsController {
   @Get(':id/portal-users')
   async portalUsers(@Req() req: any, @Param('id') id: string) {
     return { success: true, data: await this.portal.portalUsers(this.allowed(req, 'view').orgId, id) };
+  }
+
+  /** The master switch — turning it on invites the vendor's contacts. */
+  @Patch(':id/portal')
+  async setPortalEnabled(@Req() req: any, @Param('id') id: string, @Body() dto: SetPortalEnabledDto) {
+    return { success: true, data: await this.portal.setPortalEnabled(this.allowed(req, 'edit'), id, dto.enabled) };
   }
 
   /** Give a contact a login to the vendor portal. */
