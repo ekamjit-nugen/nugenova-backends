@@ -31,6 +31,13 @@ Feature: Partners — clients and vendors in one place
     When the owner adds a client in "Retail" and a vendor in "Staffing"
     Then each reports its own sector
 
+  Scenario: contacts come from one table, whichever side the partner is on
+    Given an organization with a client and a vendor
+    And each has a contact
+    When the owner lists the partners
+    Then each shows one contact
+    And neither side can see the other's contact
+
   @security
   Scenario: a role granted only one side sees only that side
     Given an organization with a client and a vendor

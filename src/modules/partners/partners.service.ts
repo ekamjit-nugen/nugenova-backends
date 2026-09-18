@@ -5,9 +5,8 @@ import { ILike, In, Repository } from 'typeorm';
 import { PartnerCategory, PartnerEntity } from './entities/partner.entity';
 import { ClientEntity } from '../clients/entities/client.entity';
 import { VendorEntity } from '../vendors/entities/vendor.entity';
-import { ClientContactEntity } from '../clients/entities/client-contact.entity';
+import { PartnerContactEntity } from './entities/partner-contact.entity';
 import { ClientAssignmentEntity } from '../clients/entities/client-assignment.entity';
-import { VendorContactEntity } from '../vendors/entities/vendor-contact.entity';
 import { VendorEmployeeEntity } from '../vendors/entities/vendor-employee.entity';
 import { CreatePartnerDto, UpdatePartnerDto } from './dto';
 
@@ -40,8 +39,7 @@ export class PartnersService {
     // discriminator. Reads use the base repository, which returns both.
     @InjectRepository(ClientEntity) private readonly clients: Repository<ClientEntity>,
     @InjectRepository(VendorEntity) private readonly vendors: Repository<VendorEntity>,
-    @InjectRepository(ClientContactEntity) private readonly clientContacts: Repository<ClientContactEntity>,
-    @InjectRepository(VendorContactEntity) private readonly vendorContacts: Repository<VendorContactEntity>,
+    @InjectRepository(PartnerContactEntity) private readonly contacts: Repository<PartnerContactEntity>,
     @InjectRepository(ClientAssignmentEntity) private readonly assignments: Repository<ClientAssignmentEntity>,
     @InjectRepository(VendorEmployeeEntity) private readonly suppliedPeople: Repository<VendorEmployeeEntity>,
   ) {}
@@ -58,19 +56,16 @@ export class PartnersService {
     const ids = filtered.map((p) => p.id);
     if (!ids.length) return [];
 
-    const [clientContacts, vendorContacts, assignments, supplied] = await Promise.all([
-      this.clientContacts.find({ where: { clientId: In(ids), isDeleted: false } }),
-      this.vendorContacts.find({ where: { vendorId: In(ids), isDeleted: false } }),
+    const [partnerContacts, assignments, supplied] = await Promise.all([
+      // One table now, whichever side the partner is on.
+      this.contacts.find({ where: { partnerId: In(ids), isDeleted: false } }),
       this.assignments.find({ where: { clientId: In(ids) } }),
       this.suppliedPeople.find({ where: { vendorId: In(ids), isDeleted: false } }),
     ]);
 
     const tally = <T>(arr: T[], key: (row: T) => string) =>
       arr.reduce((m, r) => m.set(key(r), (m.get(key(r)) || 0) + 1), new Map<string, number>());
-    const contacts = new Map([
-      ...tally(clientContacts, (c) => c.clientId),
-      ...tally(vendorContacts, (c) => c.vendorId),
-    ]);
+    const contacts = tally(partnerContacts, (c) => c.partnerId);
     const team = tally(assignments, (a) => a.clientId);
     const people = tally(supplied.filter((p) => p.status === 'active'), (p) => p.vendorId);
 

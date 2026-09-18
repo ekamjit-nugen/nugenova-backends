@@ -3,11 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from '../auth/auth.module';
 import { PartnerEntity } from './entities/partner.entity';
+import { PartnerContactEntity } from './entities/partner-contact.entity';
 import { ClientEntity } from '../clients/entities/client.entity';
 import { VendorEntity } from '../vendors/entities/vendor.entity';
-import { ClientContactEntity } from '../clients/entities/client-contact.entity';
 import { ClientAssignmentEntity } from '../clients/entities/client-assignment.entity';
-import { VendorContactEntity } from '../vendors/entities/vendor-contact.entity';
 import { VendorEmployeeEntity } from '../vendors/entities/vendor-employee.entity';
 import { PartnersService } from './partners.service';
 import { PartnersController } from './partners.controller';
@@ -23,11 +22,10 @@ import { PartnersController } from './partners.controller';
     AuthModule,
     TypeOrmModule.forFeature([
       PartnerEntity,
+      PartnerContactEntity,
       ClientEntity,
       VendorEntity,
-      ClientContactEntity,
       ClientAssignmentEntity,
-      VendorContactEntity,
       VendorEmployeeEntity,
     ]),
   ],

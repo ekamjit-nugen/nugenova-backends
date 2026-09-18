@@ -70,11 +70,20 @@ that want that.
 | Extras | tickets, shared boards | bills, onboarding clearance |
 | Sector wording | `industry` | `serviceCategory` — both read as `sector` in the partner view |
 
+## Contacts
+
+`partner_contacts` is merged the same way, with `ClientContactEntity` and
+`VendorContactEntity` as the children. One wrinkle: the two services still name
+the owning company differently in code (`clientId` / `vendorId`), so both columns
+exist and each child maps its own. **`partner_id` is a Postgres generated column
+over the pair** (`COALESCE(client_id, vendor_id)`), which is what a combined query
+reads — the partner list counts contacts through it without caring which side a
+company is on. When the services move to the shared name, the two columns
+collapse into that one.
+
 ## Still to come
 
-1. Contacts merge into one `partner_contacts` table (they are two today, keyed by
-   `clientId` / `vendorId` on the same ids).
-2. Documents, agreements and the portal move onto partner ids in name as well as
+1. Documents, agreements and the portal move onto partner ids in name as well as
    value.
 3. One Partners UI: a list with a category filter, and a detail page rendering
    the shared tabs plus the category-specific ones.

@@ -129,6 +129,35 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('contacts come from one table, whichever side the partner is on', ({ given, and, when, then }) => {
+    let clientId: string;
+    let vendorId: string;
+
+    given('an organization with a client and a vendor', async () => {
+      org = await newOrg();
+      clientId = (await addPartner(org, 'client', 'Acme Retail').expect(201)).body.data.id;
+      vendorId = (await addPartner(org, 'vendor', 'Nova Staffing').expect(201)).body.data.id;
+    });
+    and('each has a contact', async () => {
+      await as(org.ownerToken).post(`/clients/${clientId}/contacts`, { name: 'Rohan at the client' }).expect(201);
+      await as(org.ownerToken).post(`/vendors/${vendorId}/contacts`, { name: 'Riya at the vendor' }).expect(201);
+    });
+    when('the owner lists the partners', async () => {
+      res = await as(org.ownerToken).get('/partners').expect(200);
+    });
+    then('each shows one contact', () => {
+      res.body.data.forEach((p: { counts: { contacts: number } }) => expect(p.counts.contacts).toBe(1));
+    });
+    and("neither side can see the other's contact", async () => {
+      // The child repositories filter by category, so one side's contacts are
+      // invisible to the other even though the rows share a table.
+      const client = await as(org.ownerToken).get(`/clients/${clientId}`).expect(200);
+      expect(client.body.data.contacts.map((c: { name: string }) => c.name)).toEqual(['Rohan at the client']);
+      const vendor = await as(org.ownerToken).get(`/vendors/${vendorId}`).expect(200);
+      expect(vendor.body.data.contacts.map((c: { name: string }) => c.name)).toEqual(['Riya at the vendor']);
+    });
+  });
+
   test('a role granted only one side sees only that side', ({ given, and, when, then }) => {
     let member: string;
 

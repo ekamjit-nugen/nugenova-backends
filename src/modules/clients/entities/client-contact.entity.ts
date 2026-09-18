@@ -1,37 +1,15 @@
-import { Column, Entity, Index } from 'typeorm';
-import { PgBaseEntity } from '../../../bootstrap/database/pg-base.entity';
+import { ChildEntity, Column } from 'typeorm';
+import { PartnerContactEntity } from '../../partners/entities/partner-contact.entity';
 
 /**
- * A person at a client. A contact may be a record only, or be promoted to a
- * portal login — in which case `userId` links to the `client`-role OrgMembership
- * created for them.
+ * A person at a client. A `partner_contacts` row with `category = 'client'`, so
+ * this repository can only ever see client contacts.
+ *
+ * A contact may be a record only, or be promoted to a portal login — in which
+ * case `userId` links to the `client`-role OrgMembership created for them.
  */
-@Entity('client_contacts')
-@Index('ix_client_contacts_client', ['clientId'])
-@Index('ix_client_contacts_org', ['organizationId'])
-export class ClientContactEntity extends PgBaseEntity {
-  @Column({ type: 'varchar', length: 24 })
-  organizationId: string;
-
-  @Column({ type: 'varchar', length: 24 })
+@ChildEntity('client')
+export class ClientContactEntity extends PartnerContactEntity {
+  @Column({ type: 'varchar', length: 24, nullable: true })
   clientId: string;
-
-  @Column({ type: 'varchar' })
-  name: string;
-
-  @Column({ type: 'varchar', nullable: true, default: null })
-  email: string | null;
-
-  @Column({ type: 'varchar', nullable: true, default: null })
-  phone: string | null;
-
-  @Column({ type: 'varchar', nullable: true, default: null })
-  designation: string | null;
-
-  /** Auth userId once this contact has a portal login; null = record only. */
-  @Column({ type: 'varchar', length: 24, nullable: true, default: null })
-  userId: string | null;
-
-  @Column({ type: 'boolean', nullable: false, default: false })
-  isDeleted: boolean;
 }
