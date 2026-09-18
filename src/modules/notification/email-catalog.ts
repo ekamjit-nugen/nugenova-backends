@@ -5,6 +5,7 @@ import {
   attendanceMissedCheckoutEmail,
   attendanceNotClockedInEmail,
   clientPortalInviteEmail,
+  vendorPortalInviteEmail,
   documentApprovedEmail,
   documentRejectedEmail,
   documentsRequestedEmail,
@@ -407,6 +408,16 @@ export const EMAIL_CATALOG: EmailCatalogEntry[] = [
     kind: 'fixed',
     about: "Sent to a client's contact when they're invited to the client portal.",
     preview: () => clientPortalInviteEmail({ contactName: 'Rohan Kapoor', companyName: 'Acme Retail' }),
+  },
+
+  // ── Vendors ───────────────────────────────────────────────────────────────
+  {
+    key: 'vendors.portal_invite',
+    label: 'Vendor portal invitation',
+    group: 'Vendors',
+    kind: 'fixed',
+    about: "Sent to a vendor's contact when they're given access to the vendor portal.",
+    preview: () => vendorPortalInviteEmail({ contactName: 'Riya Verma', companyName: 'Acme Contractors' }),
   },
 
   // ── Chat ──────────────────────────────────────────────────────────────────

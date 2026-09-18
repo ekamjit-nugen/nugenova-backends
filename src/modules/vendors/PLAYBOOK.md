@@ -18,6 +18,7 @@ Ported from the legacy Nugenova `vendors` feature (Mongo `vendors`,
 | `vendor_employees` | the contractors the vendor supplies, with the rate the vendor charges us (`rateAmount` / `rateUnit`) |
 | `vendor_agreement_templates` | the org's reusable paperwork (MSA, NDA, code of conduct): `required`, and `appliesToCategories` (empty = every vendor) |
 | `vendor_agreements` | the copy a vendor signs, with its signature audit record, expiry and `requiredForOnboarding` |
+| `vendor_bills` | what a vendor charged us: a line per contractor, the computed money, and the approve/pay trail |
 
 Everything is org-scoped and soft-deleted (`isDeleted`). Deleting a vendor
 cascades to its contacts and people, so a later vendor of the same name starts
@@ -85,6 +86,18 @@ POST   /vendors/:id/agreements/:aid/decline
 POST   /vendors/:id/agreements/:aid/void      withdraw an unsigned one
 DELETE /vendors/:id/agreements/:aid           only while unsigned
 
+GET    /vendors/bills                        the payables queue (?status=&vendorId=&from=&to=)
+GET    /vendors/bills/:bid
+PATCH  /vendors/bills/:bid                   only while a draft
+POST   /vendors/bills/:bid/approve           draft → approved (records who)
+POST   /vendors/bills/:bid/mark-paid         approved → paid (reference + date)
+POST   /vendors/bills/:bid/cancel            draft/approved → cancelled
+DELETE /vendors/bills/:bid                   only a draft or cancelled one
+
+GET    /vendors/:id/bills                     this vendor's bills
+GET    /vendors/:id/cost-summary              outstanding / paid / lifetime
+POST   /vendors/:id/bills                     raise one
+
 GET    /vendors/:id/employees                list (status, q, skill)
 POST   /vendors/:id/employees                add contractor (duplicate email per vendor → 409)
 PATCH  /vendors/:id/employees/:employeeId
@@ -120,18 +133,92 @@ never moved again, so a suspended vendor that is reinstated keeps its original
 date. A **suspended** vendor is left alone by that sync: suspension is a
 decision, not a consequence of paperwork.
 
+## Bills
+
+A bill is what a vendor charged us for the people they supplied — a line per
+contractor (`quantity × rate`, hour/day/month/fixed), an optional tax percent,
+and the vendor's own invoice number when they gave us one.
+
+Two rules hold the money together:
+
+1. **The server computes every figure.** `amount`, `subtotal`, `taxAmount` and
+   `total` are recomputed from the lines on every write, rounded to two decimals.
+   A line's `amount` isn't even in the DTO, so a client that sends one is
+   refused rather than quietly ignored.
+2. **A bill is editable only while it is a draft.** draft → approved → paid, and
+   draft/approved → cancelled. After approval it is a financial record: a
+   correction means cancelling it and raising a new one. Approve is idempotent
+   (a double click doesn't re-stamp who approved it); delete is refused for
+   anything approved or paid.
+
+A line may name a supplied person (`vendorEmployeeId`), which is checked to
+belong to the billing vendor — billing us for someone they don't supply is a
+mistake worth stopping. `contractorName` is stored as typed, so an old bill
+still reads correctly after that person's record changes.
+
+`markPaid` records that we paid: when, by whom, and the reference (UTR, cheque
+number). It moves no money — there is no payment or ledger model in the platform
+yet, and this is the first billing surface in it.
+
+`cost-summary` per vendor: `outstanding` is approved-but-unpaid (what we owe
+today), `committed` adds what's paid, `lifetime` includes drafts. Cancelled
+bills count nowhere — they never were a cost.
+
+Bill numbers are `VB-00001` per org, allocated as count+1 (the house pattern)
+with a unique index on `(organization_id, bill_number)`; a concurrent raise
+fails on the index and simply takes the next number.
+
+## The portal
+
+`/api/v1/vendor-portal` — its own path, not `vendors/portal/*`, so these routes
+can never be shadowed by the staff controller's `:id` routes.
+
+A portal user is an OrgMembership with `role='vendor'`, `personType='vendor'`
+and a `vendorId` — the vendor mirror of a client portal login. `personType` is
+what keeps them out of `staffScope()`: payroll, the attendance roster, headcount
+and the Directory never see them. Staff give access with
+`POST /vendors/:id/contacts/:contactId/invite` (the contact needs an email; they
+sign in with the normal OTP flow, so no password is ever set) and take it away
+with the matching `DELETE`, which deactivates the membership but keeps the
+contact record.
+
+**No route here takes a vendor id.** The caller's own membership decides what
+loads, so there is nothing to tamper with, and a vendor can only ever reach
+their own rows.
+
+```
+GET    /vendor-portal/me                      their company, clearance, what we owe
+GET    /vendor-portal/agreements               everything sent to them
+POST   /vendor-portal/agreements/:aid/sign     they sign it themselves
+GET    /vendor-portal/bills                    bills we have agreed
+GET    /vendor-portal/people                   their roster
+POST   /vendor-portal/people
+PATCH  /vendor-portal/people/:eid
+DELETE /vendor-portal/people/:eid
+```
+
+Three deliberate limits:
+
+- **Drafts are ours.** A draft agreement or bill is our working copy, so it is
+  filtered out of every portal list — and signing a draft returns 404, because
+  as far as the vendor is concerned it doesn't exist.
+- **Rates are not theirs to set.** A vendor can add and edit their own people,
+  but `rateAmount` / `rateCurrency` / `rateUnit` are stripped on the way in: the
+  rate is a commercial term agreed with us.
+- **Signing in the portal is never `offline`.** That method means a staff member
+  recorded a signature on the vendor's behalf; when the vendor signs here the
+  method is `typed` (or `drawn`) and the signer is the person signed in.
+
+`auth.service.ts` routes an all-vendor member to `/vendor-portal` at login, and
+the frontend now knows that route (`KNOWN_ROUTES` in `login/page.tsx`,
+`BARE_ROUTES` in `app-frame.tsx`) — before this phase such a login landed in the
+staff app.
+
 ## Not here yet (phases)
 
-3. **Bills** — vendor bills with line items per contractor, draft-from-assignment,
-   approve and mark-paid. The platform has no invoice/payment model at all today,
-   so this is a new subsystem rather than a port.
-4. **Vendor portal** — `role='vendor'` logins. `auth.service.ts` already routes an
-   all-vendor member to `/vendor-portal`, but the frontend has no such route
-   (`KNOWN_ROUTES` in `login/page.tsx`, `BARE_ROUTES` in `app-frame.tsx`), so a
-   vendor login currently lands in the staff app. Fix those two arrays with the
-   portal.
-5. **Assignments** — linking a contractor to a project/requirement, and the cost
-   summary that reads from it.
+5. **Assignments** — linking a contractor to a project or requirement. Bills are
+   raised by hand today; with assignments they can be drafted from who worked
+   where, and project cost attribution becomes possible.
 
 Agreement fields (`VendorAgreementField`) and the signature record deliberately
 match the client-side shapes, so the frontend PDF field designer and signature
@@ -140,6 +227,18 @@ pad serve both. Attaching the PDF itself and flattening a signed copy reuse
 
 ## Tests
 
+- `features/vendor-portal.feature` — 9 scenarios covering the portal end to end,
+  including the security ones: a staff email can't become a vendor login, a
+  portal user holds no staff access, reaches nothing of another vendor, sees no
+  drafts, can't set a rate, and loses the portal when access is revoked. The
+  portal service is covered by these rather than by unit tests — its whole job
+  is the scoping, which only a real request exercises.
+- `vendor-bills.service.spec.ts` — 21 unit tests: computed totals and rounding,
+  the number collision retry, cross-vendor lines, state guards, payment dates,
+  and the cost-summary maths.
+- `features/vendor-bills.feature` — 9 scenarios: raising and totalling a bill,
+  the rejected client-supplied amount, approve → pay, paying before approval,
+  cancelling, the cost summary, the permission split, and cross-org isolation.
 - `vendor-agreements.service.spec.ts` — 22 unit tests: template copying, which
   templates apply, backdated/future signing dates, expiry, void vs delete, and
   the onboarding sync (including leaving a suspended vendor alone).

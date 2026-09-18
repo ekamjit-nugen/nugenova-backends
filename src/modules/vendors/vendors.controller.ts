@@ -4,10 +4,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { permMapAllows } from '../organization/guards/require-permission.decorator';
 import { VendorsCaller, VendorsService } from './vendors.service';
 import { VendorAgreementsService } from './vendor-agreements.service';
+import { VendorBillsService } from './vendor-bills.service';
+import { VendorPortalService } from './vendor-portal.service';
 import {
-  CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, CreateVendorContactDto, CreateVendorDto,
-  CreateVendorEmployeeDto, DeclineVendorAgreementDto, SignVendorAgreementDto, UpdateVendorAgreementDto,
-  UpdateVendorAgreementTemplateDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
+  CancelVendorBillDto, CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, CreateVendorBillDto,
+  CreateVendorContactDto, CreateVendorDto, CreateVendorEmployeeDto, DeclineVendorAgreementDto,
+  InviteVendorContactDto, MarkVendorBillPaidDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
+  UpdateVendorBillDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
 } from './dto';
 
 /**
@@ -28,6 +31,8 @@ export class VendorsController {
   constructor(
     private readonly vendors: VendorsService,
     private readonly agreements: VendorAgreementsService,
+    private readonly billing: VendorBillsService,
+    private readonly portal: VendorPortalService,
   ) {}
 
   private caller(req: any): VendorsCaller {
@@ -53,6 +58,50 @@ export class VendorsController {
   @Get('categories')
   async categories(@Req() req: any) {
     return { success: true, data: await this.vendors.categories(this.allowed(req, 'view').orgId) };
+  }
+
+  // ── bills across the org (the payables queue) ──
+  @Get('bills')
+  async listBills(
+    @Req() req: any,
+    @Query('status') status?: string,
+    @Query('vendorId') vendorId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return { success: true, data: await this.billing.listForOrg(this.allowed(req, 'view').orgId, { status, vendorId, from, to }) };
+  }
+
+  @Get('bills/:billId')
+  async getBill(@Req() req: any, @Param('billId') billId: string) {
+    return { success: true, data: await this.billing.get(this.allowed(req, 'view').orgId, billId) };
+  }
+
+  @Patch('bills/:billId')
+  async updateBill(@Req() req: any, @Param('billId') billId: string, @Body() dto: UpdateVendorBillDto) {
+    return { success: true, data: await this.billing.update(this.allowed(req, 'edit').orgId, billId, dto) };
+  }
+
+  /** Agree the bill — it becomes what we owe. */
+  @Post('bills/:billId/approve')
+  async approveBill(@Req() req: any, @Param('billId') billId: string) {
+    return { success: true, data: await this.billing.approve(this.allowed(req, 'edit'), billId) };
+  }
+
+  /** Record that we paid it; the money moves elsewhere. */
+  @Post('bills/:billId/mark-paid')
+  async markBillPaid(@Req() req: any, @Param('billId') billId: string, @Body() dto: MarkVendorBillPaidDto) {
+    return { success: true, data: await this.billing.markPaid(this.allowed(req, 'edit'), billId, dto) };
+  }
+
+  @Post('bills/:billId/cancel')
+  async cancelBill(@Req() req: any, @Param('billId') billId: string, @Body() dto: CancelVendorBillDto) {
+    return { success: true, data: await this.billing.cancel(this.allowed(req, 'edit').orgId, billId, dto) };
+  }
+
+  @Delete('bills/:billId')
+  async deleteBill(@Req() req: any, @Param('billId') billId: string) {
+    return { success: true, data: await this.billing.remove(this.allowed(req, 'delete').orgId, billId) };
   }
 
   // ── agreement templates (org-level, before the :id routes) ──
@@ -122,6 +171,24 @@ export class VendorsController {
   @Delete(':id/contacts/:contactId')
   async removeContact(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string) {
     return { success: true, data: await this.vendors.removeContact(this.allowed(req, 'delete').orgId, id, contactId) };
+  }
+
+  // ── portal access for a vendor's contacts ──
+  @Get(':id/portal-users')
+  async portalUsers(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.portal.portalUsers(this.allowed(req, 'view').orgId, id) };
+  }
+
+  /** Give a contact a login to the vendor portal. */
+  @Post(':id/contacts/:contactId/invite')
+  async invitePortalUser(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string, @Body() dto: InviteVendorContactDto) {
+    return { success: true, data: await this.portal.invite(this.allowed(req, 'create'), id, contactId, dto) };
+  }
+
+  /** Take that login away again, keeping the contact record. */
+  @Delete(':id/contacts/:contactId/invite')
+  async revokePortalUser(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string) {
+    return { success: true, data: await this.portal.revoke(this.allowed(req, 'edit').orgId, id, contactId) };
   }
 
   // ── vendor employees (the contractors they supply) ──
@@ -210,5 +277,22 @@ export class VendorsController {
   @Delete(':id/agreements/:agreementId')
   async deleteAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
     return { success: true, data: await this.agreements.remove(this.allowed(req, 'delete').orgId, id, agreementId) };
+  }
+
+  // ── bills for one vendor ──
+  @Get(':id/bills')
+  async vendorBills(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.billing.listForVendor(this.allowed(req, 'view').orgId, id) };
+  }
+
+  /** What this vendor has cost us, by state. */
+  @Get(':id/cost-summary')
+  async costSummary(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.billing.costSummary(this.allowed(req, 'view').orgId, id) };
+  }
+
+  @Post(':id/bills')
+  async createBill(@Req() req: any, @Param('id') id: string, @Body() dto: CreateVendorBillDto) {
+    return { success: true, data: await this.billing.create(this.allowed(req, 'create'), id, dto) };
   }
 }

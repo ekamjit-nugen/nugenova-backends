@@ -267,3 +267,104 @@ export class DeclineVendorAgreementDto {
   @IsOptional() @IsString() @MaxLength(1000)
   reason?: string;
 }
+
+// ── bills ────────────────────────────────────────────────────────────────────
+
+/** One line of a bill: a contractor, how much of them, at what rate. */
+export class VendorBillLineDto {
+  @IsOptional() @IsString() @MaxLength(500)
+  description?: string;
+
+  /** The supplied person this line is for; must belong to the billing vendor. */
+  @IsOptional() @IsString() @MaxLength(24)
+  vendorEmployeeId?: string;
+
+  /** Kept as typed, so the bill still reads right if that person's record changes. */
+  @IsOptional() @IsString() @MaxLength(200)
+  contractorName?: string;
+
+  @IsNumber() @Min(0) @Max(1000000)
+  quantity: number;
+
+  @IsOptional() @IsIn(['hour', 'day', 'month', 'fixed'])
+  unit?: 'hour' | 'day' | 'month' | 'fixed';
+
+  @IsNumber() @Min(0) @Max(100000000)
+  rate: number;
+}
+
+export class CreateVendorBillDto {
+  @IsArray() @ValidateNested({ each: true }) @Type(() => VendorBillLineDto)
+  lineItems: VendorBillLineDto[];
+
+  /** The vendor's own invoice number, when they gave us one. */
+  @IsOptional() @IsString() @MaxLength(60)
+  vendorInvoiceNumber?: string;
+
+  /** What the bill covers, as people say it: "Aug 2026", "Sprint 14". */
+  @IsOptional() @IsString() @MaxLength(60)
+  period?: string;
+
+  @IsOptional() @IsNumber() @Min(0) @Max(100)
+  taxPercent?: number;
+
+  @IsOptional() @IsString() @MaxLength(3)
+  currency?: string;
+
+  @IsOptional() @IsDateString()
+  issueDate?: string;
+
+  @IsOptional() @IsDateString()
+  dueDate?: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  invoiceFileId?: string;
+
+  @IsOptional() @IsString() @MaxLength(5000)
+  notes?: string;
+}
+
+export class UpdateVendorBillDto extends CreateVendorBillDto {
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VendorBillLineDto)
+  declare lineItems: VendorBillLineDto[];
+}
+
+export class MarkVendorBillPaidDto {
+  /** UTR, cheque number, transfer reference — how the payment can be traced. */
+  @IsOptional() @IsString() @MaxLength(120)
+  paymentReference?: string;
+
+  @IsOptional() @IsDateString()
+  paidAt?: string;
+}
+
+export class CancelVendorBillDto {
+  @IsOptional() @IsString() @MaxLength(1000)
+  reason?: string;
+}
+
+// ── portal ───────────────────────────────────────────────────────────────────
+
+export class InviteVendorContactDto {
+  @IsOptional() @IsString() @MaxLength(120)
+  firstName?: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  lastName?: string;
+}
+
+/** A vendor signing for themselves in the portal (never `offline`). */
+export class PortalSignAgreementDto {
+  @IsString() @MaxLength(200)
+  signerName: string;
+
+  @IsOptional() @IsEmail()
+  signerEmail?: string;
+
+  /** DocumentFile id of a drawn signature; typed signing leaves it out. */
+  @IsOptional() @IsString() @MaxLength(24)
+  signatureFileId?: string;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VendorAgreementFieldValueDto)
+  fieldValues?: VendorAgreementFieldValueDto[];
+}
