@@ -83,6 +83,7 @@ import { Partners1788590000000 } from '../src/bootstrap/database/migrations/1788
 import { PartnerContacts1788600000000 } from '../src/bootstrap/database/migrations/1788600000000-PartnerContacts';
 import { DropPremergeTables1788610000000 } from '../src/bootstrap/database/migrations/1788610000000-DropPremergeTables';
 import { LegacyClientVendorViews1788620000000 } from '../src/bootstrap/database/migrations/1788620000000-LegacyClientVendorViews';
+import { RetireLegacyClientVendorViews1788630000000 } from '../src/bootstrap/database/migrations/1788630000000-RetireLegacyClientVendorViews';
 import { ClientAgreements1788310000000 } from '../src/bootstrap/database/migrations/1788310000000-ClientAgreements';
 import { ClientAgreementFields1788320000000 } from '../src/bootstrap/database/migrations/1788320000000-ClientAgreementFields';
 import { ClientDocuments1788330000000 } from '../src/bootstrap/database/migrations/1788330000000-ClientDocuments';
@@ -373,6 +374,7 @@ module.exports = async function globalSetup(): Promise<void> {
       PartnerContacts1788600000000,
       DropPremergeTables1788610000000,
       LegacyClientVendorViews1788620000000,
+      RetireLegacyClientVendorViews1788630000000,
       ClientAgreements1788310000000,
       ClientAgreementFields1788320000000,
       ClientDocuments1788330000000,
