@@ -50,6 +50,7 @@ const CORE_MODULES = [
   'policy',
   'notification',
   'clients',
+  'vendors',
   'sales',
 ];
 

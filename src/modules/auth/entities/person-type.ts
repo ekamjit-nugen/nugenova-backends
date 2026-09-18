@@ -5,6 +5,7 @@ import { ObjectLiteral, SelectQueryBuilder } from 'typeorm';
  *
  * The whole HR/payroll/attendance platform was built assuming every org member
  * is STAFF. Once the education vertical introduces STUDENT and GUARDIAN
+ * memberships — and the delivery side adds CLIENT and VENDOR ones —
  * memberships in the same `org_memberships` table, any staff-assuming query that
  * enumerates "employees/members" would silently sweep them in — generating
  * payslips for students, inflating seat counts, and adding students to the staff
@@ -12,10 +13,10 @@ import { ObjectLiteral, SelectQueryBuilder } from 'typeorm';
  * leak). `staffScope()` makes that impossible by construction: it narrows a
  * membership query to `personType = 'staff'`.
  */
-export type PersonType = 'staff' | 'student' | 'guardian' | 'client';
+export type PersonType = 'staff' | 'student' | 'guardian' | 'client' | 'vendor';
 
 /** Every allowed personType (validation + docs). */
-export const PERSON_TYPES: readonly PersonType[] = ['staff', 'student', 'guardian', 'client'];
+export const PERSON_TYPES: readonly PersonType[] = ['staff', 'student', 'guardian', 'client', 'vendor'];
 
 /** The default — every existing row and every new org member is staff. */
 export const STAFF_PERSON_TYPE: PersonType = 'staff';
