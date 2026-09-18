@@ -70,6 +70,24 @@ describe('recruitment.utils', () => {
     expect(cleanList('Python, SQL; python | Power BI')).toEqual(['Python', 'SQL', 'Power BI']);
   });
 
+  it('cleanList splits a long CV line on its slashes instead of dropping it', () => {
+    const line = 'Snowflake Snowpipe/Streams/Tasks/Dynamic Tables/Time Travel/Virtual Warehouses/Snowpark/RBAC';
+    expect(line.length).toBeGreaterThan(60);
+    expect(cleanList(line)).toEqual([
+      'Snowflake Snowpipe', 'Streams', 'Tasks', 'Dynamic Tables', 'Time Travel', 'Virtual Warehouses', 'Snowpark', 'RBAC',
+    ]);
+  });
+
+  it('cleanList keeps a short slashed skill whole', () => {
+    expect(cleanList('CI/CD, TCP/IP')).toEqual(['CI/CD', 'TCP/IP']);
+  });
+
+  it('cleanList shortens an entry that is long with no slashes', () => {
+    const [only] = cleanList(`${'word '.repeat(30)}end`);
+    expect(only.length).toBeLessThanOrEqual(60);
+    expect(only.endsWith(' ')).toBe(false);
+  });
+
   it('isCutshortFileName', () => {
     expect(isCutshortFileName('Cutshort-SagarYadav-Power-BI-Developer-June26-xvG6.pdf')).toBe(true);
     expect(isCutshortFileName('resume.pdf')).toBe(false);

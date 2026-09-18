@@ -125,19 +125,38 @@ export function looksLikeSheetNote(v: unknown): boolean {
   return false;
 }
 
-/** De-duplicated, trimmed list of short strings (skills/tags). */
+/** Shorten at a word boundary rather than mid-word. */
+const trimTo = (s: string, max: number): string => {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return (space > max * 0.6 ? cut.slice(0, space) : cut).trim();
+};
+
+/**
+ * De-duplicated, trimmed list of short strings (skills/tags).
+ *
+ * An entry over the cap is split on its slashes before being shortened: a CV line
+ * like "Snowflake Snowpipe/Streams/Tasks/Time Travel" is several skills, while
+ * "CI/CD" is one — the length is what tells them apart. Mirrors `splitTags` in
+ * the frontend, so an imported row and a typed one end up the same shape.
+ */
 export function cleanList(v: unknown, maxItems = 60, maxLen = 60): string[] {
   const raw = Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[,;|\n•]/) : [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const item of raw) {
     const s = cleanCell(item);
-    if (!s || s.length > maxLen) continue;
-    const key = s.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(s);
-    if (out.length >= maxItems) break;
+    if (!s) continue;
+    const parts: string[] = s.length <= maxLen ? [s] : s.split('/').map((x) => cleanCell(x) ?? '').filter(Boolean);
+    for (const part of parts) {
+      const value = trimTo(part, maxLen);
+      const key = value.toLowerCase();
+      if (!value || seen.has(key)) continue;
+      seen.add(key);
+      out.push(value);
+      if (out.length >= maxItems) return out;
+    }
   }
   return out;
 }
