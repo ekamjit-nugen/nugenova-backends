@@ -262,6 +262,78 @@ export class CreateDocumentDto {
 
   @IsOptional() @IsString() @MaxLength(2000)
   description?: string;
+
+  /** Ask the client to sign this one. Off unless ticked. */
+  @IsOptional() @IsBoolean()
+  signatureRequired?: boolean;
+
+  /**
+   * Record a document the CLIENT sent us, uploaded on their behalf because it
+   * arrived by email. Staff-only; the portal route sets this itself.
+   */
+  @IsOptional() @IsBoolean()
+  fromClient?: boolean;
+
+  /** Who it came from, when recording one that arrived by email. */
+  @IsOptional() @IsString() @MaxLength(200)
+  fromName?: string;
+
+  /** They want us to sign it. */
+  @IsOptional() @IsBoolean()
+  requestOurSignature?: boolean;
+}
+
+/** An admin turning the "client must sign" tick on or off after sharing. */
+export class UpdateDocumentDto {
+  @IsOptional() @IsBoolean()
+  signatureRequired?: boolean;
+
+  @IsOptional() @IsString() @MaxLength(300)
+  title?: string;
+
+  @IsOptional() @IsString() @MaxLength(2000)
+  description?: string;
+}
+
+/** A client uploading a document to us from their portal. */
+export class PortalUploadDocumentDto {
+  @IsString() @MaxLength(24)
+  fileId: string;
+
+  @IsString() @MaxLength(500)
+  fileName: string;
+
+  @IsOptional() @IsString() @MaxLength(200)
+  mimeType?: string;
+
+  @IsOptional() @IsNumber()
+  size?: number;
+
+  @IsOptional() @IsString() @MaxLength(300)
+  title?: string;
+
+  @IsOptional() @IsString() @MaxLength(2000)
+  description?: string;
+
+  /** Ask us to sign it and send it back. */
+  @IsOptional() @IsBoolean()
+  requestOurSignature?: boolean;
+}
+
+/** Signing a document — by either side. */
+export class SignDocumentDto {
+  @IsString() @MaxLength(200)
+  signerName: string;
+
+  @IsOptional() @IsEmail()
+  signerEmail?: string;
+
+  @IsOptional() @IsIn(['drawn', 'typed'])
+  method?: 'drawn' | 'typed';
+
+  /** DocumentFile id of the signed copy, when one is attached. */
+  @IsOptional() @IsString() @MaxLength(24)
+  signedFileId?: string;
 }
 
 // ── tickets ──────────────────────────────────────────────────────────────────

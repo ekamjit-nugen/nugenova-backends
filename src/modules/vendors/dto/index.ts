@@ -368,3 +368,52 @@ export class PortalSignAgreementDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VendorAgreementFieldValueDto)
   fieldValues?: VendorAgreementFieldValueDto[];
 }
+
+// ── documents (we → vendor only) ─────────────────────────────────────────────
+
+export class CreateVendorDocumentDto {
+  @IsString() @MaxLength(24)
+  fileId: string;
+
+  @IsString() @MaxLength(500)
+  fileName: string;
+
+  @IsOptional() @IsString() @MaxLength(200)
+  mimeType?: string;
+
+  @IsOptional() @IsNumber()
+  size?: number;
+
+  @IsOptional() @IsString() @MaxLength(300)
+  title?: string;
+
+  @IsOptional() @IsString() @MaxLength(2000)
+  description?: string;
+
+  /** Ask the vendor to sign this one. Off unless ticked. */
+  @IsOptional() @IsBoolean()
+  signatureRequired?: boolean;
+}
+
+export class UpdateVendorDocumentDto {
+  @IsOptional() @IsBoolean()
+  signatureRequired?: boolean;
+
+  @IsOptional() @IsString() @MaxLength(300)
+  title?: string;
+
+  @IsOptional() @IsString() @MaxLength(2000)
+  description?: string;
+}
+
+/** The vendor signing a document we shared with them. */
+export class SignVendorDocumentDto {
+  @IsString() @MaxLength(200)
+  signerName: string;
+
+  @IsOptional() @IsEmail()
+  signerEmail?: string;
+
+  @IsOptional() @IsIn(['drawn', 'typed'])
+  method?: 'drawn' | 'typed';
+}

@@ -6,8 +6,10 @@ import { VendorsCaller, VendorsService } from './vendors.service';
 import { VendorAgreementsService } from './vendor-agreements.service';
 import { VendorBillsService } from './vendor-bills.service';
 import { VendorPortalService } from './vendor-portal.service';
+import { VendorDocumentsService } from './vendor-documents.service';
 import {
   CancelVendorBillDto, CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, CreateVendorBillDto,
+  CreateVendorDocumentDto, SignVendorDocumentDto, UpdateVendorDocumentDto,
   CreateVendorContactDto, CreateVendorDto, CreateVendorEmployeeDto, DeclineVendorAgreementDto,
   InviteVendorContactDto, MarkVendorBillPaidDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
   UpdateVendorBillDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
@@ -33,6 +35,7 @@ export class VendorsController {
     private readonly agreements: VendorAgreementsService,
     private readonly billing: VendorBillsService,
     private readonly portal: VendorPortalService,
+    private readonly documents: VendorDocumentsService,
   ) {}
 
   private caller(req: any): VendorsCaller {
@@ -294,5 +297,27 @@ export class VendorsController {
   @Post(':id/bills')
   async createBill(@Req() req: any, @Param('id') id: string, @Body() dto: CreateVendorBillDto) {
     return { success: true, data: await this.billing.create(this.allowed(req, 'create'), id, dto) };
+  }
+
+  // ── documents we share with a vendor ──
+  @Get(':id/documents')
+  async listDocuments(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.documents.list(this.allowed(req, 'view').orgId, id) };
+  }
+
+  /** Share a file with the vendor; tick `signatureRequired` to ask them to sign. */
+  @Post(':id/documents')
+  async shareDocument(@Req() req: any, @Param('id') id: string, @Body() dto: CreateVendorDocumentDto) {
+    return { success: true, data: await this.documents.share(this.allowed(req, 'create'), id, dto) };
+  }
+
+  @Patch(':id/documents/:docId')
+  async updateDocument(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string, @Body() dto: UpdateVendorDocumentDto) {
+    return { success: true, data: await this.documents.update(this.allowed(req, 'edit').orgId, id, docId, dto) };
+  }
+
+  @Delete(':id/documents/:docId')
+  async removeDocument(@Req() req: any, @Param('id') id: string, @Param('docId') docId: string) {
+    return { success: true, data: await this.documents.remove(this.allowed(req, 'delete').orgId, id, docId) };
   }
 }

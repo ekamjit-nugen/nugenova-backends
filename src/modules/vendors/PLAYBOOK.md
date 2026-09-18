@@ -19,6 +19,7 @@ Ported from the legacy Nugenova `vendors` feature (Mongo `vendors`,
 | `vendor_agreement_templates` | the org's reusable paperwork (MSA, NDA, code of conduct): `required`, and `appliesToCategories` (empty = every vendor) |
 | `vendor_agreements` | the copy a vendor signs, with its signature audit record, expiry and `requiredForOnboarding` |
 | `vendor_bills` | what a vendor charged us: a line per contractor, the computed money, and the approve/pay trail |
+| `vendor_documents` | files we share with a vendor (purchase orders, rate cards, policy packs), with an opt-in "they must sign" tick |
 
 Everything is org-scoped and soft-deleted (`isDeleted`). Deleting a vendor
 cascades to its contacts and people, so a later vendor of the same name starts
@@ -167,6 +168,26 @@ bills count nowhere — they never were a cost.
 Bill numbers are `VB-00001` per org, allocated as count+1 (the house pattern)
 with a unique index on `(organization_id, bill_number)`; a concurrent raise
 fails on the index and simply takes the next number.
+
+## Documents
+
+Documents flow **one way**: we share, the vendor reads. A vendor has no upload,
+unlike a client — what they owe us is the agreements they sign.
+
+Signing is opt-in per document. `signatureRequired` is off unless an admin ticks
+it (`POST /vendors/:id/documents`, or toggled later with `PATCH`), and the tick
+can't be moved once the document is signed. A document signature never touches
+onboarding clearance — that is what agreements decide — so asking a vendor to
+sign a purchase order can't accidentally block them from supplying people.
+
+```
+GET    /vendors/:id/documents
+POST   /vendors/:id/documents            share (optionally ticking signatureRequired)
+PATCH  /vendors/:id/documents/:docId     rename, or move the tick
+DELETE /vendors/:id/documents/:docId
+GET    /vendor-portal/documents          what they can see
+POST   /vendor-portal/documents/:id/sign they sign one we asked for
+```
 
 ## The portal
 
