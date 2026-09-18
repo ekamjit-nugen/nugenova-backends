@@ -25,6 +25,7 @@ import {
 } from '../../../bootstrap/mail/email-layout';
 import { AttendanceService } from './attendance.service';
 import { DEFAULT_TZ, dayAnchorUtc, dayBoundsUtc } from '../util/tz-day.util';
+import { STALE_OPEN_HOURS } from '../util/session-window';
 import { DEFAULT_WORK_TIMING } from '../util/status-compute';
 
 interface Person { name: string; email: string | null }
@@ -32,7 +33,10 @@ interface Person { name: string; email: string | null }
 const HOUR_MS = 3_600_000;
 // A session still open this long after its clock-in is treated as a forgotten
 // checkout and auto-closed (spans an overnight gap without being punitive).
-const STALE_OPEN_HOURS = 18;
+// Shared with the clock-out path: below this the employee still owns the
+// session, above it this cron does. One constant, so there is no gap or overlap
+// between the two — see util/session-window.
+export { STALE_OPEN_HOURS };
 // Don't reach back further than this for stale sessions (ancient rows are noise).
 const RECONCILE_LOOKBACK_DAYS = 7;
 // Roles that never clock in (blocked at check-in) — never absentee-marked/nudged.

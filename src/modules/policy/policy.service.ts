@@ -1070,8 +1070,16 @@ export class PolicyService {
    * non-deleted, non-template, in-effect timing policies, minus exclusions. Nexora
    * has no per-employee attach tier — 'specific' (by userId) covers it.
    */
-  async resolveForEmployee(orgId: string, userId: string): Promise<ResolvedWorkContext> {
-    const now = new Date();
+  async resolveForEmployee(
+    orgId: string,
+    userId: string,
+    opts: { at?: Date; policyId?: string } = {},
+  ): Promise<ResolvedWorkContext> {
+    // `at` is the moment the answer is FOR, not the moment it is asked. An
+    // attendance record has to be judged against the policy that governed the
+    // day it belongs to; resolving against "now" silently re-scores history
+    // every time a policy is created or edited.
+    const now = opts.at ?? new Date();
     const { scope, exempt } = await this.scopeFor(orgId, userId);
     // The owner is not governed by the org's work-timing policies.
     if (exempt) {
@@ -1094,7 +1102,14 @@ export class PolicyService {
       return tier[0] || null;
     };
 
+    // A record that recorded WHICH policy it was held to wins over re-deriving
+    // one — that stamp is the whole point of appliedShiftPolicyId.
+    const stamped = opts.policyId
+      ? candidates.find((p) => p.id === opts.policyId) ?? null
+      : null;
+
     const winner =
+      stamped ||
       pick((p) => p.applicableTo === 'specific' && matchesApplicability(p, scope)) ||
       pick(
         (p) =>

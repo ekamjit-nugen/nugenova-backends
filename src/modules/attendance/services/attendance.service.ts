@@ -40,7 +40,9 @@ import {
   DEFAULT_WORK_TIMING,
   WorkTiming,
   computeShiftStatusFields,
+  detectNightShiftWindow,
 } from '../util/status-compute';
+import { isSessionStillRunning } from '../util/session-window';
 import {
   CheckInDto,
   CheckOutDto,
@@ -175,8 +177,14 @@ export class AttendanceService {
   private async resolveContext(
     userId: string,
     orgId: string,
-  ): Promise<{ wt: WorkTiming; workLocation: WorkLocationConfig | null; wfhConfig: WfhConfig | null }> {
-    const ctx = await this.policyService.resolveForEmployee(orgId, userId);
+    opts: { at?: Date; policyId?: string } = {},
+  ): Promise<{
+    wt: WorkTiming;
+    workLocation: WorkLocationConfig | null;
+    wfhConfig: WfhConfig | null;
+    policyId: string | null;
+  }> {
+    const ctx = await this.policyService.resolveForEmployee(orgId, userId, opts);
     const p = ctx.workTiming;
     const d = DEFAULT_WORK_TIMING;
     const wt: WorkTiming = {
@@ -190,7 +198,12 @@ export class AttendanceService {
       minHoursForPresent: p?.minHoursForPresent ?? d.minHoursForPresent,
       isNightShift: p?.isNightShift ?? d.isNightShift,
     };
-    return { wt, workLocation: ctx.workLocation, wfhConfig: ctx.wfhConfig };
+    return {
+      wt,
+      workLocation: ctx.workLocation,
+      wfhConfig: ctx.wfhConfig,
+      policyId: ctx.policyId ?? null,
+    };
   }
 
   // ── policy enforcement (WFH allowed-days/cap + office geo-fence) ─────────────
@@ -430,6 +443,9 @@ export class AttendanceService {
     const { wt } = await this.resolveContext(
       record.employeeId,
       record.organizationId as string,
+      // Judge the record by the policy stamped on it, or failing that by the one
+      // in force on its own day — never by whatever is in force right now.
+      { at: record.date ? new Date(record.date) : undefined, policyId: record.appliedShiftPolicyId ?? undefined },
     );
     const breakHours = (wt.breakMinutes || 0) / 60;
     const standardHours = wt.minWorkingHours > 0 ? wt.minWorkingHours : 8;
@@ -476,6 +492,52 @@ export class AttendanceService {
     return rows.find((r) => r.entryType !== 'manual') || rows[0] || null;
   }
 
+  /**
+   * The record holding this employee's OPEN session, wherever it lives.
+   *
+   * Clock actions used to resolve "today" and look only there. For a shift that
+   * wraps midnight that is never the right record: a 16:30–01:30 employee opens
+   * a session on one calendar day and closes it on the next, so clock-out found
+   * nothing, told them to clock in first, and they obliged — opening a second,
+   * seconds-long record while their real session stayed open for the cron to
+   * close at an invented time.
+   *
+   * So: today's open session if there is one, else — for a night shift only —
+   * yesterday's, while it is still plausibly running. A day shift keeps the old
+   * behaviour, because there an open session from yesterday is a genuine missed
+   * checkout and closing it at `now` would bank a ~24h day.
+   */
+  private async findOpenSessionRecord(
+    orgId: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<{ record: AttendanceEntity; carriedOver: boolean } | null> {
+    const tz = this.orgTimezone();
+    const today = dayBoundsUtc(now, tz);
+    const todays = await this.findTodayRecord(orgId, userId, today.start, today.end);
+    if (todays && this.findOpenSegment(todays)) {
+      return { record: todays, carriedOver: false };
+    }
+
+    const { wt } = await this.resolveContext(userId, orgId);
+    const isNight =
+      wt.isNightShift === true || detectNightShiftWindow(wt.startTime, wt.endTime);
+    if (isNight) {
+      const yday = dayBoundsUtc(now, tz, -1);
+      const prev = await this.findTodayRecord(orgId, userId, yday.start, yday.end);
+      const open = prev ? this.findOpenSegment(prev) : undefined;
+      // Past the staleness threshold the session belongs to the reconcile cron,
+      // not to this clock-out — see util/session-window.
+      if (prev && open && isSessionStillRunning(new Date(open.checkInTime), now)) {
+        return { record: prev, carriedOver: true };
+      }
+    }
+
+    // No open session anywhere; today's record (if any) is still the one a
+    // caller wants to read or append to.
+    return todays ? { record: todays, carriedOver: false } : null;
+  }
+
   async checkIn(c: Caller, dto: CheckInDto): Promise<AttendanceEntity> {
     this.validateNotAdmin(c.roles, c.orgRole);
 
@@ -492,12 +554,22 @@ export class AttendanceService {
     // against the resolved policy's work-location.
     const dayKey = dayKeyInTz(now, this.orgTimezone());
     const isWfh = await this.wfhRequests.hasApprovedForDay(c.orgId, c.userId, dayKey);
-    const { wt, workLocation } = await this.resolveContext(c.userId, c.orgId);
+    const { wt, workLocation, policyId } = await this.resolveContext(c.userId, c.orgId);
     let geoCheck: GeoCheck;
     if (isWfh) {
       geoCheck = { mode: 'home', verified: null, distanceKm: null, officeName: null };
     } else {
       geoCheck = this.enforceWorkLocation(workLocation, location);
+    }
+
+    // A night shift's session is still open on the PREVIOUS org-day. Clocking in
+    // again would strand it and open a phantom day alongside it — which is how a
+    // seconds-long record with equal in and out times gets created.
+    const carried = await this.findOpenSessionRecord(c.orgId, c.userId, now);
+    if (carried?.carriedOver) {
+      throw new ConflictException(
+        'You are still clocked in from your last shift. Please clock out first.',
+      );
     }
 
     const record = await this.findTodayRecord(c.orgId, c.userId, start, end);
@@ -575,6 +647,9 @@ export class AttendanceService {
       checkInIP: ip,
       checkInLocation: location,
       entryType: 'system',
+      // Which policy this day was judged under. Without it a later policy edit
+      // silently re-scores days that were already settled.
+      appliedShiftPolicyId: policyId,
       status: isWfh ? 'wfh' : fields.status,
       isLateArrival: isWfh ? false : fields.isLateArrival,
       lateByMinutes: isWfh ? 0 : fields.lateByMinutes,
@@ -612,15 +687,16 @@ export class AttendanceService {
   async checkOut(c: Caller, dto: CheckOutDto): Promise<AttendanceEntity> {
     this.validateNotAdmin(c.roles, c.orgRole);
 
-    const { start, end } = this.getTodayDateRange();
-    const record = await this.findTodayRecord(c.orgId, c.userId, start, end);
+    const now = new Date();
+    // Not "today's record" — the record with the open session, which for a night
+    // shift is yesterday's. See findOpenSessionRecord.
+    const found = await this.findOpenSessionRecord(c.orgId, c.userId, now);
+    const record = found?.record;
     if (!record || !this.findOpenSegment(record)) {
       throw new NotFoundException(
-        'No active clock-in found for today. Please clock in first.',
+        'No active clock-in found. Please clock in first.',
       );
     }
-
-    const now = new Date();
     const location = (dto.location as GeoLocation) || null;
     const ip = c.ip || null;
 
@@ -676,12 +752,17 @@ export class AttendanceService {
       (workLocation.offices || []).some(
         (o) => Number.isFinite(o.latitude) && Number.isFinite(o.longitude),
       );
-    const record = await this.findTodayRecord(c.orgId, c.userId, start, end);
+    // A night-shift session opened yesterday is still THIS person's current
+    // session; reporting "not clocked in" would show them a Clock In button
+    // mid-shift and invite the double-record this fix exists to prevent.
+    const found = await this.findOpenSessionRecord(c.orgId, c.userId);
+    const record = found?.record;
     if (!record) {
       return {
         checkedIn: false,
         checkedOut: false,
         hasOpenSession: false,
+        carriedOver: false,
         record: null,
         totalHoursToday: 0,
         sessionCount: 0,
@@ -703,6 +784,9 @@ export class AttendanceService {
       checkedIn: true,
       checkedOut: !open,
       hasOpenSession: !!open,
+      // True when the open session started on the previous org-day, so the UI
+      // can say "since 17:21 yesterday" rather than implying it began today.
+      carriedOver: !!found?.carriedOver,
       record,
       totalHoursToday: parseFloat((completedMs / 3_600_000).toFixed(2)),
       sessionCount: (record.workSegments || []).length,
