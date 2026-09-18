@@ -228,6 +228,73 @@ defineFeature(feature, (test) => {
     });
   });
 
+  test('a cancelled round can be put back on the calendar', ({ given, and, when, then }) => {
+    let ctx: Awaited<ReturnType<typeof withCandidateInOpening>>;
+    let panellist: { userId: string; token: string };
+    let interview: any;
+    const ratings = () => Object.fromEntries(interview.criteria.map((c: string) => [c, 4]));
+    given(/^an organization with candidate "(.*)" in opening "(.*)"$/, async (name: string, title: string) => {
+      ctx = await withCandidateInOpening(name, title);
+    });
+    and(/^an interview "(.*)" that the owner cancelled$/, async (round: string) => {
+      panellist = await h.createEmployeeMember(ctx.org);
+      interview = (await api().post(`${API}/interviews`).set(auth(ctx.org.ownerToken)).send({
+        applicationId: ctx.applicationId, roundName: round, type: 'technical', scheduledAt: new Date(Date.now() - 3_600_000).toISOString(),
+        durationMin: 60, interviewerIds: [panellist.userId],
+      }).expect(201)).body.data;
+      await api().patch(`${API}/interviews/${interview.id}`).set(auth(ctx.org.ownerToken)).send({ status: 'cancelled' }).expect(200);
+    });
+    then('the panellist cannot submit a scorecard while it is cancelled', async () => {
+      await api().post(`${API}/interviews/${interview.id}/feedback`).set(auth(panellist.token))
+        .send({ ratings: ratings(), recommendation: 'yes' }).expect(400);
+    });
+    and('it is left out of feedback due', async () => {
+      const totals = (await api().get(`${API}/analytics`).set(auth(ctx.org.ownerToken)).expect(200)).body.data.totals;
+      expect(totals.pendingFeedback).toBe(0);
+      const rows = (await api().get(`${API}/interviews`).query({ scope: 'all', pendingFeedback: '1' }).set(auth(ctx.org.ownerToken)).expect(200)).body.data;
+      expect(rows).toEqual([]);
+    });
+    when('the owner reopens it at a new time', async () => {
+      await api().patch(`${API}/interviews/${interview.id}`).set(auth(ctx.org.ownerToken))
+        .send({ scheduledAt: new Date(Date.now() - 1_800_000).toISOString(), status: 'scheduled' }).expect(200);
+    });
+    then('the round is scheduled again and the panellist can submit their scorecard', async () => {
+      const again = (await api().get(`${API}/interviews/${interview.id}`).set(auth(ctx.org.ownerToken)).expect(200)).body.data;
+      expect(again.status).toBe('scheduled');
+      await api().post(`${API}/interviews/${interview.id}/feedback`).set(auth(panellist.token))
+        .send({ ratings: ratings(), recommendation: 'yes' }).expect(201);
+    });
+  });
+
+  test("the dashboard's feedback-due count is the list you land on", ({ given, and, when, then }) => {
+    let ctx: Awaited<ReturnType<typeof withCandidateInOpening>>;
+    let interview: any;
+    let totals: any;
+    given(/^an organization with candidate "(.*)" in opening "(.*)"$/, async (name: string, title: string) => {
+      ctx = await withCandidateInOpening(name, title);
+    });
+    and('a finished interview with two panellists and no scorecards yet', async () => {
+      const a = await h.createEmployeeMember(ctx.org);
+      const b = await h.createEmployeeMember(ctx.org);
+      interview = (await api().post(`${API}/interviews`).set(auth(ctx.org.ownerToken)).send({
+        applicationId: ctx.applicationId, roundName: 'Panel Round', type: 'technical', scheduledAt: new Date(Date.now() - 7_200_000).toISOString(),
+        durationMin: 45, interviewerIds: [a.userId, b.userId],
+      }).expect(201)).body.data;
+    });
+    when('the owner opens the dashboard', async () => {
+      totals = (await api().get(`${API}/analytics`).set(auth(ctx.org.ownerToken)).expect(200)).body.data.totals;
+    });
+    then(/^feedback due counts (\d+) interview$/, (n: string) => {
+      // Interviews, not interviewer slots — two panellists owe a scorecard, but it is one row to open.
+      expect(totals.pendingFeedback).toBe(Number(n));
+    });
+    and('opening the feedback-due list returns that same interview', async () => {
+      const rows = (await api().get(`${API}/interviews`).query({ scope: 'all', pendingFeedback: '1' }).set(auth(ctx.org.ownerToken)).expect(200)).body.data;
+      expect(rows).toHaveLength(totals.pendingFeedback);
+      expect(rows[0].id).toBe(interview.id);
+    });
+  });
+
   test('importing the legacy spreadsheet merges people across sheets', ({ given, when, then, and }) => {
     let org: CreatedOrg;
     const rows = [

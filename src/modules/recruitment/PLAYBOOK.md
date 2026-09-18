@@ -18,6 +18,8 @@ on a stage pipeline with interviews, scorecards, offers and an onboarding handof
 
 **Wording:** an *opening* is shown in the app as a **Category** (the team's sheets are capabilities: Data Engineer, SAP, DevOps…). Tables, routes, DTOs and payload fields keep `opening`; only the labels and user-facing messages say category.
 
+**Counts:** a tile shows **one** number with the unit spelled out, never `a / b`. People and *category entries* are different things — one person can sit in several categories — so a number that counts entries says so (the funnel and Category health), and everything else counts people. Every count is a link to the list that produces it: KPI tiles carry `href`, funnel stages open `/recruitment/candidates?pool=pipeline&stageId=…`, client-submission numbers open `/recruitment/submissions?status=…`, and "Feedback due" opens `/recruitment/interviews?scope=all&tab=todo`. When a count and its list are computed in different places, keep the windows identical — `InterviewsService.FEEDBACK_WINDOW_DAYS` matches the interviews page's `LOOKBACK_DAYS`, covered by an e2e scenario.
+
 ## Entities (migration `1788430000000-Recruitment`)
 
 | Table | Purpose |

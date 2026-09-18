@@ -53,6 +53,21 @@ Feature: Recruitment — talent pool, pipeline, interviews and offers
     Then the interview is completed with an overall rating of 4
     And a different employee cannot open that interview
 
+  Scenario: a cancelled round can be put back on the calendar
+    Given an organization with candidate "Ravi Menon" in opening "Full Stack Developer"
+    And an interview "Technical Round 1" that the owner cancelled
+    Then the panellist cannot submit a scorecard while it is cancelled
+    And it is left out of feedback due
+    When the owner reopens it at a new time
+    Then the round is scheduled again and the panellist can submit their scorecard
+
+  Scenario: the dashboard's feedback-due count is the list you land on
+    Given an organization with candidate "Neha Sharma" in opening "Data Analyst"
+    And a finished interview with two panellists and no scorecards yet
+    When the owner opens the dashboard
+    Then feedback due counts 1 interview
+    And opening the feedback-due list returns that same interview
+
   Scenario: importing the legacy spreadsheet merges people across sheets
     Given an organization
     When the owner dry-runs an import of rows from two role sheets sharing one email
