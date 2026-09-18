@@ -7,6 +7,8 @@ import { MongoClient } from 'mongodb';
 import { Client as Pg } from 'pg';
 import { S3Client, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
+import { newObjectId } from '../object-id';
+
 /**
  * Bring the legacy files that the earlier ETLs left behind into the new app.
  *
@@ -179,11 +181,18 @@ async function migrateAvatars(pg: Pg, s3: S3Client, bucket: string, counts: Coun
     }
     const key = `orgs/${TARGET_ORG}/avatars/${u.id}.${extForMime(mime)}`;
     await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: mime }));
+    // `document_files.id` is a 24-char ObjectId, so an avatar row can't be keyed
+    // by the user id with a prefix. Re-use this user's existing avatar row when
+    // there is one, which is what keeps a re-run from piling up duplicates.
+    const existing = await pg.query<{ id: string }>(
+      `SELECT id FROM document_files WHERE organization_id = $1 AND uploaded_by = $2 AND category = 'avatar' LIMIT 1`,
+      [TARGET_ORG, u.id],
+    );
     await pg.query(
       `INSERT INTO document_files (id, organization_id, uploaded_by, original_name, mime_type, size, driver, storage_key, content, category, is_deleted, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,'s3',$7,NULL,'avatar',false,now(),now())
        ON CONFLICT (id) DO UPDATE SET storage_key=EXCLUDED.storage_key, mime_type=EXCLUDED.mime_type, size=EXCLUDED.size, is_deleted=false`,
-      [`avatar-${u.id}`.slice(0, 32), TARGET_ORG, u.id, `${u.id}.${extForMime(mime)}`, mime, body.length, key],
+      [existing.rows[0]?.id ?? newObjectId(), TARGET_ORG, u.id, `${u.id}.${extForMime(mime)}`, mime, body.length, key],
     );
     bump(counts, 'avatars.copied');
   }
