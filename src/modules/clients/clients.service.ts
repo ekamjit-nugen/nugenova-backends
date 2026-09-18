@@ -80,6 +80,9 @@ export class ClientsService {
       tags: dto.tags ?? [],
       notes: dto.notes ?? null,
       primaryContact: dto.primaryContact ?? null,
+      // The portal starts closed: giving an outside company a login is a
+      // deliberate act, not a side effect of adding them.
+      portalEnabled: false,
       createdBy: caller.userId,
       updatedBy: caller.userId,
       isDeleted: false,
@@ -244,6 +247,7 @@ export class ClientsService {
   async inviteContact(caller: ClientsCaller, clientId: string, contactId: string, dto: InviteContactDto) {
     const orgId = caller.orgId;
     const client = await this.require(orgId, clientId);
+    if (!client.portalEnabled) throw new BadRequestException('Turn on portal access for this client before inviting anyone');
     const contact = await this.contacts.findOne({ where: { id: contactId, clientId, organizationId: orgId, isDeleted: false } });
     if (!contact) throw new NotFoundException('Contact not found');
     if (!contact.email) throw new BadRequestException('Add an email to this contact before inviting them to the portal');
@@ -363,10 +367,53 @@ export class ClientsService {
 
   // ── portal (client-role caller) ─────────────────────────────────────────────
 
-  /** The clientId a portal user belongs to (from their client-role membership). */
+  /**
+   * The clientId a portal user belongs to (from their client-role membership),
+   * or null when the client's portal switch is off — which locks everyone at
+   * that client out at once, without revoking their logins one by one.
+   */
   async clientIdForUser(orgId: string, userId: string): Promise<string | null> {
     const m = await this.memberships.findOne({ where: { organizationId: orgId, userId, role: 'client', status: 'active' } });
-    return m?.clientId ?? null;
+    if (!m?.clientId) return null;
+    const client = await this.clients.findOne({ where: { id: m.clientId, organizationId: orgId, isDeleted: false } });
+    return client?.portalEnabled ? m.clientId : null;
+  }
+
+  /**
+   * The master switch for a client's portal.
+   *
+   * Turning it ON invites every contact with an email that doesn't already have
+   * a login — that is what "they receive an email to join" means; contacts are
+   * people you deliberately added, so nobody unexpected is emailed. A contact
+   * who can't be invited (their email is already a staff member, or a portal
+   * user of another client) is skipped and counted rather than failing the whole
+   * thing: opening the portal shouldn't hinge on one bad row.
+   *
+   * Turning it OFF leaves existing logins intact but refuses every portal read
+   * while off.
+   */
+  async setPortalEnabled(caller: ClientsCaller, clientId: string, enabled: boolean) {
+    const client = await this.require(caller.orgId, clientId);
+    if (client.portalEnabled === enabled) return { clientId, portalEnabled: enabled, invited: 0, skipped: 0 };
+    client.portalEnabled = enabled;
+    client.updatedBy = caller.userId;
+    await this.clients.save(client);
+
+    if (!enabled) return { clientId, portalEnabled: false, invited: 0, skipped: 0 };
+
+    const contacts = await this.contacts.find({ where: { organizationId: caller.orgId, clientId, isDeleted: false } });
+    let invited = 0;
+    let skipped = 0;
+    for (const contact of contacts) {
+      if (!contact.email || contact.userId) continue;
+      try {
+        await this.inviteContact(caller, clientId, contact.id, {});
+        invited++;
+      } catch {
+        skipped++;
+      }
+    }
+    return { clientId, portalEnabled: true, invited, skipped };
   }
 
   /** Portal home: the client's profile, delivery team, and shared boards. */

@@ -7,7 +7,7 @@ import { VendorsService } from './vendors.service';
  * permission gates are covered by features/vendors.e2e-spec.ts.
  */
 describe('VendorsService', () => {
-  let vendors: any, contacts: any, people: any;
+  let vendors: any, contacts: any, people: any, memberships: any, users: any;
   let service: VendorsService;
 
   const admin = { userId: 'owner1', orgId: 'orgA', isAdmin: true };
@@ -21,8 +21,8 @@ describe('VendorsService', () => {
       create: jest.fn((v) => ({ ...v })),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     });
-    vendors = repo(); contacts = repo(); people = repo();
-    service = new VendorsService(vendors, contacts, people);
+    vendors = repo(); contacts = repo(); people = repo(); memberships = repo(); users = repo();
+    service = new VendorsService(vendors, contacts, people, memberships, users);
   });
 
   describe('create', () => {

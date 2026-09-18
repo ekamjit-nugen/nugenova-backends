@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 
 import { OrgMembershipEntity } from '../../auth/entities/org-membership.entity';
 import { staffScope } from '../../auth/entities/person-type';
+import { VendorEntity } from '../../vendors/entities/vendor.entity';
 import { UserEntity } from '../../auth/entities/user.entity';
 import { RoleEntity } from '../../auth/entities/role.entity';
 import { OrganizationEntity } from '../entities/organization.entity';
@@ -22,6 +23,14 @@ import { emailChangedNoticeEmail } from '../../../bootstrap/mail/email-layout';
 
 export interface MemberView {
   membershipId: string;
+  /**
+   * `staff` for the org's own people; `vendor` for a contractor a vendor
+   * supplies, who is a secondary member — in the Directory, but never in
+   * payroll, the attendance roster, seat counts or leave.
+   */
+  personType?: string;
+  /** The vendor supplying this person, when they are a secondary member. */
+  suppliedBy?: { vendorId: string; companyName: string } | null;
   userId: string | null;
   email: string | null;
   firstName: string | null;
@@ -202,14 +211,29 @@ export class MembershipService {
     return this.toView(membership, user);
   }
 
-  async list(orgId: string): Promise<MemberView[]> {
-    // staffScope: the org directory is the STAFF roster. Students/guardians (the
-    // education vertical) live in the same table but are enumerated through their
-    // own surfaces, never this member list.
-    const memberships = await this.membershipRepo.find({
-      where: staffScope({ organizationId: orgId }),
-      order: { createdAt: 'ASC' },
-    });
+  /**
+   * The org directory.
+   *
+   * staffScope by default: this is the STAFF roster, and students/guardians (the
+   * education vertical) live in the same table but are enumerated through their
+   * own surfaces. `includeSecondary` additionally returns the contractors a
+   * vendor supplies — people who work here without being employed here. They are
+   * badged with their vendor and are still excluded everywhere staffScope is
+   * used: payroll, the attendance roster, seat counts, leave.
+   */
+  async list(orgId: string, opts: { includeSecondary?: boolean } = {}): Promise<MemberView[]> {
+    const memberships = opts.includeSecondary
+      ? await this.membershipRepo.find({
+          where: [
+            staffScope({ organizationId: orgId }),
+            { organizationId: orgId, personType: 'vendor' },
+          ],
+          order: { createdAt: 'ASC' },
+        })
+      : await this.membershipRepo.find({
+          where: staffScope({ organizationId: orgId }),
+          order: { createdAt: 'ASC' },
+        });
     // Default ordering: active (and any non-deactivated) members first, then
     // deactivated ones at the bottom. Stable sort preserves join order within
     // each group (Array.prototype.sort is stable in modern Node).
@@ -222,9 +246,22 @@ export class MembershipService {
       ? await this.userRepo.find({ where: { id: In(userIds) } })
       : [];
     const byId = new Map(users.map((u) => [u.id, u]));
-    return memberships.map((m) =>
-      this.toView(m, m.userId ? byId.get(m.userId) : undefined),
-    );
+
+    // Name the vendor behind each secondary member, so the Directory can say
+    // "Supplied by Acme" rather than showing an unexplained outsider.
+    const vendorIds = [...new Set(memberships.map((m) => m.vendorId).filter(Boolean) as string[])];
+    const vendors = vendorIds.length
+      ? await this.membershipRepo.manager.find(VendorEntity, { where: { id: In(vendorIds) } })
+      : [];
+    const vendorById = new Map(vendors.map((v) => [v.id, v]));
+
+    return memberships.map((m) => {
+      const view = this.toView(m, m.userId ? byId.get(m.userId) : undefined);
+      view.personType = m.personType;
+      const vendor = m.vendorId ? vendorById.get(m.vendorId) : undefined;
+      view.suppliedBy = vendor ? { vendorId: vendor.id, companyName: vendor.companyName } : null;
+      return view;
+    });
   }
 
   async get(orgId: string, membershipId: string): Promise<MemberView> {

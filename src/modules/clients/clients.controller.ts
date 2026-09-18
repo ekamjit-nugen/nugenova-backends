@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { permMapAllows } from '../organization/guards/require-permission.decorator';
 import { ClientsCaller, ClientsService } from './clients.service';
 import {
-  AssignEmployeeDto, CreateAgreementDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, PortalUploadDocumentDto, ShareBoardDto, SignAgreementDto, SignDocumentDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateDocumentDto, UpdateTicketDto,
+  AssignEmployeeDto, CreateAgreementDto, SetClientPortalDto, CreateAgreementTemplateDto, CreateClientDto, CreateContactDto, CreateDocumentDto, CreateTicketDto, InviteContactDto, PortalCommentDto, PortalUploadDocumentDto, ShareBoardDto, SignAgreementDto, SignDocumentDto, TicketMessageDto, UpdateAgreementDto, UpdateAgreementTemplateDto, UpdateClientDto, UpdateContactDto, UpdateDocumentDto, UpdateTicketDto,
 } from './dto';
 
 /**
@@ -309,6 +309,12 @@ export class ClientsController {
   @Delete(':id/agreements/:agreementId')
   async deleteAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
     return { success: true, data: await this.clients.deleteAgreement(this.allowed(req, 'delete').orgId, id, agreementId) };
+  }
+
+  /** The master switch — turning it on invites the client's contacts. */
+  @Patch(':id/portal')
+  async setPortalEnabled(@Req() req: any, @Param('id') id: string, @Body() dto: SetClientPortalDto) {
+    return { success: true, data: await this.clients.setPortalEnabled(this.allowed(req, 'edit'), id, dto.enabled) };
   }
 
   // ── document vault (admin) ──

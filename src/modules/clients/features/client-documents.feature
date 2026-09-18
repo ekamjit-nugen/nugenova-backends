@@ -40,6 +40,19 @@ Feature: Client documents — both directions, and signing only when asked
     Then it is marked as having come from the client by email
     And the client can see it in their portal
 
+  Scenario: the client portal is closed until someone opens it
+    Given an organization with a client and a contact with an email
+    When the owner tries to invite that contact
+    Then the invite is refused because the portal is off
+    When the owner turns the portal on
+    Then the contact is invited and emailed
+
+  @security
+  Scenario: turning the client portal off locks them out without deleting the login
+    Given an organization with a client and a portal user
+    When the owner turns the portal off
+    Then their portal is closed
+
   @security
   Scenario: a client cannot sign what was never asked of them
     Given an organization with a client and a portal user

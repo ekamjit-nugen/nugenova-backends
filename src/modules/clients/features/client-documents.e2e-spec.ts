@@ -64,6 +64,8 @@ defineFeature(feature, (test) => {
     const client = (await as(o.ownerToken).post('/clients', { companyName }).expect(201)).body.data;
     const email = randomEmail('clientportal');
     const contact = (await as(o.ownerToken).post(`/clients/${client.id}/contacts`, { name: 'Rohan Kapoor', email }).expect(201)).body.data;
+    // The portal is closed until someone opens it for this client.
+    await as(o.ownerToken).patch(`/clients/${client.id}/portal`, { enabled: true }).expect(200);
     const invited = (await as(o.ownerToken).post(`/clients/${client.id}/contacts/${contact.id}/invite`, {}).expect(201)).body.data;
     portalUserIds.add(invited.userId);
     return { clientId: client.id as string, portalToken: await h.mintToken(email) };
@@ -187,6 +189,47 @@ defineFeature(feature, (test) => {
     });
     and('the client can see it in their portal', async () => {
       expect(await portalDoc(portalToken, docId)).toMatchObject({ id: docId, origin: 'client' });
+    });
+  });
+
+  test('the client portal is closed until someone opens it', ({ given, when, then }) => {
+    let contactId: string;
+    let email: string;
+
+    given('an organization with a client and a contact with an email', async () => {
+      org = await newOrg();
+      const client = (await as(org.ownerToken).post('/clients', { companyName: 'Acme Retail' }).expect(201)).body.data;
+      clientId = client.id;
+      email = randomEmail('clientportal');
+      contactId = (await as(org.ownerToken).post(`/clients/${clientId}/contacts`, { name: 'Rohan Kapoor', email }).expect(201)).body.data.id;
+    });
+    when('the owner tries to invite that contact', async () => {
+      res = await as(org.ownerToken).post(`/clients/${clientId}/contacts/${contactId}/invite`, {});
+    });
+    then('the invite is refused because the portal is off', () => {
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(/Turn on portal access/);
+    });
+    when('the owner turns the portal on', async () => {
+      res = await as(org.ownerToken).patch(`/clients/${clientId}/portal`, { enabled: true }).expect(200);
+    });
+    then('the contact is invited and emailed', async () => {
+      expect(res.body.data).toMatchObject({ portalEnabled: true, invited: 1, skipped: 0 });
+      const detail = await as(org.ownerToken).get(`/clients/${clientId}`).expect(200);
+      const contact = detail.body.data.contacts.find((c: { id: string }) => c.id === contactId);
+      expect(contact.userId).toBeTruthy();
+      portalUserIds.add(contact.userId);
+    });
+  });
+
+  test('turning the client portal off locks them out without deleting the login', ({ given, when, then }) => {
+    given('an organization with a client and a portal user', givenClientWithPortal);
+    when('the owner turns the portal off', async () => {
+      await as(org.ownerToken).patch(`/clients/${clientId}/portal`, { enabled: false }).expect(200);
+    });
+    then('their portal is closed', async () => {
+      res = await as(portalToken).get('/clients/portal/documents');
+      expect(res.status).toBe(403);
     });
   });
 

@@ -202,6 +202,14 @@ POST   /vendor-portal/documents/:id/sign they sign one we asked for
 `/api/v1/vendor-portal` — its own path, not `vendors/portal/*`, so these routes
 can never be shadowed by the staff controller's `:id` routes.
 
+**`vendors.portalEnabled` is the master switch.** Nobody at a vendor can sign in
+until someone turns it on (`PATCH /vendors/:id/portal`), and turning it off locks
+everyone there out at once — checked on every portal read, so existing logins are
+kept rather than revoked one by one. Turning it ON invites every contact with an
+email that has no login yet: that is the "email to join". A contact who cannot be
+invited (their email is already a staff member, or a portal user of another
+vendor) is skipped and counted rather than failing the whole switch.
+
 A portal user is an OrgMembership with `role='vendor'`, `personType='vendor'`
 and a `vendorId` — the vendor mirror of a client portal login. `personType` is
 what keeps them out of `staffScope()`: payroll, the attendance roster, headcount

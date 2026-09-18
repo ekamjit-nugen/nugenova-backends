@@ -93,6 +93,16 @@ export class UpdateClientDto {
 
   @IsOptional() @ValidateNested() @Type(() => PrimaryContactDto)
   primaryContact?: PrimaryContactDto;
+
+  /** Let this client sign in to the portal. Turning it on invites their contacts. */
+  @IsOptional() @IsBoolean()
+  portalEnabled?: boolean;
+}
+
+/** The portal master switch for a client. */
+export class SetClientPortalDto {
+  @IsBoolean()
+  enabled: boolean;
 }
 
 export class CreateContactDto {

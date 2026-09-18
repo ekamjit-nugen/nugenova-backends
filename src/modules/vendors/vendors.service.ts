@@ -1,6 +1,10 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
+
+import { OrgMembershipEntity } from '../auth/entities/org-membership.entity';
+import { UserEntity } from '../auth/entities/user.entity';
 
 import { VendorEntity } from './entities/vendor.entity';
 import { VendorContactEntity } from './entities/vendor-contact.entity';
@@ -31,6 +35,8 @@ export class VendorsService {
     @InjectRepository(VendorEntity) private readonly vendors: Repository<VendorEntity>,
     @InjectRepository(VendorContactEntity) private readonly contacts: Repository<VendorContactEntity>,
     @InjectRepository(VendorEmployeeEntity) private readonly people: Repository<VendorEmployeeEntity>,
+    @InjectRepository(OrgMembershipEntity) private readonly memberships: Repository<OrgMembershipEntity>,
+    @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
   ) {}
 
   // ── vendors ────────────────────────────────────────────────────────────────
@@ -51,6 +57,9 @@ export class VendorsService {
       onboardingStatus: 'invited',
       onboardedAt: null,
       timeTrackingEnabled: dto.timeTrackingEnabled ?? false,
+      // The portal starts closed: giving an outside company a login is a
+      // deliberate act, not a side effect of adding them.
+      portalEnabled: false,
       billingAddress: dto.billingAddress ?? null,
       primaryContact: dto.primaryContact ?? null,
       tags: dto.tags ?? [],
@@ -108,6 +117,8 @@ export class VendorsService {
     if (dto.taxId !== undefined) vendor.taxId = dto.taxId ?? null;
     if (dto.currency !== undefined) vendor.currency = dto.currency?.toUpperCase() || vendor.currency;
     if (dto.timeTrackingEnabled !== undefined) vendor.timeTrackingEnabled = dto.timeTrackingEnabled;
+    // `portalEnabled` is handled by VendorPortalService.setPortalEnabled, which
+    // also sends the invitations — set it there, not here.
     if (dto.billingAddress !== undefined) vendor.billingAddress = dto.billingAddress ?? null;
     if (dto.primaryContact !== undefined) vendor.primaryContact = dto.primaryContact ?? null;
     if (dto.tags !== undefined) vendor.tags = dto.tags ?? [];
@@ -259,6 +270,86 @@ export class VendorsService {
     const res = await this.people.update({ id: employeeId, organizationId: orgId, vendorId }, { isDeleted: true });
     if (!res.affected) throw new NotFoundException('Vendor employee not found');
     return { id: employeeId };
+  }
+
+  // ── secondary members ──────────────────────────────────────────────────────
+
+  /**
+   * Bring a supplied contractor into the org as a **secondary member**: they
+   * appear in the Directory badged with the vendor supplying them, so everyone
+   * can see who is working here — while `personType = 'vendor'` keeps them out
+   * of payroll, the attendance roster, seat counts and leave, which all run
+   * through `staffScope()`.
+   *
+   * An email is required because a membership hangs off a user record. It does
+   * NOT give them a login to anything: the vendor portal is for the vendor's own
+   * contacts, and a membership carrying `vendorEmployeeId` is refused there.
+   */
+  async promoteEmployee(caller: VendorsCaller, vendorId: string, employeeId: string) {
+    const vendor = await this.requireVendor(caller.orgId, vendorId);
+    const person = await this.people.findOne({ where: { id: employeeId, organizationId: caller.orgId, vendorId, isDeleted: false } });
+    if (!person) throw new NotFoundException('Vendor employee not found');
+    if (!person.email) throw new BadRequestException('Add an email to this person before making them a secondary member');
+    if (person.status !== 'active') throw new BadRequestException('Only an active person can be made a secondary member');
+    const email = person.email.toLowerCase();
+
+    let user = await this.users.findOne({ where: { email } });
+    if (!user) {
+      user = await this.users.save(this.users.create({
+        email,
+        password: 'pending-otp-' + randomUUID(),
+        firstName: person.name.split(' ')[0] || 'Contractor',
+        lastName: person.name.split(' ').slice(1).join(' ') || '',
+        isActive: true,
+        setupStage: 'complete',
+      }));
+    }
+
+    const existing = await this.memberships.findOne({ where: { organizationId: caller.orgId, userId: user.id } });
+    if (existing && existing.personType !== 'vendor') {
+      throw new ConflictException('This email already belongs to someone in this organization');
+    }
+    if (existing) {
+      existing.status = 'active';
+      existing.vendorId = vendorId;
+      existing.vendorEmployeeId = person.id;
+      existing.personType = 'vendor';
+      await this.memberships.save(existing);
+    } else {
+      await this.memberships.save(this.memberships.create({
+        userId: user.id,
+        email,
+        organizationId: caller.orgId,
+        role: 'vendor',
+        personType: 'vendor',
+        vendorId,
+        vendorEmployeeId: person.id,
+        status: 'active',
+        invitedBy: caller.userId,
+        joinedAt: new Date(),
+      }));
+    }
+
+    person.linkedUserId = user.id;
+    await this.people.save(person);
+    return { employeeId: person.id, userId: user.id, suppliedBy: { vendorId, companyName: vendor.companyName } };
+  }
+
+  /** Take them back out of the org. Their record at the vendor is untouched. */
+  async demoteEmployee(orgId: string, vendorId: string, employeeId: string) {
+    const person = await this.people.findOne({ where: { id: employeeId, organizationId: orgId, vendorId, isDeleted: false } });
+    if (!person) throw new NotFoundException('Vendor employee not found');
+    if (!person.linkedUserId) throw new BadRequestException('This person is not a secondary member');
+    const membership = await this.memberships.findOne({
+      where: { organizationId: orgId, userId: person.linkedUserId, personType: 'vendor' },
+    });
+    if (membership) {
+      membership.status = 'inactive';
+      await this.memberships.save(membership);
+    }
+    person.linkedUserId = null;
+    await this.people.save(person);
+    return { employeeId: person.id };
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────

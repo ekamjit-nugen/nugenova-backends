@@ -56,6 +56,44 @@ export class VendorPortalService {
   // ── giving access (staff side) ─────────────────────────────────────────────
 
   /**
+   * The master switch for a vendor's portal.
+   *
+   * Turning it ON invites every contact with an email that doesn't already have
+   * a login — that is what "they receive an email to join" means; the contacts
+   * are people you deliberately added to the vendor, so nobody unexpected is
+   * emailed. A contact who can't be invited (their email is already a staff
+   * member, or a portal user of another vendor) is skipped and counted rather
+   * than failing the whole thing: opening the portal shouldn't hinge on one bad
+   * row, and the per-contact invite still reports why.
+   *
+   * Turning it OFF closes the door immediately: existing logins are left intact
+   * (so turning it back on doesn't lose anything) but every portal read refuses
+   * while the switch is off.
+   */
+  async setPortalEnabled(caller: VendorsCaller, vendorId: string, enabled: boolean) {
+    const vendor = await this.requireVendor(caller.orgId, vendorId);
+    if (vendor.portalEnabled === enabled) return { vendorId, portalEnabled: enabled, invited: 0, skipped: 0 };
+    vendor.portalEnabled = enabled;
+    await this.vendors.save(vendor);
+
+    if (!enabled) return { vendorId, portalEnabled: false, invited: 0, skipped: 0 };
+
+    const contacts = await this.contacts.find({ where: { organizationId: caller.orgId, vendorId, isDeleted: false } });
+    let invited = 0;
+    let skipped = 0;
+    for (const contact of contacts) {
+      if (!contact.email || contact.userId) continue;
+      try {
+        await this.invite(caller, vendorId, contact.id, {});
+        invited++;
+      } catch {
+        skipped++;
+      }
+    }
+    return { vendorId, portalEnabled: true, invited, skipped };
+  }
+
+  /**
    * Turn a vendor contact into a portal login. Same shape as the client portal
    * invite: the person signs in with their email and the OTP flow, so no
    * password is ever set or sent here.
@@ -63,6 +101,7 @@ export class VendorPortalService {
   async invite(caller: VendorsCaller, vendorId: string, contactId: string, dto: InviteVendorContactDto) {
     const orgId = caller.orgId;
     const vendor = await this.requireVendor(orgId, vendorId);
+    if (!vendor.portalEnabled) throw new BadRequestException('Turn on portal access for this vendor before inviting anyone');
     const contact = await this.contacts.findOne({ where: { id: contactId, vendorId, organizationId: orgId, isDeleted: false } });
     if (!contact) throw new NotFoundException('Contact not found');
     if (!contact.email) throw new BadRequestException('Add an email to this contact before inviting them to the portal');
@@ -310,10 +349,17 @@ export class VendorPortalService {
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
-  /** The vendorId a portal user belongs to (from their vendor-role membership). */
+  /**
+   * The vendorId a portal user belongs to (from their vendor-role membership).
+   *
+   * A membership carrying `vendorEmployeeId` is a contractor the vendor supplies
+   * — a secondary member of OUR org, not the vendor's office. They must never
+   * reach the portal, where they would see the vendor's bills and agreements.
+   */
   async vendorIdForUser(orgId: string, userId: string): Promise<string | null> {
     const m = await this.memberships.findOne({ where: { organizationId: orgId, userId, role: 'vendor', status: 'active' } });
-    return m?.vendorId ?? null;
+    if (!m || m.vendorEmployeeId) return null;
+    return m.vendorId ?? null;
   }
 
   /** The caller's own vendor, or 403. Every portal read starts here. */
@@ -323,6 +369,9 @@ export class VendorPortalService {
     const vendor = await this.vendors.findOne({ where: { id: vendorId, organizationId: orgId, isDeleted: false } });
     if (!vendor) throw new ForbiddenException('No vendor portal access');
     if (vendor.status === 'archived') throw new ForbiddenException('This vendor portal is not active');
+    // The master switch, checked on every read: turning it off locks everyone
+    // out at once, without having to revoke each login.
+    if (!vendor.portalEnabled) throw new ForbiddenException('This vendor portal is turned off');
     return vendor;
   }
 

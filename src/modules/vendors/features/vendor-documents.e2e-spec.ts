@@ -59,6 +59,8 @@ defineFeature(feature, (test) => {
     const vendor = (await as(o.ownerToken).post('/vendors', { companyName, serviceCategory: 'Staffing' }).expect(201)).body.data;
     const email = randomEmail('vendorportal');
     const contact = (await as(o.ownerToken).post(`/vendors/${vendor.id}/contacts`, { name: 'Riya Verma', email }).expect(201)).body.data;
+    // The portal is closed until someone opens it for this vendor.
+    await as(o.ownerToken).patch(`/vendors/${vendor.id}/portal`, { enabled: true }).expect(200);
     const invited = (await as(o.ownerToken).post(`/vendors/${vendor.id}/contacts/${contact.id}/invite`, {}).expect(201)).body.data;
     h.trackUser(invited.userId);
     return { vendorId: vendor.id as string, portalToken: await h.mintToken(email) };

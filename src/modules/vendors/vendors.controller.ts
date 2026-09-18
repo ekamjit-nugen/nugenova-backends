@@ -11,7 +11,7 @@ import {
   CancelVendorBillDto, CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, CreateVendorBillDto,
   CreateVendorDocumentDto, SignVendorDocumentDto, UpdateVendorDocumentDto,
   CreateVendorContactDto, CreateVendorDto, CreateVendorEmployeeDto, DeclineVendorAgreementDto,
-  InviteVendorContactDto, MarkVendorBillPaidDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
+  InviteVendorContactDto, MarkVendorBillPaidDto, SetPortalEnabledDto, SignVendorAgreementDto, UpdateVendorAgreementDto, UpdateVendorAgreementTemplateDto,
   UpdateVendorBillDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
   WaiveVendorAgreementDto,
 } from './dto';
@@ -183,6 +183,12 @@ export class VendorsController {
     return { success: true, data: await this.portal.portalUsers(this.allowed(req, 'view').orgId, id) };
   }
 
+  /** The master switch — turning it on invites the vendor's contacts. */
+  @Patch(':id/portal')
+  async setPortalEnabled(@Req() req: any, @Param('id') id: string, @Body() dto: SetPortalEnabledDto) {
+    return { success: true, data: await this.portal.setPortalEnabled(this.allowed(req, 'edit'), id, dto.enabled) };
+  }
+
   /** Give a contact a login to the vendor portal. */
   @Post(':id/contacts/:contactId/invite')
   async invitePortalUser(@Req() req: any, @Param('id') id: string, @Param('contactId') contactId: string, @Body() dto: InviteVendorContactDto) {
@@ -210,6 +216,18 @@ export class VendorsController {
   @Post(':id/employees')
   async addEmployee(@Req() req: any, @Param('id') id: string, @Body() dto: CreateVendorEmployeeDto) {
     return { success: true, data: await this.vendors.addEmployee(this.allowed(req, 'create').orgId, id, dto) };
+  }
+
+  /** Make a supplied person a secondary member of the org. */
+  @Post(':id/employees/:employeeId/promote')
+  async promoteEmployee(@Req() req: any, @Param('id') id: string, @Param('employeeId') employeeId: string) {
+    return { success: true, data: await this.vendors.promoteEmployee(this.allowed(req, 'edit'), id, employeeId) };
+  }
+
+  /** Take them back out of the org; their record at the vendor stays. */
+  @Delete(':id/employees/:employeeId/promote')
+  async demoteEmployee(@Req() req: any, @Param('id') id: string, @Param('employeeId') employeeId: string) {
+    return { success: true, data: await this.vendors.demoteEmployee(this.allowed(req, 'edit').orgId, id, employeeId) };
   }
 
   @Patch(':id/employees/:employeeId')

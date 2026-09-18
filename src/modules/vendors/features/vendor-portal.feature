@@ -4,6 +4,21 @@ Feature: Vendor portal — the vendor's own view of us
   agreed. They sign agreements themselves. They never see our drafts, they can
   never reach another vendor's rows, and they hold no staff access at all.
 
+  Scenario: the portal is closed until someone opens it
+    Given an organization with a vendor "Acme Contractors" and two contacts with emails
+    When the owner tries to invite a contact
+    Then the invite is refused because the portal is off
+    When the owner turns the portal on
+    Then both contacts are invited and emailed
+
+  @security
+  Scenario: turning the portal off locks the vendor out without deleting their login
+    Given an organization with a vendor "Acme Contractors" and a portal user
+    When the owner turns the portal off
+    Then the portal is closed to them
+    When the owner turns it back on
+    Then they can use the portal again
+
   Scenario: inviting a contact gives them a vendor login, not a staff one
     Given an organization with a vendor "Acme Contractors" and a contact with an email
     When the owner invites that contact to the portal
@@ -42,6 +57,13 @@ Feature: Vendor portal — the vendor's own view of us
     When the portal user adds "Amit Sharma" to their roster with a rate of 9999
     Then the person is added with no rate
     And the rate stays ours to set
+
+  @security
+  Scenario: a supplied contractor cannot use the vendor portal
+    Given an organization with a vendor "Acme Contractors" and a portal user
+    And a contractor supplied by that vendor, made a secondary member
+    When that contractor tries to open the vendor portal
+    Then the portal is closed to them
 
   @security
   Scenario: a portal user holds no staff access
