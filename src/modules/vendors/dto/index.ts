@@ -1,5 +1,6 @@
+import { Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min,
+  IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 
 export class VendorPrimaryContactDto {
@@ -132,4 +133,137 @@ export class CreateVendorEmployeeDto {
 export class UpdateVendorEmployeeDto extends CreateVendorEmployeeDto {
   @IsOptional() @IsString() @MaxLength(200)
   declare name: string;
+}
+
+// ── agreements ───────────────────────────────────────────────────────────────
+
+const AGREEMENT_CATEGORIES = ['msa', 'nda', 'sow', 'code_of_conduct', 'other'];
+
+/** A signature/name/date box placed on the PDF (page-relative percentages). */
+export class VendorAgreementFieldDto {
+  @IsString() @MaxLength(60)
+  key: string;
+
+  @IsIn(['signature', 'initials', 'name', 'firstName', 'lastName', 'date', 'text', 'email'])
+  type: string;
+
+  @IsNumber() page: number;
+  @IsNumber() xPct: number;
+  @IsNumber() yPct: number;
+  @IsNumber() wPct: number;
+  @IsNumber() hPct: number;
+
+  @IsOptional() @IsBoolean()
+  required?: boolean;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  label?: string;
+}
+
+/** A value typed into a placed text field, merged by key when signing. */
+export class VendorAgreementFieldValueDto {
+  @IsString() @MaxLength(60)
+  key: string;
+
+  @IsString() @MaxLength(2000)
+  value: string;
+}
+
+export class CreateVendorAgreementTemplateDto {
+  @IsString() @MaxLength(200)
+  name: string;
+
+  @IsOptional() @IsString() @MaxLength(200)
+  title?: string;
+
+  @IsOptional() @IsIn(AGREEMENT_CATEGORIES)
+  category?: string;
+
+  @IsOptional() @IsString() @MaxLength(200000)
+  bodyHtml?: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  sourceFileId?: string;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VendorAgreementFieldDto)
+  fields?: VendorAgreementFieldDto[];
+
+  @IsOptional() @IsBoolean()
+  required?: boolean;
+
+  @IsOptional() @IsArray() @IsString({ each: true })
+  appliesToCategories?: string[];
+}
+
+export class UpdateVendorAgreementTemplateDto extends CreateVendorAgreementTemplateDto {
+  @IsOptional() @IsString() @MaxLength(200)
+  declare name: string;
+
+  @IsOptional() @IsBoolean()
+  isArchived?: boolean;
+}
+
+export class CreateVendorAgreementDto {
+  /** Start from a template; its content is copied, so later template edits don't leak in. */
+  @IsOptional() @IsString() @MaxLength(24)
+  templateId?: string;
+
+  @IsOptional() @IsString() @MaxLength(200)
+  title?: string;
+
+  @IsOptional() @IsString() @MaxLength(5000)
+  description?: string;
+
+  @IsOptional() @IsIn(AGREEMENT_CATEGORIES)
+  category?: string;
+
+  @IsOptional() @IsString() @MaxLength(200000)
+  bodyHtml?: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  sourceFileId?: string;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VendorAgreementFieldDto)
+  fields?: VendorAgreementFieldDto[];
+
+  @IsOptional() @IsBoolean()
+  requiredForOnboarding?: boolean;
+
+  @IsOptional() @IsDateString()
+  expiresAt?: string;
+}
+
+export class UpdateVendorAgreementDto extends CreateVendorAgreementDto {}
+
+/** Record a signature we received — in the app, or on paper/by email (`offline`). */
+export class SignVendorAgreementDto {
+  @IsString() @MaxLength(200)
+  signerName: string;
+
+  @IsOptional() @IsEmail()
+  signerEmail?: string;
+
+  @IsOptional() @IsIn(['drawn', 'typed', 'offline'])
+  method?: 'drawn' | 'typed' | 'offline';
+
+  @IsOptional() @IsString() @MaxLength(24)
+  signatureFileId?: string;
+
+  /** The signed copy: a flattened PDF, or the scan of a paper signature. */
+  @IsOptional() @IsString() @MaxLength(24)
+  signedFileId?: string;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  recordedNote?: string;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => VendorAgreementFieldValueDto)
+  fieldValues?: VendorAgreementFieldValueDto[];
+
+  @IsOptional() @IsDateString()
+  signedAt?: string;
+}
+
+export class DeclineVendorAgreementDto {
+  @IsOptional() @IsString() @MaxLength(1000)
+  reason?: string;
 }
