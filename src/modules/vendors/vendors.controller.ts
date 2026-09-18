@@ -1,11 +1,13 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Ip, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { permMapAllows } from '../organization/guards/require-permission.decorator';
 import { VendorsCaller, VendorsService } from './vendors.service';
+import { VendorAgreementsService } from './vendor-agreements.service';
 import {
-  CreateVendorContactDto, CreateVendorDto, CreateVendorEmployeeDto,
-  UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
+  CreateVendorAgreementDto, CreateVendorAgreementTemplateDto, CreateVendorContactDto, CreateVendorDto,
+  CreateVendorEmployeeDto, DeclineVendorAgreementDto, SignVendorAgreementDto, UpdateVendorAgreementDto,
+  UpdateVendorAgreementTemplateDto, UpdateVendorContactDto, UpdateVendorDto, UpdateVendorEmployeeDto,
 } from './dto';
 
 /**
@@ -23,7 +25,10 @@ type VendorsAction = 'view' | 'create' | 'edit' | 'delete';
 @Controller('vendors')
 @UseGuards(JwtAuthGuard)
 export class VendorsController {
-  constructor(private readonly vendors: VendorsService) {}
+  constructor(
+    private readonly vendors: VendorsService,
+    private readonly agreements: VendorAgreementsService,
+  ) {}
 
   private caller(req: any): VendorsCaller {
     const orgId = req.user?.organizationId;
@@ -48,6 +53,27 @@ export class VendorsController {
   @Get('categories')
   async categories(@Req() req: any) {
     return { success: true, data: await this.vendors.categories(this.allowed(req, 'view').orgId) };
+  }
+
+  // ── agreement templates (org-level, before the :id routes) ──
+  @Get('agreement-templates')
+  async listTemplates(@Req() req: any, @Query('includeArchived') includeArchived?: string) {
+    return { success: true, data: await this.agreements.listTemplates(this.allowed(req, 'view').orgId, includeArchived === 'true') };
+  }
+
+  @Post('agreement-templates')
+  async createTemplate(@Req() req: any, @Body() dto: CreateVendorAgreementTemplateDto) {
+    return { success: true, data: await this.agreements.createTemplate(this.allowed(req, 'create'), dto) };
+  }
+
+  @Patch('agreement-templates/:templateId')
+  async updateTemplate(@Req() req: any, @Param('templateId') templateId: string, @Body() dto: UpdateVendorAgreementTemplateDto) {
+    return { success: true, data: await this.agreements.updateTemplate(this.allowed(req, 'edit').orgId, templateId, dto) };
+  }
+
+  @Delete('agreement-templates/:templateId')
+  async deleteTemplate(@Req() req: any, @Param('templateId') templateId: string) {
+    return { success: true, data: await this.agreements.deleteTemplate(this.allowed(req, 'delete').orgId, templateId) };
   }
 
   // ── vendors ──
@@ -123,5 +149,66 @@ export class VendorsController {
   @Delete(':id/employees/:employeeId')
   async removeEmployee(@Req() req: any, @Param('id') id: string, @Param('employeeId') employeeId: string) {
     return { success: true, data: await this.vendors.removeEmployee(this.allowed(req, 'delete').orgId, id, employeeId) };
+  }
+
+  // ── agreements for one vendor ──
+  @Get(':id/agreements')
+  async listAgreements(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.agreements.list(this.allowed(req, 'view').orgId, id) };
+  }
+
+  /** Is this vendor cleared to supply people, and what is outstanding? */
+  @Get(':id/clearance')
+  async clearance(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.agreements.clearance(this.allowed(req, 'view').orgId, id) };
+  }
+
+  @Post(':id/agreements')
+  async createAgreement(@Req() req: any, @Param('id') id: string, @Body() dto: CreateVendorAgreementDto) {
+    return { success: true, data: await this.agreements.create(this.allowed(req, 'create'), id, dto) };
+  }
+
+  /** Raise every required agreement this vendor is missing, in one go. */
+  @Post(':id/agreements/issue-required')
+  async issueRequired(@Req() req: any, @Param('id') id: string) {
+    return { success: true, data: await this.agreements.issueRequired(this.allowed(req, 'create'), id) };
+  }
+
+  @Patch(':id/agreements/:agreementId')
+  async updateAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string, @Body() dto: UpdateVendorAgreementDto) {
+    return { success: true, data: await this.agreements.update(this.allowed(req, 'edit').orgId, id, agreementId, dto) };
+  }
+
+  @Post(':id/agreements/:agreementId/send')
+  async sendAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
+    return { success: true, data: await this.agreements.send(this.allowed(req, 'edit').orgId, id, agreementId) };
+  }
+
+  /** Record the signature the vendor gave us (in the app, or on paper). */
+  @Post(':id/agreements/:agreementId/sign')
+  async signAgreement(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('agreementId') agreementId: string,
+    @Body() dto: SignVendorAgreementDto,
+    @Ip() ip: string,
+  ) {
+    const caller = this.allowed(req, 'edit');
+    return { success: true, data: await this.agreements.sign(caller, id, agreementId, dto, ip, req.headers?.['user-agent']) };
+  }
+
+  @Post(':id/agreements/:agreementId/decline')
+  async declineAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string, @Body() dto: DeclineVendorAgreementDto) {
+    return { success: true, data: await this.agreements.decline(this.allowed(req, 'edit').orgId, id, agreementId, dto) };
+  }
+
+  @Post(':id/agreements/:agreementId/void')
+  async voidAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
+    return { success: true, data: await this.agreements.void(this.allowed(req, 'edit').orgId, id, agreementId) };
+  }
+
+  @Delete(':id/agreements/:agreementId')
+  async deleteAgreement(@Req() req: any, @Param('id') id: string, @Param('agreementId') agreementId: string) {
+    return { success: true, data: await this.agreements.remove(this.allowed(req, 'delete').orgId, id, agreementId) };
   }
 }

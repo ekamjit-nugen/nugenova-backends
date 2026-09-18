@@ -74,6 +74,7 @@ import { DiscussionBoards1788170000000 } from '../src/bootstrap/database/migrati
 import { BoardNoteDue1788180000000 } from '../src/bootstrap/database/migrations/1788180000000-BoardNoteDue';
 import { Clients1788300000000 } from '../src/bootstrap/database/migrations/1788300000000-Clients';
 import { Vendors1788500000000 } from '../src/bootstrap/database/migrations/1788500000000-Vendors';
+import { VendorAgreements1788510000000 } from '../src/bootstrap/database/migrations/1788510000000-VendorAgreements';
 import { ClientAgreements1788310000000 } from '../src/bootstrap/database/migrations/1788310000000-ClientAgreements';
 import { ClientAgreementFields1788320000000 } from '../src/bootstrap/database/migrations/1788320000000-ClientAgreementFields';
 import { ClientDocuments1788330000000 } from '../src/bootstrap/database/migrations/1788330000000-ClientDocuments';
@@ -106,6 +107,8 @@ import { ClientEntity } from '../src/modules/clients/entities/client.entity';
 import { VendorEntity } from '../src/modules/vendors/entities/vendor.entity';
 import { VendorContactEntity } from '../src/modules/vendors/entities/vendor-contact.entity';
 import { VendorEmployeeEntity } from '../src/modules/vendors/entities/vendor-employee.entity';
+import { VendorAgreementEntity } from '../src/modules/vendors/entities/vendor-agreement.entity';
+import { VendorAgreementTemplateEntity } from '../src/modules/vendors/entities/vendor-agreement-template.entity';
 import { ClientContactEntity } from '../src/modules/clients/entities/client-contact.entity';
 import { ClientAssignmentEntity } from '../src/modules/clients/entities/client-assignment.entity';
 import { BoardClientShareEntity } from '../src/modules/clients/entities/board-client-share.entity';
@@ -264,6 +267,8 @@ module.exports = async function globalSetup(): Promise<void> {
       VendorEntity,
       VendorContactEntity,
       VendorEmployeeEntity,
+      VendorAgreementEntity,
+      VendorAgreementTemplateEntity,
       ClientContactEntity,
       ClientAssignmentEntity,
       BoardClientShareEntity,
@@ -343,6 +348,7 @@ module.exports = async function globalSetup(): Promise<void> {
       BoardNoteDue1788180000000,
       Clients1788300000000,
       Vendors1788500000000,
+      VendorAgreements1788510000000,
       ClientAgreements1788310000000,
       ClientAgreementFields1788320000000,
       ClientDocuments1788330000000,
