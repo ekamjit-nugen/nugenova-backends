@@ -16,6 +16,8 @@ pasted as Drive links. This module keeps one rich profile per person, stores CVs
 in the platform (S3) and shows them in the portal, and runs every opening
 on a stage pipeline with interviews, scorecards, offers and an onboarding handoff.
 
+**Wording:** an *opening* is shown in the app as a **Category** (the team's sheets are capabilities: Data Engineer, SAP, DevOps…). Tables, routes, DTOs and payload fields keep `opening`; only the labels and user-facing messages say category.
+
 ## Entities (migration `1788430000000-Recruitment`)
 
 | Table | Purpose |
@@ -68,7 +70,8 @@ The UI previews synchronously (`POST /candidates/import` with `dryRun`, ≤ 5,00
 - `POST /imports` → **202** at once. Stores the job + every mapped row (`recruitment_import_jobs`, `recruitment_import_rows`), ≤ 10,000 rows. The wizard sends an `idempotencyKey` per preview; a double-click, retry or second tab gets the same job back (partial unique index).
 - **Worker** (`ImportJobsService`, every API instance): claims the oldest ready job with `FOR UPDATE SKIP LOCKED` under a transaction advisory lock, **one running job per organization**. Rows are saved one at a time with the same `ImportExportService.processRow` the preview uses; counters are recomputed from the row table every 25 rows (exact and restart-safe) and double as the heartbeat. A job whose heartbeat is older than 90 s is resumed by any instance; in-file identity is rebuilt from saved rows so resumed jobs don't duplicate people. Rows that crash the worker 3× are set aside as errors; a job interrupted 5× fails (retry continues from the last saved row). Env: `RECRUITMENT_IMPORT_WORKER=off` disables the worker on an instance, `RECRUITMENT_IMPORT_POLL_MS` (default 5000).
 - `GET /imports` (running + last 7 days, not dismissed), `GET /imports/:id`, `GET /imports/:id/rows?filter=issues|skipped|error|flagged|all`, `POST /imports/:id/cancel|retry|dismiss`. Cancel/retry: the starter (with create) or a recruitment editor. Notification `recruitment_import_finished` to the starter; audit events `recruitment.import_*`.
-- **Ignored rows** (reported as skipped with a reason, never saved): no name; the name cell is a sheet note/total/banner (`looksLikeSheetNote`); no valid email, phone, web CV link or LinkedIn after invalid values are dropped. Summary/master/generic sheets never become openings (frontend), and opening find-or-create is serialised with an advisory lock.
+- **Wrong data is never imported.** `ImportExportService.rowIssue` (pure) decides per row, and the same check runs in the preview, in the worker and as a pre-flight on `POST /imports`. A row is ignored, with the reason shown, when: it has no name; the name cell is a sheet note/total/banner (`looksLikeSheetNote`); any supplied email, phone, CV link or LinkedIn is invalid (the row is never saved half-filled); or nothing identifies the person (no email, phone, CV link or LinkedIn).
+- **Bad files are refused whole:** `POST /imports` returns 400 when no row is usable, or when ≥ 25% of rows (`BAD_FILE_RATIO`) carry wrong or missing data, naming the first few rows to fix. The preview blocks the Import button on the same rule. Summary/master/generic sheets never become openings (frontend), and opening find-or-create is serialised with an advisory lock.
 - Dashboard shows each file with a segmented bar (new / merged / ignored / failed), ETA, stop / retry / review rows / dismiss; the import page shows the same card and can be left while it runs.
 
 **Database connections:** Supabase's session pooler caps clients for the whole project. The per-process pool is `DB_POOL_MAX` (default 5) with idle release and a connect timeout; the importer never holds one connection while waiting for another.

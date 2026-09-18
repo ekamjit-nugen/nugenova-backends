@@ -75,6 +75,11 @@ interface ExistingIndex {
   applications: Map<string, Set<string>>;
 }
 
+/** A usable web link (http/https). */
+export const isWebLink = (v: string | null | undefined): boolean => !!v && /^https?:\/\/\S+$/i.test(v);
+/** A LinkedIn profile link. */
+export const isLinkedInLink = (v: string | null | undefined): boolean => !!v && /^(https?:\/\/)?([\w-]+\.)?linkedin\.com\/\S+/i.test(v);
+
 const numberish = (v: unknown): number | null => {
   const s = cleanCell(v);
   if (!s) return null;
@@ -197,6 +202,26 @@ export class ImportExportService {
     ].filter(Boolean) as string[];
   }
 
+  /**
+   * Why this row can't be imported, or null when it is fine. Pure (no DB), so the
+   * preview, the worker and the pre-flight check on `POST /imports` all agree.
+   * A row with a wrong value (bad email, phone, link) is never imported half-filled.
+   */
+  rowIssue(row: ImportRowDto, defaultSource: CandidateSource): string | null {
+    const { fields } = this.normalizeRow(row, defaultSource);
+    if (!fields.fullName) return 'Ignored — no candidate name';
+    if (looksLikeSheetNote(fields.fullName)) return `Ignored — “${fields.fullName.slice(0, 60)}” is a sheet note or total line, not a candidate name`;
+    const given = (v: unknown) => !!cleanCell(v);
+    if (given(row.email) && !fields.email) return `Ignored — “${String(row.email).slice(0, 60)}” is not a valid email address`;
+    if (given(row.phone) && !fields.phone) return `Ignored — “${String(row.phone).slice(0, 40)}” is not a valid phone number`;
+    if (given(row.resumeUrl) && !isWebLink(fields.externalResumeUrl)) return `Ignored — CV link “${String(row.resumeUrl).slice(0, 60)}” is not a web link`;
+    if (given(row.linkedinUrl) && !isLinkedInLink(fields.linkedinUrl)) return `Ignored — “${String(row.linkedinUrl).slice(0, 60)}” is not a LinkedIn profile link`;
+    if (!fields.email && !fields.phone && !fields.externalResumeUrl && !fields.linkedinUrl) {
+      return 'Ignored — no email, phone, CV link or LinkedIn to identify this candidate';
+    }
+    return null;
+  }
+
   /** Import one row. Never throws — failures are reported on the result. */
   async processRow(ctx: ImportContext, row: ImportRowDto): Promise<ImportRowResult> {
     const { caller, dryRun, extraTags, stages } = ctx;
@@ -208,35 +233,19 @@ export class ImportExportService {
     try {
       const { fields, openingTitle, notes, stageName, leadName, requirementTitle } = this.normalizeRow(row, ctx.defaultSource);
       res.fullName = fields.fullName ?? null;
-      if (!fields.fullName) {
-        res.messages.push('Ignored — no candidate name');
+      // Rows with missing or invalid data are never imported — not even partly.
+      const issue = this.rowIssue(row, ctx.defaultSource);
+      if (issue) {
+        res.messages.push(issue);
         return res;
       }
-      // Rows with missing or invalid data are ignored (reported as skipped, never saved).
-      if (looksLikeSheetNote(fields.fullName)) {
-        res.messages.push(`Ignored — “${fields.fullName.slice(0, 60)}” is a sheet note or total line, not a candidate name`);
-        return res;
-      }
-      if (row.email && cleanCell(row.email) && !fields.email) res.messages.push(`Invalid email "${String(row.email).slice(0, 80)}" left out`);
-      if (row.phone && cleanCell(row.phone) && !fields.phone) res.messages.push(`Invalid phone "${String(row.phone).slice(0, 40)}" left out`);
-      if (fields.externalResumeUrl && !/^https?:\/\/\S+$/i.test(fields.externalResumeUrl)) {
-        res.messages.push(`CV link "${fields.externalResumeUrl.slice(0, 80)}" is not a web link — left out`);
-        fields.externalResumeUrl = null;
-      }
-      if (fields.linkedinUrl && !/^(https?:\/\/)?([\w-]+\.)?linkedin\.com\/\S+$/i.test(fields.linkedinUrl)) {
-        res.messages.push(`LinkedIn "${fields.linkedinUrl.slice(0, 80)}" is not a LinkedIn profile link — left out`);
-        fields.linkedinUrl = null;
-      }
-      if (!fields.email && !fields.phone && !fields.externalResumeUrl && !fields.linkedinUrl) {
-        res.messages.push('Ignored — no valid email, phone, CV link or LinkedIn to identify this candidate');
-        return res;
-      }
+      const fullName = fields.fullName!; // rowIssue guarantees a usable name
       if (extraTags.length) fields.tags = extraTags;
 
       const keys = this.identityKeys(fields);
       const fileKey = keys.find((k) => ctx.batch.has(k));
       let candidateId: string | null = fileKey ? ctx.batch.get(fileKey)! : null;
-      const nameKey = fields.fullName.toLowerCase();
+      const nameKey = fullName.toLowerCase();
       if (fileKey) {
         const earlier = ctx.batchRows.get(fileKey)!;
         const fileMatchId = ctx.batch.get(fileKey)!;
@@ -246,7 +255,7 @@ export class ImportExportService {
         };
         res.messages.push(`Same person as ${earlier.row ? `row ${earlier.row}` : 'an earlier row'} in this file — merged`);
       } else {
-        const probe = { email: fields.email ?? null, phone: fields.phone ?? null, name: fields.fullName };
+        const probe = { email: fields.email ?? null, phone: fields.phone ?? null, name: fullName };
         const { merged, possible } = ctx.existing ? this.matchIndexed(ctx.existing, probe) : await this.candidatesService.matchForImport(caller.orgId, probe);
         if (merged) {
           candidateId = merged.id;
@@ -297,17 +306,17 @@ export class ImportExportService {
         candidateId = `dry:${seq}`;
         res.outcome = 'created';
       } else {
-        const created = await this.candidatesService.create(caller, { ...fields, fullName: fields.fullName } as any);
+        const created = await this.candidatesService.create(caller, { ...fields, fullName } as any);
         candidateId = created.id;
         res.outcome = 'created';
         if (fields.externalResumeUrl) res.messages.push('CV link saved — upload the file on the profile to enable search & AI');
       }
       res.candidateId = candidateId.startsWith('dry:') ? null : candidateId;
       keys.forEach((k) => {
-        if (!ctx.batchRows.has(k)) ctx.batchRows.set(k, { row: row.rowNumber ?? null, fullName: fields.fullName! });
+        if (!ctx.batchRows.has(k)) ctx.batchRows.set(k, { row: row.rowNumber ?? null, fullName });
         ctx.batch.set(k, candidateId!);
       });
-      if (!ctx.nameRows.has(nameKey)) ctx.nameRows.set(nameKey, { row: row.rowNumber ?? null, fullName: fields.fullName });
+      if (!ctx.nameRows.has(nameKey)) ctx.nameRows.set(nameKey, { row: row.rowNumber ?? null, fullName });
 
       if (notes && !dryRun && res.candidateId) {
         await this.pipeline.logActivity(caller.orgId, res.candidateId, 'note', `Imported remark: ${notes}`, { actorId: caller.userId });

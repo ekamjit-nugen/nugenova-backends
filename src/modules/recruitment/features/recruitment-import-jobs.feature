@@ -5,9 +5,9 @@ Feature: Recruitment — background spreadsheet imports
 
   Scenario: starting an import answers at once and saves rows in the background
     Given an organization
-    When the owner starts importing "Q3 candidates.xlsx" with 3 valid rows, a repeated row, a total line, a row without contact details and a row with only an invalid email
+    When the owner starts importing "Q3 candidates.xlsx" with 12 valid rows, a repeated row, a total line, a row without contact details and a row with an invalid email
     Then the import is accepted immediately as queued or processing
-    And the import finishes with 3 new, 1 merged, 3 ignored and 0 errors out of 7 rows
+    And the import finishes with 12 new, 1 merged, 3 ignored and 0 errors out of 16 rows
     And the import list shows "Q3 candidates.xlsx" at 100 percent
     And every ignored row says why it was ignored
 
@@ -54,4 +54,10 @@ Feature: Recruitment — background spreadsheet imports
     Then the import finishes with 1 new, 0 merged and 3 ignored
     And Ravi's profile still says "Old Co"
     And each discarded row names the candidate or row it duplicates
+
+  Scenario: a file full of wrong data is refused instead of half-imported
+    Given an organization
+    When the owner tries to import a file where most rows have a broken email or no contact details
+    Then the import is rejected, naming the rows to fix
+    And no candidates were created and no import was started
 
