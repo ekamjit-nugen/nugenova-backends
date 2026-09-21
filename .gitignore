@@ -6,8 +6,6 @@ dist/
 *.tsbuildinfo
 
 # env (never commit secrets; keep .env.example)
-.env
-.env.*
 !.env.example
 
 # test / coverage
@@ -23,3 +21,4 @@ logs/
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+config.bat
