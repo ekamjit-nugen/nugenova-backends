@@ -6,8 +6,6 @@ dist/
 *.tsbuildinfo
 
 # env (never commit secrets; keep .env.example)
-.env
-.env.*
 !.env.example
 
 # test / coverage
@@ -26,3 +24,4 @@ temp_interactive_push.bat
 
 # Local database dumps — never commit data.
 .backups/
+config.bat
